@@ -1,4 +1,6 @@
 import { useFrame, useThree } from "@react-three/fiber";
+import { NET, NET_HOOKS, PVP_DMG, PVP_HITBOX, hitPeer, reportDeath, sendPose } from "./net";
+import { RemotePlayers } from "./RemotePlayers";
 import { PointerLockControls } from "@react-three/drei";
 import { SETTINGS, useSettings, lampIntensity } from "./settings";
 import { useEffect, useMemo, useRef, type ElementRef } from "react";
@@ -221,6 +223,7 @@ const ONE = new THREE.Vector3(1, 1, 1);
 const zAxis = new THREE.Vector3(0, 0, 1);
 const START = new THREE.Vector3(0, 0, 120);
 const BOT_START = new THREE.Vector3(0, 0, -100);
+const _pvpAt = new THREE.Vector3(), _peerC = new THREE.Vector3();
 const HIDE = new THREE.Matrix4().makeScale(0, 0, 0);
 
 function newTable(): Table {
@@ -329,8 +332,14 @@ export function World() {
   const damagePlayer = (d: number, force = false) => {
     if (!force && G.buff > 0) return;
     if (slam.current.on) { slam.current.on = false; G.slamming = false; vy.current = 0; } // hit mid-air cancels the slam
+    if (G.mode === "pvp" && (G.pvpDead || G.frozen)) return;
     G.playerHp = Math.max(0, G.playerHp - d);
     G.hurtFlash = 0.25;
+    if (G.playerHp <= 0 && G.mode === "pvp") {
+      G.pvpDead = true;
+      reportDeath();
+      return;
+    }
     if (G.playerHp <= 0) {
       if (G.mode === "training") {
         // training death: back to the usual spawn point, refill, open the (pausing) training menu
@@ -437,6 +446,7 @@ export function World() {
     for (const u of blues) if (u.alive && u.pos.distanceTo(at) < br) { u.alive = false; burst(tmpV.copy(u.pos).setY(4), TABLE_S, 5); }
     if (bossLive() && tmpV.set(boss.current.pos.x, boss.current.y + 10, boss.current.pos.z).distanceTo(at) < br + 30)
       hitBoss((BOMB_DMG / DMG) * (buffed ? 2 : 1));
+    pvpBlast(at, br, PVP_DMG.bomb);
     ringsIn(at, br);
     boomFx(at, br);
     G.shake = 0.6;
@@ -446,6 +456,14 @@ export function World() {
     bm.t = t;
     bm.pos.copy(at);
     bm.r = r;
+  };
+  // 1v1: damage every opponent whose (enlarged) hitbox is inside the blast
+  const pvpBlast = (at: THREE.Vector3, r: number, dmg: number, stun = false) => {
+    if (G.mode !== "pvp") return;
+    for (const pr of NET.peers.values()) {
+      if (pr.dead) continue;
+      if (tmpV.set(pr.x, pr.y + 1.8, pr.z).distanceTo(at) < r + PVP_HITBOX) hitPeer(pr.id, dmg, stun);
+    }
   };
   // healing ring: heal, or (when full) reset the bomb cooldown. Returns true if consumed.
   const collectRing = (h: (typeof health)[number]) => {
@@ -632,6 +650,11 @@ export function World() {
     };
   }, [camera]);
 
+  NET_HOOKS.onHit = (d, stun) => {
+    damagePlayer(d);
+    if (stun && !G.pvpDead) G.stun = STUN_TIME;
+  };
+
   useFrame((_, raw) => {
     const dt = Math.min(raw, 0.05);
     const cam = camera as THREE.PerspectiveCamera;
@@ -651,8 +674,9 @@ export function World() {
       G.wallrunReady = true;
       G.grounded = true;
       G.grappling = false;
+      if (G.mode === "pvp") p.set(0, 0, NET.colors[NET.myId] === "blue" ? -150 : 150);
       cam.position.set(p.x, EYE, p.z);
-      cam.lookAt(0, EYE, -100);
+      cam.lookAt(0, EYE, G.mode === "pvp" && p.z < 0 ? 100 : -100);
       lastYaw.current = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ").y;
       pendingYaw.current = 0;
       playerPool.forEach((x) => (x.alive = false));
@@ -731,8 +755,9 @@ export function World() {
       }
     }
 
-    if (G.phase === "playing" && G.locked && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
-    const active = G.phase === "playing" && G.locked && G.countdown <= 0.6;
+    const engaged = G.locked || NET.online; // online games never pause
+    if (G.phase === "playing" && engaged && !G.frozen && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
+    const active = G.phase === "playing" && engaged && !G.frozen && !G.pvpDead && G.countdown <= 0.6;
     G.hitFlash = Math.max(0, G.hitFlash - dt);
     G.hurtFlash = Math.max(0, G.hurtFlash - dt);
     G.parryFlash = Math.max(0, G.parryFlash - dt);
@@ -879,6 +904,7 @@ export function World() {
             hitBoss(Math.round(q.dmg / DMG));
             if (tier === SLAM_TIERS.length - 1) b.lockT = 2; // next boss attack waits 2s
           }
+          pvpBlast(_pvpAt.copy(p).setY(p.y + 0.5), r, PVP_DMG.slam, true);
           ringsIn(p, r);
           boomFx(tmpV.copy(p).setY(p.y + 0.5), r, 0.4);
           G.slamCd = cfg.slamCd(q.cd);
@@ -1299,12 +1325,18 @@ export function World() {
               const tt = segAABB(bl.prev, bl.pos, _mn, _mx);
               if (tt < ringT) { ringT = tt; ringHit = h; }
             }
-            const tHit = Math.min(bestT, bossT, ringT, tWorld);
+            let peerT = Infinity;
+            if (G.mode === "pvp") for (const pr of NET.peers.values()) {
+              if (pr.dead) continue;
+              peerT = Math.min(peerT, segSphere(bl.prev, bl.pos, _peerC.set(pr.x, pr.y + 1.8, pr.z), PVP_HITBOX));
+            }
+            const tHit = Math.min(bestT, bossT, ringT, tWorld, peerT);
             if (tHit < Infinity) {
               bl.alive = false;
               const at = bl.prev.clone().lerp(bl.pos, tHit);
               if (at.y < 0.2) at.y = 0.2;
               if (ringHit && ringT === tHit) collectRing(ringHit);
+              pvpBlast(at, BULLET_AOE_R, PVP_DMG.bullet);
               bulletExplode(
                 at, bl.dmg,
                 bestT === tHit ? bestTable : null,
@@ -1413,6 +1445,8 @@ export function World() {
     MAP.tables = tables.flatMap((t) => (t.alive ? [t.pos.x, t.pos.z] : []));
     MAP.blues = blues.flatMap((u) => (u.alive ? [u.pos.x, u.pos.z] : []));
     MAP.health = health.flatMap((h) => (h.active ? [h.pos.x, h.pos.z] : []));
+    MAP.peers = [...NET.peers.values()].flatMap((q) => (q.dead ? [] : [q.x, q.z]));
+    if (NET.online && G.phase === "playing") sendPose(pos.current.x, pos.current.y, pos.current.z, MAP.yaw);
 
     // --- splinter cones ---
     if (splI.current) {
@@ -1577,6 +1611,7 @@ export function World() {
         <Room />
       </group>
       <HomeShowcase />
+      <RemotePlayers />
       <instancedMesh ref={topI} args={[undefined, undefined, TABLE_POOL]} frustumCulled={false} castShadow>
         <boxGeometry args={[6, 0.5, 4]} />
         <meshStandardMaterial map={wood} roughness={0.3} metalness={0.08} envMapIntensity={2} />

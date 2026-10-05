@@ -141,7 +141,7 @@ export function lockPointer() {
 }
 
 // Minimap snapshot, written by World each frame, read by the HUD.
-export const MAP = { px: 0, pz: 0, yaw: 0, boss: null as null | { x: number; z: number }, tables: [] as number[], blues: [] as number[], health: [] as number[] };
+export const MAP = { px: 0, pz: 0, yaw: 0, boss: null as null | { x: number; z: number }, tables: [] as number[], blues: [] as number[], health: [] as number[], peers: [] as number[] };
 
 // --- Training mode sandbox ---
 export type TrainSpawn = { kind: "brown" | "blue" | "boss"; n: number; t: number };

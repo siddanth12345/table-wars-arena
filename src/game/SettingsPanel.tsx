@@ -1,3 +1,4 @@
+import { NET } from "./net";
 import { useEffect, useState } from "react";
 import { ACTIONS, DEFAULT_SETTINGS, applySettings, keyLabel, useSettings, type Action, type Settings, type TimeOfDay } from "./settings";
 
@@ -89,6 +90,7 @@ export function SettingsPanel() {
     <div>
       <h3 className="mb-2 border-b border-hud/30 pb-1 text-lg font-black uppercase tracking-widest text-crosshair">Settings</h3>
 
+      {!NET.online && (<>
       <div className="mb-2 mt-4 text-xs font-bold uppercase tracking-widest opacity-70">Time of day</div>
       <div className="grid grid-cols-3 gap-3">
         {TODS.map((t) => (
@@ -103,6 +105,7 @@ export function SettingsPanel() {
           </button>
         ))}
       </div>
+      </>)}
 
       <div className="mt-4">
         <Row label={`Mouse sensitivity · ${draft.sensitivity.toFixed(2)}x`}>

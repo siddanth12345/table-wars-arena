@@ -19,10 +19,10 @@ export const PARRY_LOCK_AT = 5; // seconds into the boss fight
 
 export type Phase = "home" | "playing" | "won" | "lost";
 export type Stage = "tables" | "incoming" | "boss";
-export type Mode = "game" | "tutorial" | "training";
+export type Mode = "game" | "tutorial" | "training" | "pvp";
 
 export const TUT_STEPS: { title: string; text: string; enter?: boolean }[] = [
-  { title: "You are the GREEN table", text: "Welcome to Table Wars! You are the green table. Press ENTER to continue.", enter: true },
+  { title: "You are the GREEN table", text: "Welcome to TBLE! You are the green table. Press ENTER to continue.", enter: true },
   { title: "Move", text: "Use W A S D to walk around and the mouse to look." },
   { title: "Jump", text: "Press SPACE to jump — then press SPACE twice more in the air (triple jump)." },
   { title: "Wallrun", text: "Jump next to a wall or furniture and HOLD SPACE to wallrun for up to 3 seconds. Land for 1 second to recharge it." },

@@ -52,14 +52,36 @@ function load() {
     if (raw) {
       const p = JSON.parse(raw) as Partial<Settings>;
       SETTINGS = { ...DEFAULT_SETTINGS, ...p, keys: { ...DEFAULT_SETTINGS.keys, ...(p.keys ?? {}) } };
+      VIEW = SETTINGS;
     }
   } catch { /* ignore */ }
 }
 
-export function applySettings(next: Settings) {
-  SETTINGS = structuredClone(next);
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(SETTINGS)); } catch { /* ignore */ }
+/** Online matches force a time of day without touching the player's own saved setting. */
+let TOD_OVERRIDE: TimeOfDay | null = null;
+let VIEW: Settings = SETTINGS;
+function rebuild() {
+  VIEW = TOD_OVERRIDE ? { ...SETTINGS, timeOfDay: TOD_OVERRIDE } : SETTINGS;
   subs.forEach((f) => f());
+}
+export function setTodOverride(t: TimeOfDay | null) {
+  TOD_OVERRIDE = t;
+  rebuild();
+}
+export function currentTod(): TimeOfDay {
+  return TOD_OVERRIDE ?? SETTINGS.timeOfDay;
+}
+/** Called after settings are saved, so a signed-in account can store them. */
+let persist: ((s: Settings) => void) | null = null;
+export function setSettingsPersister(fn: ((s: Settings) => void) | null) {
+  persist = fn;
+}
+
+export function applySettings(next: Settings, fromAccount = false) {
+  SETTINGS = { ...DEFAULT_SETTINGS, ...structuredClone(next), keys: { ...DEFAULT_SETTINGS.keys, ...(next.keys ?? {}) } };
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(SETTINGS)); } catch { /* ignore */ }
+  if (!fromAccount) persist?.(SETTINGS);
+  rebuild();
 }
 
 function subscribe(f: () => void) {
@@ -71,7 +93,7 @@ function subscribe(f: () => void) {
 }
 
 export function useSettings() {
-  return useSyncExternalStore(subscribe, () => SETTINGS, () => DEFAULT_SETTINGS);
+  return useSyncExternalStore(subscribe, () => VIEW, () => DEFAULT_SETTINGS);
 }
 
 export function keyLabel(code: string) {

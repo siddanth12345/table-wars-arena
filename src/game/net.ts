@@ -109,6 +109,7 @@ function joinRoom(name: string, kind: Kind, host: boolean): Promise<RealtimeChan
     const p = payload as Peer;
     const cur = NET.peers.get(p.id);
     NET.peers.set(p.id, { ...p, name: cur?.name ?? NET.names[p.id] ?? "player", t: performance.now() });
+    if (!cur) bump();
   });
   ch.on("broadcast", { event: "hit" }, ({ payload }) => {
     if (payload.to === id && NET.stage === "playing") NET_HOOKS.onHit(payload.dmg as number, !!payload.stun);

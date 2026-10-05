@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { saveTraining } from "./account";
+import { LobbyInvite } from "./OnlineUI";
 import { G, TRAIN, TRAIN_CMD, TRAIN_DEFAULTS, TRAIN_Q, lockPointer, type TrainCfg, type TrainSpawn } from "./state";
 
 function useTick(ms: number) {
@@ -58,6 +60,7 @@ export function TrainingMenu() {
     if (apply) {
       const hpChanged = draft.maxHp !== TRAIN.maxHp;
       Object.assign(TRAIN, draft);
+      saveTraining();
       TRAIN_Q.push(...queue.map((q) => ({ ...q })));
       if (hpChanged) G.playerHp = TRAIN.maxHp;
       G.playerHp = Math.min(G.playerHp, TRAIN.maxHp);
@@ -144,6 +147,7 @@ export function TrainingMenu() {
           </section>
         </div>
 
+        <LobbyInvite />
         <div className="mt-8 flex flex-wrap gap-3">
           <button className={`${btn} bg-crosshair text-hud-ink`} onClick={() => close(true)}>Close</button>
           <button className={`${btn} border-2 border-hud/40`} onClick={() => close(false)}>Cancel</button>

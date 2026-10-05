@@ -9,6 +9,10 @@ import * as THREE from "three";
 import { World } from "./World";
 import { G, MAG, PARRY_CD, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, MAP, TUT_STEPS, goHome, finishTutorial } from "./state";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
+import { LoadingScreen } from "./LoadingScreen";
+import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
+import { NET } from "./net";
+import { useAccount } from "./account";
 
 const LIGHT = {
   day: { hemiSky: "#e6f1ff", hemiGround: "#8a8f94", hemi: 0.75, amb: 0.3, ambC: "#f2f7ff", sun: 6.5, sunC: "#f6f9ff", bg: "#9cc9f0", fog: "#cfe3f5", lf: "#eef5ff", lf2: "#b9cde0", lfI: 0.9 },
@@ -229,7 +233,7 @@ function HUD() {
         </div>
         {G.stage === "tables" && (
           <>
-            <div>Tables alive: {G.alive}{G.mode === "training" ? "" : G.capReached ? " — clear them all!" : ` / ${TABLE_CAP}`}</div>
+            <div className={G.mode === "pvp" ? "hidden" : ""}>Tables alive: {G.alive}{G.mode === "training" ? "" : G.capReached ? " — clear them all!" : ` / ${TABLE_CAP}`}</div>
             {G.bluesAlive > 0 && <div className="text-shield">Blue tables: {G.bluesAlive}</div>}
             <div className="opacity-70">Kills: {G.kills}</div>
           </>
@@ -373,23 +377,28 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Home() {
   useTick(150);
-  const [tab, setTab] = useState<"main" | "controls" | "tutorial" | "settings">("main");
+  const [tab, setTab] = useState<"main" | "controls" | "tutorial" | "settings" | "play">("main");
+  const acc = useAccount();
+  const [authOpen, setAuthOpen] = useState(false);
   if (G.phase !== "home") return null;
   return (
     <div className="fixed inset-0 z-20 flex bg-hud-scrim/40 font-mono text-hud">
       <div className="flex w-full max-w-md flex-col justify-center bg-hud-panel/70 p-10 backdrop-blur-[2px]">
-        <h1 className="text-6xl font-black leading-none tracking-tight">Table<br />Wars</h1>
+        <h1 className="text-7xl font-black leading-none tracking-tight">TBLE</h1>
         <p className="mt-3 text-sm opacity-70">Break every table. Survive the red boss.</p>
         <div className="mt-10 flex flex-col gap-3">
-          <button className={btnMain} onClick={playGame}>Play</button>
+          <button className={btnMain} onClick={() => setTab(tab === "play" ? "main" : "play")}>Play</button>
           <button className={tab === "controls" ? btnMain : btnAlt} onClick={() => setTab(tab === "controls" ? "main" : "controls")}>Controls &amp; Bot Types</button>
           <button className={tab === "tutorial" ? btnMain : btnAlt} onClick={() => setTab(tab === "tutorial" ? "main" : "tutorial")} data-glow="orange">Tutorial</button>
           <button className={btnAlt} onClick={startTraining}>Training</button>
           <button className={tab === "settings" ? btnMain : btnAlt} onClick={() => setTab(tab === "settings" ? "main" : "settings")}>Settings</button>
         </div>
-        <p className="mt-10 text-xs opacity-60">Live battle in the arena.</p>
+        <AccountBadge onLogin={() => setAuthOpen(true)} />
+        <p className="mt-4 text-xs opacity-60">Offline modes run on your own private server.</p>
       </div>
-      {tab !== "main" && (
+      {(authOpen || acc.status === "signedOut") && <AuthPanel onClose={() => setAuthOpen(false)} />}
+      {tab === "play" && <PlayMenu onCampaign={playGame} onClose={() => setTab("main")} />}
+      {tab !== "main" && tab !== "play" && (
         <div className="m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">
           {tab === "settings" ? (
             <SettingsPanel />
@@ -446,6 +455,7 @@ function Menu() {
     );
   }
   if (phase !== "playing" || G.locked || G.trainMenu) return null;
+  if (NET.online && !showSettings) return <OnlinePause onSettings={() => setShowSettings(true)} />;
   const tut = G.mode === "tutorial";
   const train = G.mode === "training";
   if (showSettings) {
@@ -549,6 +559,7 @@ function WinScreen() {
 
 export function Game() {
   const [, force] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     // Feed the cursor position to whichever GUI button it is over, for the hover glow.
     const move = (e: PointerEvent) => {
@@ -580,6 +591,13 @@ export function Game() {
       <TrainingMenu />
       <Home />
       <WinScreen />
+      <QueueOverlay />
+      <MapPick />
+      <Scoreboard />
+      <PvpEnd />
+      <LobbyBar />
+      <Invites />
+      {!loaded && <LoadingScreen onDone={() => setLoaded(true)} />}
     </div>
   );
 }

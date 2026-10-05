@@ -16,3 +16,7 @@
 - [x] Night lamps 1.5x, moon 2x, player glow, light from shots/bombs/ground pounds (0.5x lamp) and bot tables (0.3x lamp).
 - [x] Always open on home, orange-glow Tutorial button, hover grow + cursor glow on buttons, 1.5x room reflectivity on home.
 - [x] Training mode (home only): Enter opens sandbox menu with timed brown/blue/boss spawns, boss/player tuning, Close/Cancel/Despawn all; deaths keep everything. FOV slider + screen shake toggle in settings.
+- [x] TBLE rename, loading screen with throwable spinning table, accounts (username/password, optional email, guest), saved settings + training per account
+- [x] Play menu: offline campaign, 1v1 queue (map pick, colours, first to 3, rematch/requeue/home), lobby with 6-letter code + join box, party invites/kick/disband, online non-pausing menu
+- [ ] Test 1v1/lobby/party with two real players and tune (bots in party campaign/training are per-player, not shared yet)
+- [ ] Password reset by optional email (not wired yet)

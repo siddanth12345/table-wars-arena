@@ -93,6 +93,8 @@ export const G = {
   respawnMsg: 0,
   tutStep: 0,
   trainMenu: false,
+  pvpDead: false,
+  frozen: false,
   bossMax: BOSS_HITS,
   tut: { enter: false, dashed: false, zoomed: false, bombed: false },
 };
@@ -106,7 +108,7 @@ export function resetGame(mode: Mode = G.mode) {
     bossWarn: 0, bossHits: 0, bossTime: 0, parryLocked: false, compromisedT: 0, stun: 0, bombBig: 0, countdown: 0,
     shots: 0, hits: 0, parries: 0, time: 0, firing: false, scoped: false, respawnMsg: 0, tutStep: 0,
     tut: { enter: false, dashed: false, zoomed: false, bombed: false },
-    trainMenu: false, bossMax: BOSS_HITS,
+    trainMenu: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
   });
   TRAIN_Q.length = 0;
   if (mode === "training") Object.assign(G, { playerHp: TRAIN.maxHp, airJumps: TRAIN.airJumps, airDashes: TRAIN.airDashes });

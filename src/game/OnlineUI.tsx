@@ -63,7 +63,7 @@ export function AuthPanel({ onClose }: { onClose?: () => void }) {
 export function AccountBadge({ onLogin }: { onLogin: () => void }) {
   const acc = useAccount();
   useEffect(() => {
-    if (acc.status === "user") startInbox();
+    if (acc.status === "user" || acc.status === "guest") startInbox();
     else stopInbox();
   }, [acc.status, acc.username]);
   if (acc.status === "user")
@@ -75,7 +75,7 @@ export function AccountBadge({ onLogin }: { onLogin: () => void }) {
     );
   return (
     <div className="mt-6 flex items-center justify-between gap-2 text-xs">
-      <span className="opacity-80">{acc.status === "guest" ? "Playing as guest" : "Not signed in"}</span>
+      <span className="opacity-80">{acc.status === "guest" ? <>Playing as <b className="text-crosshair">{acc.username}</b></> : "Not signed in"}</span>
       <button className="pointer-events-auto underline" onClick={onLogin}>Log in / Create account</button>
     </div>
   );
@@ -140,8 +140,8 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
         <button className={btnAlt} onClick={() => setPartyOpen(!partyOpen)}>Party{net.party ? ` (${net.party.members.length})` : ""}</button>
         {partyOpen && (
           <div className="rounded border-2 border-hud/20 p-4">
-            {acc.status !== "user" ? (
-              <p className="text-sm opacity-80">Log in to make a party. Guests can't be invited.</p>
+            {acc.status !== "user" && acc.status !== "guest" ? (
+              <p className="text-sm opacity-80">Log in or play as guest to make a party.</p>
             ) : (
               <>
                 {net.party && net.party.members.length > 0 && (
@@ -155,7 +155,7 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
                   </ul>
                 )}
                 {(!net.party || leader) && <InviteBox kind="party" label="Invite" />}
-                <p className="mt-1 text-xs opacity-60">Up to 4 invited players.</p>
+                <p className="mt-1 text-xs opacity-60">Up to 4 invited players. Guests show up as guest + 6 digits.</p>
                 {net.party && (
                   <button className={`${btnAlt} mt-3 border-destructive text-destructive`} onClick={() => (leader ? disbandParty() : leaveParty())}>
                     {leader ? "Disband party" : "Leave party"}
@@ -324,7 +324,7 @@ export function LobbyInvite() {
   return (
     <section className="mt-6 border-t border-hud/30 pt-4">
       <h3 className="mb-1 text-lg font-black uppercase tracking-widest text-crosshair">Invite to lobby · code {net.code}</h3>
-      {acc.status === "user" ? <InviteBox kind="lobby" label="Invite" /> : <p className="text-sm opacity-70">Log in to invite players by name, or share the code.</p>}
+      {acc.status === "user" || acc.status === "guest" ? <InviteBox kind="lobby" label="Invite" /> : <p className="text-sm opacity-70">Share the code to invite players.</p>}
     </section>
   );
 }

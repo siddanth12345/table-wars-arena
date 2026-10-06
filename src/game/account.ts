@@ -22,7 +22,15 @@ export function useAccount() {
   );
 }
 /** Name shown to other players in online modes. */
-export const displayName = () => (ACC.status === "user" ? ACC.username : "guest");
+let guestTag = "";
+/** Guests get a random 6-digit tag (e.g. guest482913) so they can be invited to parties. */
+export const displayName = () => {
+  if (ACC.status === "user") return ACC.username;
+  if (!guestTag) guestTag = String(Math.floor(100000 + Math.random() * 900000));
+  return `guest${guestTag}`;
+};
+// The auth service needs 6+ character passwords; the game allows 3–20, so a fixed suffix is added.
+const authPw = (p: string) => `${p}#tble`;
 
 const DOMAIN = "players.tble.app";
 const toEmail = (u: string) => `${u.trim().toLowerCase()}@${DOMAIN}`;
@@ -30,7 +38,7 @@ const toEmail = (u: string) => `${u.trim().toLowerCase()}@${DOMAIN}`;
 export function validateUsername(u: string): string | null {
   if (u.length < 3 || u.length > 20) return "Username must be 3–20 characters.";
   if (!/^[A-Za-z0-9_]+$/.test(u)) return "Username can only use letters, numbers and _.";
-  if (u.toLowerCase() === "guest") return "That username is reserved.";
+  if (u.toLowerCase().startsWith("guest")) return "Usernames can't start with \"guest\".";
   return null;
 }
 export function validatePassword(p: string): string | null {
@@ -78,24 +86,26 @@ export async function signUp(username: string, password: string, email: string) 
   if (taken) return "That username is taken.";
   const { data, error } = await supabase.auth.signUp({
     email: toEmail(username),
-    password,
+    password: authPw(password),
     options: { data: { username, contact_email: email || "" } },
   });
-  if (error) return /registered/i.test(error.message) ? "That username is taken." : error.message;
+  if (error) return /registered|exists/i.test(error.message) ? "That username is taken." : `Couldn't create the account: ${error.message}`;
   if (data.user) await loadProfile(data.user.id);
   return null;
 }
 
 export async function signIn(username: string, password: string) {
   if (!username || !password) return "Enter your username and password.";
-  const { data, error } = await supabase.auth.signInWithPassword({ email: toEmail(username), password });
+  let { data, error } = await supabase.auth.signInWithPassword({ email: toEmail(username), password: authPw(password) });
+  // accounts made before the suffix was added used the raw password
+  if (error && password.length >= 6) ({ data, error } = await supabase.auth.signInWithPassword({ email: toEmail(username), password }));
   if (error) return "Wrong username or password.";
   if (data.user) await loadProfile(data.user.id);
   return null;
 }
 
 export function playAsGuest() {
-  set({ status: "guest", userId: null, username: "guest", email: null });
+  set({ status: "guest", userId: null, username: displayName(), email: null });
 }
 
 export async function signOut() {

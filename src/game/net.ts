@@ -18,7 +18,9 @@ export type PartyMember = { id: string; name: string; leader: boolean };
 
 export const PVP_WIN = 3;
 export const PVP_DMG = { bullet: 5, bomb: 10, slam: 10 };
-export const PVP_HITBOX = 1.6 * 1.5; // 1.5x player hitbox for now
+export const PVP_SCALE = 3; // players are 3x bigger in 1v1s and lobbies
+export const PVP_HITBOX = 1.6 * PVP_SCALE;
+export const PVP_CENTER_Y = 1.8 * PVP_SCALE;
 export const LOBBY_MAX = 8;
 export const PARTY_MAX = 5; // leader + 4 invited
 
@@ -77,7 +79,25 @@ export function myId() {
 /** Set by World so network events can reach the simulation. */
 export const NET_HOOKS = {
   onHit: (_dmg: number, _stun: boolean) => {},
+  /** shared enemies: host snapshot arrives at followers */
+  onEnts: (_s: EntSnap) => {},
+  /** shared enemies: a follower hit something (host applies it) */
+  onEhit: (_h: EHit) => {},
+  /** shared enemies: host fired an enemy bullet (followers spawn a copy) */
+  onEshot: (_b: number[]) => {},
+  /** lobby: a follower asked the host to spawn training enemies */
+  onEspawn: (_q: { kind: string; n: number }) => {},
+  onWon: () => {},
 };
+export type EntSnap = { t: number[]; b: number[]; boss: number[] | null; stage: string; bh: number; bm: number };
+export type EHit = { k: "t" | "b" | "boss"; i: number; dmg: number };
+
+/** Followers in shared-enemy rooms show the host's enemies instead of simulating their own. */
+export const sharesEnemies = () => NET.online && (NET.kind === "coop" || NET.kind === "lobby");
+export const isFollower = () => sharesEnemies() && !NET.isHost;
+export function sendNet(event: string, payload: Record<string, unknown>) {
+  if (NET.online) send(event, payload);
+}
 
 let room: RealtimeChannel | null = null;
 let mm: RealtimeChannel | null = null;
@@ -98,10 +118,11 @@ const send = (event: string, payload: Record<string, unknown>) => {
 
 type Meta = { name: string; host: boolean; id: string };
 
-function joinRoom(name: string, kind: Kind, host: boolean): Promise<RealtimeChannel> {
+function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)["stage"]): Promise<RealtimeChannel> {
   leaveRoom(false);
   const id = myId();
   Object.assign(NET, empty(), { online: true, kind, room: name, isHost: host });
+  if (stage) NET.stage = stage; // set before presence syncs so the host can start the pick
   NET.names[id] = displayName();
   const ch = supabase.channel(`tble:${name}`, { config: { broadcast: { self: false }, presence: { key: id } } });
   room = ch;
@@ -112,8 +133,14 @@ function joinRoom(name: string, kind: Kind, host: boolean): Promise<RealtimeChan
     if (!cur) bump();
   });
   ch.on("broadcast", { event: "hit" }, ({ payload }) => {
-    if (payload.to === id && NET.stage === "playing") NET_HOOKS.onHit(payload.dmg as number, !!payload.stun);
+    if (payload.to !== id) return;
+    if (NET.kind === "pvp" ? NET.stage === "playing" : true) NET_HOOKS.onHit(payload.dmg as number, !!payload.stun);
   });
+  ch.on("broadcast", { event: "ents" }, ({ payload }) => { if (!NET.isHost) NET_HOOKS.onEnts(payload as EntSnap); });
+  ch.on("broadcast", { event: "ehit" }, ({ payload }) => { if (NET.isHost) NET_HOOKS.onEhit(payload as EHit); });
+  ch.on("broadcast", { event: "eshot" }, ({ payload }) => { if (!NET.isHost) NET_HOOKS.onEshot(payload.b as number[]); });
+  ch.on("broadcast", { event: "espawn" }, ({ payload }) => { if (NET.isHost) NET_HOOKS.onEspawn(payload as { kind: string; n: number }); });
+  ch.on("broadcast", { event: "won" }, () => { if (!NET.isHost) NET_HOOKS.onWon(); });
   ch.on("broadcast", { event: "death" }, ({ payload }) => onDeath(payload.id as string));
   ch.on("broadcast", { event: "pickstart" }, ({ payload }) => beginPick(payload.ms as number));
   ch.on("broadcast", { event: "pick" }, ({ payload }) => { picks[payload.id as string] = payload.tod as TimeOfDay; });
@@ -181,8 +208,13 @@ export function sendPose(x: number, y: number, z: number, yaw: number) {
 }
 
 export function hitPeer(to: string, dmg: number, stun = false) {
-  if (NET.kind !== "pvp" || NET.stage !== "playing") return;
+  const ok = NET.kind === "pvp" ? NET.stage === "playing" : NET.kind === "lobby";
+  if (!ok) return;
   send("hit", { to, dmg, stun });
+}
+/** Host enemies hurting another player in a shared-enemy room. */
+export function enemyHitPeer(to: string, dmg: number) {
+  if (sharesEnemies() && NET.isHost) send("hit", { to, dmg, stun: false });
 }
 
 export function opponentId() {
@@ -192,9 +224,13 @@ export function opponentId() {
 function onPresence(ids: Set<string>) {
   if (NET.kind !== "pvp") return;
   const opp = [...ids].find((k) => k !== myId());
-  if (NET.stage === "pick" && NET.isHost && opp && NET.pickEnds === 0) {
-    send("pickstart", { ms: 10000 });
-    beginPick(10000);
+  if (NET.stage === "pick" && NET.isHost && opp) {
+    if (NET.pickEnds === 0) {
+      send("pickstart", { ms: 10000 });
+      beginPick(10000);
+    } else send("pickstart", { ms: Math.max(500, NET.pickEnds - Date.now()) }); // late joiner catch-up
+    // re-send a couple of times in case the opponent wasn't listening yet
+    for (const d of [800, 2000]) later(d, () => { if (NET.stage === "pick" && NET.pickEnds) send("pickstart", { ms: Math.max(500, NET.pickEnds - Date.now()) }); });
   }
   if (!opp && NET.stage !== "idle" && NET.stage !== "over" && NET.pickEnds !== 0) {
     // opponent left mid-match: you win
@@ -235,9 +271,9 @@ export function leaveQueue() {
 }
 
 export async function startPvp(name: string, host: boolean, partyMatch = false) {
-  await joinRoom(name, "pvp", host);
+  await joinRoom(name, "pvp", host, "pick");
   NET.partyMatch = partyMatch;
-  NET.stage = "pick";
+  if (NET.stage === "idle") NET.stage = "pick";
   resetGame("pvp");
   G.frozen = true;
   document.exitPointerLock?.();
@@ -245,6 +281,8 @@ export async function startPvp(name: string, host: boolean, partyMatch = false) 
 }
 
 function beginPick(ms: number) {
+  if (!NET.isHost && NET.pickEnds !== 0) return; // already counting down
+  if (NET.stage !== "pick" && NET.stage !== "idle") return;
   NET.pickEnds = Date.now() + ms;
   NET.stage = "pick";
   bump();
@@ -419,8 +457,8 @@ const inboxName = (u: string) => `tble:user:${u.trim().toLowerCase()}`;
 export function startInbox() {
   const acc = getAccount();
   stopInbox();
-  if (acc.status !== "user") return;
-  const ch = supabase.channel(inboxName(acc.username), { config: { broadcast: { self: false } } });
+  if (acc.status !== "user" && acc.status !== "guest") return;
+  const ch = supabase.channel(inboxName(displayName()), { config: { broadcast: { self: false } } });
   inbox = ch;
   ch.on("broadcast", { event: "invite" }, ({ payload }) => {
     const inv = payload as Invite;
@@ -439,11 +477,12 @@ export function stopInbox() {
 export async function sendInvite(username: string, kind: "party" | "lobby"): Promise<{ ok: boolean; msg: string }> {
   const name = username.trim();
   const acc = getAccount();
-  if (acc.status !== "user") return { ok: false, msg: "Sign in to invite players." };
-  if (!name || name.toLowerCase() === "guest") return { ok: false, msg: "Guests can't be invited." };
-  if (name.toLowerCase() === acc.username.toLowerCase()) return { ok: false, msg: "That's you!" };
+  if (acc.status !== "user" && acc.status !== "guest") return { ok: false, msg: "Log in or play as guest first." };
+  if (!name) return { ok: false, msg: "Enter a username." };
+  if (name.toLowerCase() === displayName().toLowerCase()) return { ok: false, msg: "That's you!" };
   if (Date.now() - NET.inviteSentAt < 3000) return { ok: false, msg: "Wait a moment before sending another invite." };
-  if (!(await lookupUsername(name))) return { ok: false, msg: "No player with that exact username." };
+  const guestName = /^guest\d{6}$/i.test(name);
+  if (!guestName && !(await lookupUsername(name))) return { ok: false, msg: "No player with that exact username." };
   let target = "";
   if (kind === "party") {
     if (!NET.party) await createParty();
@@ -460,7 +499,7 @@ export async function sendInvite(username: string, kind: "party" | "lobby"): Pro
     const t = setTimeout(resolve, 2500);
     ch.subscribe((s) => { if (s === "SUBSCRIBED") { clearTimeout(t); resolve(); } });
   });
-  await ch.send({ type: "broadcast", event: "invite", payload: { kind, from: acc.username, target } });
+  await ch.send({ type: "broadcast", event: "invite", payload: { kind, from: displayName(), target } });
   setTimeout(() => void supabase.removeChannel(ch), 1500);
   return { ok: true, msg: `Invite sent to ${name}.` };
 }

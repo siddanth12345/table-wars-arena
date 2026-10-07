@@ -86,6 +86,7 @@ type Hazard = { active: boolean; kind: "quarter" | "sword" | "stomp" | "aoe"; t:
 const FX_LIGHTS = 5;
 const BOT_LIGHTS = 6;
 const _glowBoss = new THREE.Vector3();
+const tmpV2 = new THREE.Vector3();
 
 const bulletPool = (n: number): Bullet[] =>
   Array.from({ length: n }, () => ({ pos: new THREE.Vector3(), prev: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, alive: false, dmg: DMG }));

@@ -20,3 +20,11 @@
 - [x] Play menu: offline campaign, 1v1 queue (map pick, colours, first to 3, rematch/requeue/home), lobby with 6-letter code + join box, party invites/kick/disband, online non-pausing menu
 - [ ] Test 1v1/lobby/party with two real players and tune (bots in party campaign/training are per-player, not shared yet)
 - [ ] Password reset by optional email (not wired yet)
+
+## Round 2
+- [x] Party campaign/training + lobby share the host's enemies (host simulates, streams snapshots + enemy shots; teammates' hits go to host)
+- [x] Lobby PvP; players 3x bigger (hitbox + model) in 1v1 and lobby
+- [x] Guests get guest###### names, can party/invite
+- [x] Create account fixed (auth needs 6+ char passwords → fixed suffix)
+- [x] 1v1: both players now reach the arena pick
+- [ ] Boss hazards (sword/quarter/AOE/waves) only hit the host in shared games

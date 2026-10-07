@@ -1,5 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { NET, NET_HOOKS, PVP_DMG, PVP_HITBOX, hitPeer, reportDeath, sendPose } from "./net";
+import { NET, NET_HOOKS, PVP_DMG, PVP_HITBOX, PVP_CENTER_Y, hitPeer, reportDeath, sendPose, sharesEnemies, isFollower, sendNet, enemyHitPeer, type EntSnap } from "./net";
 import { RemotePlayers } from "./RemotePlayers";
 import { PointerLockControls } from "@react-three/drei";
 import { SETTINGS, useSettings, lampIntensity } from "./settings";
@@ -86,6 +86,7 @@ type Hazard = { active: boolean; kind: "quarter" | "sword" | "stomp" | "aoe"; t:
 const FX_LIGHTS = 5;
 const BOT_LIGHTS = 6;
 const _glowBoss = new THREE.Vector3();
+const tmpV2 = new THREE.Vector3();
 
 const bulletPool = (n: number): Bullet[] =>
   Array.from({ length: n }, () => ({ pos: new THREE.Vector3(), prev: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, alive: false, dmg: DMG }));
@@ -278,6 +279,8 @@ export function World() {
   const tutSetup = useRef(-1);
   const tutDist = useRef(0);
   const tutKills = useRef(0);
+  const snapRef = useRef<EntSnap | null>(null);
+  const lastSnap = useRef(0);
 
   const topI = useRef<THREE.InstancedMesh>(null);
   const legI = useRef<THREE.InstancedMesh>(null);
@@ -340,6 +343,15 @@ export function World() {
       reportDeath();
       return;
     }
+    if (G.playerHp <= 0 && sharesEnemies() && G.mode === "game") {
+      // party campaign: you respawn so your partner can keep fighting
+      G.playerHp = MAX_HP;
+      pos.current.copy(START);
+      hv.current.set(0, 0, 0);
+      vy.current = 0;
+      G.respawnMsg = 2.5;
+      return;
+    }
     if (G.playerHp <= 0) {
       if (G.mode === "training") {
         // training death: back to the usual spawn point, refill, open the (pausing) training menu
@@ -382,6 +394,7 @@ export function World() {
   };
   const hitTable = (t: Table, dmg: number) => {
     if (!t.alive) return;
+    if (isFollower()) { G.hitFlash = 0.15; sendNet("ehit", { k: "t", i: tables.indexOf(t), dmg }); return; }
     t.hp -= dmg;
     G.hitFlash = 0.15;
     if (t.hp > 0) return;
@@ -398,14 +411,41 @@ export function World() {
   };
   const hitBoss = (n: number) => {
     if (G.stage !== "boss" || !boss.current.landed) return;
+    if (isFollower()) { G.hitFlash = 0.15; sendNet("ehit", { k: "boss", i: 0, dmg: n }); return; }
     G.bossHits = Math.min(G.bossMax, G.bossHits + n);
     G.hitFlash = 0.15;
     if (G.bossHits >= G.bossMax) {
       burst(tmpV.copy(boss.current.pos).setY(15), BOSS_S / 2, 30);
       if (G.mode === "training") { despawnBoss(); return; }
       G.phase = "won";
+      sendNet("won", {});
       document.exitPointerLock?.();
     }
+  };
+  const hitBlue = (u: (typeof blues)[number], dmg: number) => {
+    if (!u.alive) return;
+    if (isFollower()) { G.hitFlash = 0.15; sendNet("ehit", { k: "b", i: blues.indexOf(u), dmg }); return; }
+    u.hp -= dmg;
+    if (u.hp <= 0) { u.alive = false; burst(tmpV.copy(u.pos).setY(4), TABLE_S, 5); }
+  };
+  // closest player (you or a teammate) to an enemy — used by host-run shared enemies
+  const _aim = new THREE.Vector3();
+  const nearest = (from: THREE.Vector3): { at: THREE.Vector3; id: string | null } => {
+    _aim.copy(camera.position);
+    let id: string | null = null;
+    if (sharesEnemies()) {
+      let best = from.distanceTo(_aim);
+      for (const pr of NET.peers.values()) {
+        const d = Math.hypot(pr.x - from.x, pr.y + EYE - from.y, pr.z - from.z);
+        if (d < best) { best = d; id = pr.id; _aim.set(pr.x, pr.y + EYE, pr.z); }
+      }
+    }
+    return { at: _aim, id };
+  };
+  const shotQ: number[] = [];
+  const enemyShot = (from: THREE.Vector3, vel: THREE.Vector3, dmg: number, life: number) => {
+    spawnBullet(botPool, from, vel, dmg, life);
+    if (sharesEnemies() && NET.isHost) shotQ.push(from.x, from.y, from.z, vel.x, vel.y, vel.z, dmg, life);
   };
   const bossBox = (min: THREE.Vector3, max: THREE.Vector3) => {
     const b = boss.current;
@@ -443,7 +483,7 @@ export function World() {
     const br = BOMB_R * (G.bombBig > 0 ? 1.5 : 1);
     G.tut.bombed = true;
     for (const t of tables) if (t.alive && t.pos.distanceTo(at) < br) hitTable(t, BOMB_DMG * (buffed ? 2 : 1));
-    for (const u of blues) if (u.alive && u.pos.distanceTo(at) < br) { u.alive = false; burst(tmpV.copy(u.pos).setY(4), TABLE_S, 5); }
+    for (const u of blues) if (u.alive && u.pos.distanceTo(at) < br) hitBlue(u, 9999);
     if (bossLive() && tmpV.set(boss.current.pos.x, boss.current.y + 10, boss.current.pos.z).distanceTo(at) < br + 30)
       hitBoss((BOMB_DMG / DMG) * (buffed ? 2 : 1));
     pvpBlast(at, br, PVP_DMG.bomb);
@@ -459,10 +499,10 @@ export function World() {
   };
   // 1v1: damage every opponent whose (enlarged) hitbox is inside the blast
   const pvpBlast = (at: THREE.Vector3, r: number, dmg: number, stun = false) => {
-    if (G.mode !== "pvp") return;
+    if (G.mode !== "pvp" && NET.kind !== "lobby") return;
     for (const pr of NET.peers.values()) {
       if (pr.dead) continue;
-      if (tmpV.set(pr.x, pr.y + 1.8, pr.z).distanceTo(at) < r + PVP_HITBOX) hitPeer(pr.id, dmg, stun);
+      if (tmpV.set(pr.x, pr.y + PVP_CENTER_Y, pr.z).distanceTo(at) < r + PVP_HITBOX) hitPeer(pr.id, dmg, stun);
     }
   };
   // healing ring: heal, or (when full) reset the bomb cooldown. Returns true if consumed.
@@ -494,10 +534,9 @@ export function World() {
     for (const u of blues) {
       if (!u.alive) continue;
       if (u === directBlue || (Math.hypot(u.pos.x - at.x, u.pos.z - at.z) < BULLET_AOE_R + 3 * TABLE_S && at.y < BULLET_AOE_R + 4 * TABLE_S)) {
-        u.hp -= dmg;
+        hitBlue(u, dmg);
         any = true;
         G.hitFlash = 0.15;
-        if (u.hp <= 0) { u.alive = false; burst(tmpV.copy(u.pos).setY(4), TABLE_S, 5); }
       }
     }
     if (bossLive() && boss.current.landed && (directBoss || distToBossBox(at) < BULLET_AOE_R)) {
@@ -533,6 +572,8 @@ export function World() {
       return { f, r: new THREE.Vector3(-f.z, 0, f.x) };
     };
     const kd = (e: KeyboardEvent) => {
+      const tg = e.target as HTMLElement | null;
+      if (tg && (tg.tagName === "INPUT" || tg.tagName === "TEXTAREA")) return; // typing in a box
       if (e.code === SETTINGS.keys.jump) e.preventDefault();
       const wasDown = keys.current[e.code];
       keys.current[e.code] = true;
@@ -650,6 +691,17 @@ export function World() {
     };
   }, [camera]);
 
+  NET_HOOKS.onEnts = (snap) => { snapRef.current = snap; };
+  NET_HOOKS.onEhit = (h) => {
+    if (h.k === "t") { const t = tables[h.i]; if (t) hitTable(t, h.dmg); }
+    else if (h.k === "b") { const u = blues[h.i]; if (u) hitBlue(u, h.dmg); }
+    else hitBoss(h.dmg);
+  };
+  NET_HOOKS.onEspawn = (q) => {
+    if (q.kind === "despawn") despawnAll();
+    else trainSpawn({ kind: q.kind as TrainSpawn["kind"], n: q.n, t: 0 });
+  };
+  NET_HOOKS.onWon = () => { G.phase = "won"; document.exitPointerLock?.(); };
   NET_HOOKS.onHit = (d, stun) => {
     damagePlayer(d);
     if (stun && !G.pvpDead) G.stun = STUN_TIME;
@@ -702,7 +754,7 @@ export function World() {
       tutSetup.current = -1;
       clearArena();
       splinters.length = 0;
-      if (G.mode === "game") spawnTable(BOT_START.clone());
+      if (G.mode === "game" && !isFollower()) spawnTable(BOT_START.clone());
     }
     if (lastRespawn.current !== G.respawnToken) {
       lastRespawn.current = G.respawnToken;
@@ -711,8 +763,10 @@ export function World() {
 
     if (TRAIN_CMD.despawn) {
       TRAIN_CMD.despawn = false;
+      if (isFollower()) sendNet("espawn", { kind: "despawn", n: 0 });
       despawnAll();
     }
+    const follower = isFollower();
 
     const home = G.phase === "home";
     const targetFov = G.scoped ? G.zoomFov : SETTINGS.fov;
@@ -897,8 +951,7 @@ export function World() {
           for (const t of tables) if (t.alive && Math.hypot(t.pos.x - p.x, t.pos.z - p.z) < r + 3 * t.s && t.pos.y < p.y + r) hitTable(t, q.dmg);
           for (const u of blues) {
             if (!u.alive || Math.hypot(u.pos.x - p.x, u.pos.z - p.z) >= r + 3 * TABLE_S) continue;
-            u.hp -= q.dmg;
-            if (u.hp <= 0) { u.alive = false; burst(tmpV.copy(u.pos).setY(4), TABLE_S, 5); }
+            hitBlue(u, q.dmg);
           }
           if (bossLive() && b.landed && distToBossBox(tmpV.copy(p).setY(p.y + 1)) < r) {
             hitBoss(Math.round(q.dmg / DMG));
@@ -974,9 +1027,9 @@ export function World() {
         if (!buffed && G.ammo === 0) G.reloading = 1.5;
       }
 
-      // --- tables AI ---
+      // --- tables AI (followers mirror the host's tables instead) ---
       for (const t of tables) {
-        if (!t.alive) continue;
+        if (!t.alive || follower) continue;
         const bp = t.pos;
         const speed = (5 + (1 - t.hp / (t.summoned ? SUMMON_HP : TABLE_HP)) * 9) * 4;
         const toT = tmpV.copy(t.target).sub(bp).setY(0);
@@ -1007,22 +1060,23 @@ export function World() {
         for (const s of SOLIDS) if (s.y0 < 5 && bp.y < s.y1) pushOut(bp, s, 3 * t.s);
         clampCircle(bp, 3 * t.s);
         t.bob += dt * speed * 0.35;
-        t.yaw = Math.atan2(cam.position.x - bp.x, cam.position.z - bp.z);
+        const tgt = nearest(tmpV2.copy(bp).setY(bp.y + 3.2 * t.s)).at;
+        t.yaw = Math.atan2(tgt.x - bp.x, tgt.z - bp.z);
         t.shootT -= dt;
         if (t.shootT <= 0 && !t.passive) {
           t.shootT = 0.45 + Math.random() * 0.4;
           const from = bp.clone().setY(bp.y + 3.2 * t.s);
-          if (from.distanceTo(cam.position) < 380) {
-            const aim = cam.position.clone().setY(cam.position.y - 0.5).sub(from).normalize();
+          if (from.distanceTo(tgt) < 380) {
+            const aim = tgt.clone().setY(tgt.y - 0.5).sub(from).normalize();
             aim.x += (Math.random() - 0.5) * 0.05;
             aim.y += (Math.random() - 0.5) * 0.03;
-            spawnBullet(botPool, from, aim.normalize().multiplyScalar(t.summoned ? BOT_BULLET_SPEED * 0.5 : BOT_BULLET_SPEED), DMG, t.summoned ? 4 : 2);
+            enemyShot(from, aim.normalize().multiplyScalar(t.summoned ? BOT_BULLET_SPEED * 0.5 : BOT_BULLET_SPEED), DMG, t.summoned ? 4 : 2);
           }
         }
       }
 
       // --- boss ---
-      if (G.stage === "incoming") {
+      if (follower) { /* host runs the boss */ } else if (G.stage === "incoming") {
         G.bossWarn -= dt;
         if (G.bossWarn <= 0) {
           G.stage = "boss";
@@ -1068,8 +1122,9 @@ export function World() {
           if (b.bulletT <= 0) {
             b.bulletT = 1 * cfg.bossCdK();
             const from = new THREE.Vector3(b.pos.x, 3.4 * BOSS_S, b.pos.z);
-            const aim = cam.position.clone().setY(cam.position.y - 0.5).sub(from).normalize();
-            spawnBullet(botPool, from, aim.multiplyScalar(BOT_BULLET_SPEED), BOSS_BULLET_DMG, 3);
+            const bt = nearest(from).at;
+            const aim = bt.clone().setY(bt.y - 0.5).sub(from).normalize();
+            enemyShot(from, aim.multiplyScalar(BOT_BULLET_SPEED), BOSS_BULLET_DMG, 3);
           }
           const bossAtk = b.lockT <= 0;
           b.lockT = Math.max(0, b.lockT - dt);
@@ -1128,7 +1183,20 @@ export function World() {
 
       // --- blue chaser tables ---
       for (const u of blues) {
-        if (!u.alive) continue;
+        if (!u.alive || follower) continue;
+        // chase the closest player
+        let cx = p.x, cz = p.z, cid: string | null = null, cd = Math.hypot(p.x - u.pos.x, p.z - u.pos.z);
+        if (sharesEnemies()) for (const pr of NET.peers.values()) {
+          const dd = Math.hypot(pr.x - u.pos.x, pr.z - u.pos.z);
+          if (dd < cd) { cd = dd; cx = pr.x; cz = pr.z; cid = pr.id; }
+        }
+        if (cid) {
+          u.pos.addScaledVector(tmpV.set(cx - u.pos.x, 0, cz - u.pos.z).normalize(), BLUE_SPEED * dt);
+          u.yaw = Math.atan2(cx - u.pos.x, cz - u.pos.z);
+          clampCircle(u.pos, 3 * TABLE_S);
+          if (cd < 3 * TABLE_S + PLAYER_R + 1) { enemyHitPeer(cid, 2); u.alive = false; burst(tmpV.copy(u.pos).setY(4), TABLE_S, 5); }
+          continue;
+        }
         const toP = tmpV.set(p.x - u.pos.x, 0, p.z - u.pos.z);
         const d = toP.length();
         if (d > 0.1) u.pos.addScaledVector(toP.normalize(), BLUE_SPEED * dt);
@@ -1223,7 +1291,7 @@ export function World() {
 
       // --- stage clear check ---
       G.bluesAlive = blues.reduce((n, u) => n + (u.alive ? 1 : 0), 0);
-      if (G.mode === "game" && G.stage === "tables" && G.capReached && aliveCount() === 0 && G.bluesAlive === 0) {
+      if (!follower && G.mode === "game" && G.stage === "tables" && G.capReached && aliveCount() === 0 && G.bluesAlive === 0) {
         G.stage = "incoming";
         G.bossWarn = BOSS_WARN;
         G.playerHp = MAX_HP;
@@ -1234,7 +1302,7 @@ export function World() {
         for (let i = TRAIN_Q.length - 1; i >= 0; i--) {
           const q = TRAIN_Q[i]!;
           q.t -= dt;
-          if (q.t <= 0) { TRAIN_Q.splice(i, 1); trainSpawn(q); }
+          if (q.t <= 0) { TRAIN_Q.splice(i, 1); if (follower) sendNet("espawn", { kind: q.kind, n: q.n }); else trainSpawn(q); }
         }
       }
 
@@ -1282,6 +1350,59 @@ export function World() {
       }
     }
 
+    // --- shared enemies: host streams, followers mirror ---
+    if (sharesEnemies() && G.phase === "playing") {
+      if (NET.isHost) {
+        const now = performance.now();
+        if (now - lastSnap.current > 100) {
+          lastSnap.current = now;
+          const t: number[] = [], bl: number[] = [];
+          tables.forEach((x, i) => { if (x.alive) t.push(i, +x.pos.x.toFixed(1), +x.pos.y.toFixed(1), +x.pos.z.toFixed(1), +x.yaw.toFixed(2), +x.s.toFixed(2)); });
+          blues.forEach((u, i) => { if (u.alive) bl.push(i, +u.pos.x.toFixed(1), +u.pos.z.toFixed(1), +u.yaw.toFixed(2)); });
+          const bs = G.stage === "boss" ? [b.landed ? 1 : 0, b.y, b.pos.x, b.pos.z, b.yaw] : null;
+          sendNet("ents", { t, b: bl, boss: bs, stage: G.stage, bh: G.bossHits, bm: G.bossMax, s: shotQ.splice(0) });
+        }
+      } else if (snapRef.current) {
+        const sn = snapRef.current;
+        const k = 1 - Math.exp(-12 * dt);
+        const seenT = new Set<number>();
+        for (let j = 0; j + 5 < sn.t.length; j += 6) {
+          const i = sn.t[j]!, x = tables[i];
+          if (!x) continue;
+          seenT.add(i);
+          if (!x.alive) { x.alive = true; x.passive = true; x.pos.set(sn.t[j + 1]!, sn.t[j + 2]!, sn.t[j + 3]!); }
+          x.pos.lerp(tmpV.set(sn.t[j + 1]!, sn.t[j + 2]!, sn.t[j + 3]!), k);
+          x.yaw = sn.t[j + 4]!;
+          x.s = sn.t[j + 5]!;
+          x.bob += dt * 6;
+        }
+        tables.forEach((x, i) => { if (x.alive && !seenT.has(i)) { x.alive = false; burst(tmpV.copy(x.pos).setY(x.pos.y + 3 * x.s), x.s, 7); } });
+        const seenB = new Set<number>();
+        for (let j = 0; j + 3 < sn.b.length; j += 4) {
+          const i = sn.b[j]!, u = blues[i];
+          if (!u) continue;
+          seenB.add(i);
+          if (!u.alive) { u.alive = true; u.pos.set(sn.b[j + 1]!, 0, sn.b[j + 2]!); }
+          u.pos.lerp(tmpV.set(sn.b[j + 1]!, 0, sn.b[j + 2]!), k);
+          u.yaw = sn.b[j + 3]!;
+        }
+        blues.forEach((u, i) => { if (u.alive && !seenB.has(i)) { u.alive = false; burst(tmpV.copy(u.pos).setY(4), TABLE_S, 5); } });
+        G.stage = sn.stage as typeof G.stage;
+        G.bossHits = sn.bh;
+        G.bossMax = sn.bm;
+        if (sn.boss) {
+          b.landed = !!sn.boss[0];
+          b.y = sn.boss[1]!;
+          b.pos.lerp(tmpV.set(sn.boss[2]!, 0, sn.boss[3]!), k);
+          b.yaw = sn.boss[4]!;
+        }
+        for (let j = 0; j + 7 < sn.s.length; j += 8) {
+          spawnBullet(botPool, tmpV.set(sn.s[j]!, sn.s[j + 1]!, sn.s[j + 2]!), tmpV2.set(sn.s[j + 3]!, sn.s[j + 4]!, sn.s[j + 5]!), sn.s[j + 6]!, sn.s[j + 7]!);
+        }
+        sn.s = [];
+      }
+    }
+
     // --- bullets ---
     const stepPool = (pool: Bullet[], inst: THREE.InstancedMesh | null, isPlayer: boolean) => {
       let n = 0;
@@ -1326,9 +1447,9 @@ export function World() {
               if (tt < ringT) { ringT = tt; ringHit = h; }
             }
             let peerT = Infinity;
-            if (G.mode === "pvp") for (const pr of NET.peers.values()) {
+            if (G.mode === "pvp" || NET.kind === "lobby") for (const pr of NET.peers.values()) {
               if (pr.dead) continue;
-              peerT = Math.min(peerT, segSphere(bl.prev, bl.pos, _peerC.set(pr.x, pr.y + 1.8, pr.z), PVP_HITBOX));
+              peerT = Math.min(peerT, segSphere(bl.prev, bl.pos, _peerC.set(pr.x, pr.y + PVP_CENTER_Y, pr.z), PVP_HITBOX));
             }
             const tHit = Math.min(bestT, bossT, ringT, tWorld, peerT);
             if (tHit < Infinity) {

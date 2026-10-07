@@ -89,7 +89,7 @@ export const NET_HOOKS = {
   onEspawn: (_q: { kind: string; n: number }) => {},
   onWon: () => {},
 };
-export type EntSnap = { t: number[]; b: number[]; boss: number[] | null; stage: string; bh: number; bm: number };
+export type EntSnap = { t: number[]; b: number[]; boss: number[] | null; stage: string; bh: number; bm: number; s: number[] };
 export type EHit = { k: "t" | "b" | "boss"; i: number; dmg: number };
 
 /** Followers in shared-enemy rooms show the host's enemies instead of simulating their own. */

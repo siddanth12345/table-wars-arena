@@ -474,7 +474,7 @@ function Menu() {
       </div>
     );
   }
-  if (phase !== "playing" || G.locked || G.trainMenu) return null;
+  if (phase !== "playing" || G.locked || G.trainMenu || G.freecam) return null;
   if (NET.online && !showSettings) return <OnlinePause onSettings={() => setShowSettings(true)} />;
   const tut = G.mode === "tutorial";
   const train = G.mode === "training";

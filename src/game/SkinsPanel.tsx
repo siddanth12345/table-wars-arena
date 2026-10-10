@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useRef, useState, useEffect } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import * as THREE from "three";
 import {
   applySkin, useSkin, COLOR_CHART, EYE_DESIGNS, DECORATIONS, LEG_DESIGNS,
   type Skin, type EyeDesign, type TableDecoration, type LegDesign,
 } from "./skins";
+import { TableBot, StageDisc } from "./TableBot";
 
 const btn = "rounded-xl border-2 border-white/20 bg-black/50 px-3 py-2 text-sm font-bold uppercase tracking-wide text-white hover:bg-white/10 transition";
 const btnOn = "rounded-xl border-2 border-crosshair bg-crosshair/20 px-3 py-2 text-sm font-bold uppercase tracking-wide text-crosshair";
@@ -24,83 +27,66 @@ function ColorChart({ value, onPick }: { value: string; onPick: (c: string) => v
   );
 }
 
-/** Live 3D-style CSS preview of the table bot on a circular stage. */
-function SkinPreview({ skin }: { skin: Skin }) {
-  const legCount = skin.legDesign === "oneleg" ? 1 : skin.legDesign === "minimal" ? 2 : 4;
+function OrbitDrag({ yawRef }: { yawRef: React.MutableRefObject<number> }) {
+  const { gl } = useThree();
+  const dragging = useRef(false);
+  const lastX = useRef(0);
+
+  useEffect(() => {
+    const el = gl.domElement;
+    const down = (e: PointerEvent) => {
+      dragging.current = true;
+      lastX.current = e.clientX;
+      el.setPointerCapture(e.pointerId);
+    };
+    const move = (e: PointerEvent) => {
+      if (!dragging.current) return;
+      const dx = e.clientX - lastX.current;
+      lastX.current = e.clientX;
+      yawRef.current += dx * 0.01;
+    };
+    const up = (e: PointerEvent) => {
+      dragging.current = false;
+      try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    };
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+  }, [gl, yawRef]);
+
+  return null;
+}
+
+function PreviewScene({ skin }: { skin: Skin }) {
+  const yawRef = useRef(0);
+  const group = useRef<THREE.Group>(null);
+
+  useFrame(() => {
+    if (group.current) group.current.rotation.y = yawRef.current;
+  });
+
   return (
-    <div className="relative flex h-56 w-full items-end justify-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-[#1a1020] to-[#0a0610]">
-      {/* stage */}
-      <div
-        className="absolute bottom-6 h-4 w-40 rounded-full opacity-80"
-        style={{ background: `radial-gradient(ellipse, ${skin.lightColor}88, transparent 70%)`, boxShadow: `0 0 40px ${skin.lightColor}` }}
-      />
-      <div className="absolute bottom-4 h-3 w-36 rounded-full bg-gradient-to-b from-[#3a3a3a] to-[#1a1a1a] shadow-lg" />
-      {/* table model */}
-      <div className="relative mb-8 flex flex-col items-center" style={{ filter: `drop-shadow(0 0 12px ${skin.lightColor}aa)` }}>
-        {/* eyes */}
-        <div className="mb-1 flex gap-3">
-          {[-1, 1].map((side) => {
-            if (skin.eyeDesign === "triangle") {
-              return (
-                <div
-                  key={side}
-                  className="h-0 w-0 border-l-[8px] border-r-[8px] border-b-[12px] border-l-transparent border-r-transparent"
-                  style={{ borderBottomColor: skin.eyeColor, transform: `rotate(${side * 12}deg)` }}
-                />
-              );
-            }
-            if (skin.eyeDesign === "square") {
-              return <div key={side} className="h-3 w-3 rounded-sm" style={{ background: skin.eyeColor, boxShadow: `0 0 8px ${skin.eyeColor}` }} />;
-            }
-            // boss eyes — slanted bars
-            return (
-              <div
-                key={side}
-                className="h-1.5 w-5 rounded-sm"
-                style={{ background: skin.eyeColor, boxShadow: `0 0 8px ${skin.eyeColor}`, transform: `rotate(${side * -20}deg)` }}
-              />
-            );
-          })}
-        </div>
-        {/* tabletop */}
-        <div className="relative h-4 w-28 rounded-sm border border-black/30" style={{ background: skin.tablePrimary }}>
-          {skin.decoration === "plates" && (
-            <div className="absolute inset-0 flex items-center justify-center gap-2">
-              <div className="h-2 w-2 rounded-full" style={{ background: skin.decorationColor }} />
-              <div className="h-2 w-2 rounded-full" style={{ background: skin.decorationColor }} />
-            </div>
-          )}
-          {skin.decoration === "rug" && (
-            <div className="absolute inset-x-2 top-0.5 h-3 rounded-sm opacity-70" style={{ background: skin.decorationColor }} />
-          )}
-          {skin.decoration === "office" && (
-            <div className="absolute left-1/2 top-0.5 h-2.5 w-6 -translate-x-1/2 rounded-sm border border-black/40" style={{ background: skin.decorationColor }} />
-          )}
-          {skin.decoration === "birthday" && (
-            <div className="absolute left-1/2 top-0 flex -translate-x-1/2 flex-col items-center">
-              <div className="h-1.5 w-1 rounded-t-sm bg-yellow-300" />
-              <div className="h-2 w-4 rounded-sm" style={{ background: skin.decorationColor }} />
-            </div>
-          )}
-        </div>
-        {/* legs */}
-        <div className={`mt-0.5 flex ${legCount === 1 ? "justify-center" : "justify-between"} w-24`}>
-          {Array.from({ length: legCount }, (_, i) => (
-            <div
-              key={i}
-              className={skin.legDesign === "triangle" ? "h-10 w-0 border-l-[6px] border-r-[6px] border-b-[40px] border-l-transparent border-r-transparent" : "h-10 w-2 rounded-b-sm"}
-              style={
-                skin.legDesign === "triangle"
-                  ? { borderBottomColor: skin.tablePrimary }
-                  : skin.legDesign === "conic"
-                    ? { background: `linear-gradient(to bottom, ${skin.tablePrimary}, #222)`, width: 10, clipPath: "polygon(20% 0, 80% 0, 100% 100%, 0 100%)" }
-                    : { background: skin.tablePrimary }
-              }
-            />
-          ))}
-        </div>
-      </div>
-    </div>
+    <>
+      <color attach="background" args={["#0a0612"]} />
+      <ambientLight intensity={0.35} />
+      <directionalLight position={[6, 12, 4]} intensity={1.4} castShadow />
+      <OrbitDrag yawRef={yawRef} />
+      <group ref={group}>
+        <StageDisc color="#2a2430" lightColor={skin.lightColor} />
+        <TableBot skin={skin} scale={0.85} emitLight lightIntensity={1.2} />
+      </group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
+        <circleGeometry args={[20, 32]} />
+        <meshBasicMaterial color="#050308" />
+      </mesh>
+    </>
   );
 }
 
@@ -119,7 +105,14 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
           <button type="button" className={btn} onClick={onClose}>Close</button>
         </div>
 
-        <SkinPreview skin={draft} />
+        <div className="relative h-64 w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
+          <Canvas shadows camera={{ position: [7, 6, 9], fov: 40 }} className="h-full w-full cursor-grab active:cursor-grabbing">
+            <PreviewScene skin={draft} />
+          </Canvas>
+          <p className="pointer-events-none absolute bottom-2 left-3 text-[10px] font-bold uppercase tracking-widest text-white/50">
+            Drag to rotate · live 3D preview
+          </p>
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>

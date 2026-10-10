@@ -11,7 +11,8 @@ import {
   MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, type TrainSpawn,
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, LOBBY_RESPAWN, FREECAM_SPEEDS,
 } from "./state";
-import { SKIN } from "./skins";
+import { SKIN, useSkin } from "./skins";
+import { TableBot } from "./TableBot";
 import { Room, ROOM, SOLIDS } from "./Room";
 import { tableWood } from "./textures";
 import { HomeShowcase } from "./HomeShowcase";
@@ -236,6 +237,27 @@ function newTable(): Table {
   };
 }
 
+// Local player body pose for freecam third-person view
+const localBody = { x: 0, y: 0, z: 0, yaw: 0, show: false, playerYaw: 0 };
+
+function LocalFreecamBody() {
+  const g = useRef<THREE.Group>(null);
+  const skin = useSkin();
+  useFrame(() => {
+    const m = g.current;
+    if (!m) return;
+    m.visible = localBody.show;
+    if (!localBody.show) return;
+    m.position.set(localBody.x, localBody.y, localBody.z);
+    m.rotation.y = localBody.yaw + Math.PI;
+  });
+  return (
+    <group ref={g} visible={false}>
+      <TableBot skin={skin} scale={0.6 * ((NET.kind === "pvp" || NET.kind === "lobby") ? 3 : 1)} emitLight lightIntensity={1.3} />
+    </group>
+  );
+}
+
 export function World() {
   const { camera } = useThree();
   const settings = useSettings();
@@ -342,6 +364,8 @@ export function World() {
     G.hurtFlash = 0.25;
     if (G.playerHp <= 0 && G.mode === "pvp") {
       G.pvpDead = true;
+      G.freecam = false;
+      G.freecamSpeedIdx = 0;
       reportDeath();
       return;
     }
@@ -359,6 +383,8 @@ export function World() {
       // Lobby PvP: 5-second respawn delay
       if (NET.kind === "lobby") {
         G.pvpDead = true;
+        G.freecam = false;
+        G.freecamSpeedIdx = 0;
         G.lobbyRespawnT = LOBBY_RESPAWN;
         G.respawnMsg = LOBBY_RESPAWN;
         return;
@@ -595,6 +621,11 @@ export function World() {
         G.firing = false;
         G.scoped = false;
         keys.current = {};
+        // Esc while freecam: leave freecam instead of opening pause over a frozen sim
+        if (G.freecam) {
+          G.freecam = false;
+          G.freecamSpeedIdx = 0;
+        }
       }
     };
     document.addEventListener("pointerlockchange", onLock);
@@ -612,7 +643,7 @@ export function World() {
       const wasDown = keys.current[e.code];
       keys.current[e.code] = true;
       // Freecam toggle (lobby & training only)
-      if (e.code === "KeyX" && !wasDown && !e.repeat && G.phase === "playing" && (G.mode === "training" || NET.kind === "lobby")) {
+      if (e.code === "KeyX" && !wasDown && !e.repeat && G.phase === "playing" && (G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.mode === "pvp")) {
         G.freecam = !G.freecam;
         if (!G.freecam) G.freecamSpeedIdx = 0;
         return;
@@ -880,34 +911,10 @@ export function World() {
       return;
     }
 
-    // --- freecam (lobby & training) ---
-    if (G.freecam && G.phase === "playing" && (G.mode === "training" || NET.kind === "lobby")) {
-      const spd = FREECAM_SPEEDS[G.freecamSpeedIdx] ?? 44;
-      const forward = new THREE.Vector3();
-      cam.getWorldDirection(forward);
-      const right = new THREE.Vector3().crossVectors(forward, cam.up).normalize();
-      const move = new THREE.Vector3();
-      if (keys.current["KeyW"] || keys.current[SETTINGS.keys.forward]) move.add(forward);
-      if (keys.current["KeyS"] || keys.current[SETTINGS.keys.back]) move.sub(forward);
-      if (keys.current["KeyA"] || keys.current[SETTINGS.keys.left]) move.sub(right);
-      if (keys.current["KeyD"] || keys.current[SETTINGS.keys.right]) move.add(right);
-      if (move.lengthSq() > 0) {
-        move.normalize().multiplyScalar(spd * dt);
-        cam.position.add(move);
-      }
-      // clamp to solid map edge (ROOM.r)
-      const flat = Math.hypot(cam.position.x, cam.position.z);
-      const maxR = ROOM.r - 2;
-      if (flat > maxR) {
-        const k = maxR / flat;
-        cam.position.x *= k;
-        cam.position.z *= k;
-      }
-      cam.position.y = THREE.MathUtils.clamp(cam.position.y, 1, ROOM.h - 2);
-      return;
-    }
+    // --- freecam movement runs after sim so physics keep going; camera is overridden below ---
+    const freecamOn = G.freecam && G.phase === "playing" && (G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp");
 
-    const engaged = G.locked || NET.online; // online games never pause
+    const engaged = G.locked || NET.online || G.freecam; // freecam keeps sim running
     if (G.phase === "playing" && engaged && !G.frozen && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
     const active = G.phase === "playing" && engaged && !G.frozen && !G.pvpDead && !G.campaignDead && G.countdown <= 0.6;
     G.hitFlash = Math.max(0, G.hitFlash - dt);
@@ -970,7 +977,7 @@ export function World() {
       if (k[SETTINGS.keys.back]) wish.sub(f);
       if (k[SETTINGS.keys.right]) wish.add(rgt);
       if (k[SETTINGS.keys.left]) wish.sub(rgt);
-      if (stunned) wish.set(0, 0, 0);
+      if (stunned || freecamOn) wish.set(0, 0, 0);
       if (wish.lengthSq()) wish.normalize();
       const space = !!k[SETTINGS.keys.jump];
 
@@ -1107,8 +1114,10 @@ export function World() {
       const slamTier = SLAM_TIERS.find((tier) => p.y - sup < tier.maxH) ?? SLAM_TIERS[SLAM_TIERS.length - 1]!;
       G.slamAoe = slamTier.d / WORLD_UNITS_PER_METER;
       G.shake = Math.max(0, G.shake - dt * 1.5);
-      cam.position.set(p.x, p.y + EYE, p.z);
-      if (G.shake > 0 && SETTINGS.screenShake) cam.position.add(tmpV.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(G.shake * 2));
+      if (!freecamOn) {
+        cam.position.set(p.x, p.y + EYE, p.z);
+        if (G.shake > 0 && SETTINGS.screenShake) cam.position.add(tmpV.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(G.shake * 2));
+      }
 
       recentPos.current.push({ t: G.time, p: p.clone() });
       while (recentPos.current.length > 1 && recentPos.current[0]!.t < G.time - 0.4) recentPos.current.shift();
@@ -1686,7 +1695,39 @@ export function World() {
     MAP.blues = blues.flatMap((u) => (u.alive ? [u.pos.x, u.pos.z] : []));
     MAP.health = health.flatMap((h) => (h.active ? [h.pos.x, h.pos.z] : []));
     MAP.peers = [...NET.peers.values()].flatMap((q) => (q.dead ? [] : [q.x, q.z]));
-    if (NET.online && G.phase === "playing") sendPose(pos.current.x, pos.current.y, pos.current.z, MAP.yaw);
+    localBody.show = freecamOn && !G.pvpDead && !G.campaignDead;
+    localBody.x = pos.current.x;
+    localBody.y = pos.current.y;
+    localBody.z = pos.current.z;
+    if (!freecamOn) localBody.playerYaw = MAP.yaw;
+    localBody.yaw = freecamOn ? localBody.playerYaw : MAP.yaw;
+
+    // freecam camera: world sim already ran; only the view is detached
+    if (freecamOn) {
+      const spd = FREECAM_SPEEDS[G.freecamSpeedIdx] ?? 44;
+      const forward = new THREE.Vector3();
+      cam.getWorldDirection(forward);
+      const right = new THREE.Vector3().crossVectors(forward, cam.up).normalize();
+      const move = new THREE.Vector3();
+      if (keys.current["KeyW"] || keys.current[SETTINGS.keys.forward]) move.add(forward);
+      if (keys.current["KeyS"] || keys.current[SETTINGS.keys.back]) move.sub(forward);
+      if (keys.current["KeyA"] || keys.current[SETTINGS.keys.left]) move.sub(right);
+      if (keys.current["KeyD"] || keys.current[SETTINGS.keys.right]) move.add(right);
+      if (move.lengthSq() > 0) {
+        move.normalize().multiplyScalar(spd * dt);
+        cam.position.add(move);
+      }
+      const flat = Math.hypot(cam.position.x, cam.position.z);
+      const maxR = ROOM.r - 2;
+      if (flat > maxR) {
+        const k = maxR / flat;
+        cam.position.x *= k;
+        cam.position.z *= k;
+      }
+      cam.position.y = THREE.MathUtils.clamp(cam.position.y, 1, ROOM.h - 2);
+    }
+
+    if (NET.online && G.phase === "playing") sendPose(pos.current.x, pos.current.y, pos.current.z, freecamOn ? localBody.playerYaw : MAP.yaw);
 
     // --- splinter cones ---
     if (splI.current) {
@@ -1804,9 +1845,11 @@ export function World() {
     const L = lampIntensity(settings.timeOfDay);
     const playing = G.phase === "playing";
     if (flashRef.current) {
-      flashRef.current.visible = playing;
-      flashRef.current.position.set(pos.current.x, pos.current.y + 45, pos.current.z);
-      flashRef.current.intensity = L * 0.4; // full lamp strength blows out the glossy floor at point-blank range
+      flashRef.current.visible = playing && !G.campaignDead;
+      flashRef.current.position.set(pos.current.x, pos.current.y + 4.5, pos.current.z);
+      flashRef.current.color.set(SKIN.lightColor);
+      flashRef.current.intensity = L * 0.55; // table light from skin
+      flashRef.current.distance = 220;
     }
     // effects: explosions (shots, bombs, ground pounds), the flying bomb, then player bullets
     const fx: [THREE.Vector3, number][] = [];
@@ -1852,6 +1895,8 @@ export function World() {
       </group>
       <HomeShowcase />
       <RemotePlayers />
+      {/* Own table body — visible in freecam so you can see your model + light */}
+      <LocalFreecamBody />
       <instancedMesh ref={topI} args={[undefined, undefined, TABLE_POOL]} frustumCulled={false} castShadow>
         <boxGeometry args={[6, 0.5, 4]} />
         <meshStandardMaterial map={wood} roughness={0.3} metalness={0.08} envMapIntensity={2} />

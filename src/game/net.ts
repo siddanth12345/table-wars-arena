@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { setTodOverride, type TimeOfDay } from "./settings";
 import { displayName, getAccount, lookupUsername } from "./account";
 import { G, goHome, resetGame, type Mode } from "./state";
+import { SKIN, type Skin } from "./skins";
 
 /**
  * Online play runs on realtime channels. Each player's browser simulates its own
@@ -11,7 +12,7 @@ import { G, goHome, resetGame, type Mode } from "./state";
  * (map pick, colours, scoring, rounds) and everyone follows the host's calls.
  */
 
-export type Peer = { id: string; name: string; x: number; y: number; z: number; yaw: number; hp: number; dead: boolean; t: number };
+export type Peer = { id: string; name: string; x: number; y: number; z: number; yaw: number; hp: number; dead: boolean; t: number; skin?: Skin };
 export type Kind = "pvp" | "lobby" | "coop";
 export type Invite = { id: string; kind: "party" | "lobby"; from: string; target: string; t: number };
 export type PartyMember = { id: string; name: string; leader: boolean };
@@ -129,8 +130,9 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
   ch.on("broadcast", { event: "pose" }, ({ payload }) => {
     const p = payload as Peer;
     const cur = NET.peers.get(p.id);
-    NET.peers.set(p.id, { ...p, name: cur?.name ?? NET.names[p.id] ?? "player", t: performance.now() });
-    if (!cur) bump();
+    const skinChanged = JSON.stringify(cur?.skin) !== JSON.stringify(p.skin);
+    NET.peers.set(p.id, { ...p, name: cur?.name ?? NET.names[p.id] ?? "player", t: performance.now(), skin: p.skin ?? cur?.skin });
+    if (!cur || skinChanged) bump();
   });
   ch.on("broadcast", { event: "hit" }, ({ payload }) => {
     if (payload.to !== id) return;
@@ -204,7 +206,7 @@ export function sendPose(x: number, y: number, z: number, yaw: number) {
   const now = performance.now();
   if (now - lastPose < 100) return;
   lastPose = now;
-  send("pose", { id: myId(), x, y, z, yaw, hp: G.playerHp, dead: G.pvpDead || G.campaignDead });
+  send("pose", { id: myId(), x, y, z, yaw, hp: G.playerHp, dead: G.pvpDead || G.campaignDead, skin: SKIN });
 }
 
 export function hitPeer(to: string, dmg: number, stun = false) {

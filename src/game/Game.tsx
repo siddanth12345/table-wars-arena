@@ -7,8 +7,10 @@ import { Environment, Lightformer } from "@react-three/drei";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { World } from "./World";
-import { G, MAG, PARRY_CD, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial } from "./state";
+import { G, MAG, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial } from "./state";
 import { SkinsPanel } from "./SkinsPanel";
+import { TouchControls } from "./TouchControls";
+import { isTouchDevice } from "./mobileInput";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
 import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
@@ -234,17 +236,28 @@ function HUD() {
       {playing && (
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
           <div className="relative h-8 w-8">
-            <div className="absolute left-1/2 top-0 h-2.5 w-0.5 -translate-x-1/2 bg-crosshair" />
-            <div className="absolute bottom-0 left-1/2 h-2.5 w-0.5 -translate-x-1/2 bg-crosshair" />
-            <div className="absolute left-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2 bg-crosshair" />
-            <div className="absolute right-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2 bg-crosshair" />
-            <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-crosshair" />
+            {(() => {
+              const mode = G.crosshair;
+              const color = mode === "enemy" ? "#3a9eff" : mode === "grapple" ? "#f5d76e" : "var(--crosshair)";
+              const rot = mode === "enemy" ? "rotate-45" : "rotate-0";
+              const anim = mode === "enemy" ? "transition-transform duration-150" : "transition-all duration-150";
+              return (
+                <div className={`absolute inset-0 ${anim} ${rot}`} style={{ color }}>
+                  <div className="absolute left-1/2 top-0 h-2.5 w-0.5 -translate-x-1/2" style={{ background: color }} />
+                  <div className="absolute bottom-0 left-1/2 h-2.5 w-0.5 -translate-x-1/2" style={{ background: color }} />
+                  <div className="absolute left-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2" style={{ background: color }} />
+                  <div className="absolute right-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2" style={{ background: color }} />
+                  <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: color }} />
+                </div>
+              );
+            })()}
             {G.hitFlash > 0 && <div className="absolute -inset-2 rotate-45 border-2 border-crosshair" />}
           </div>
         </div>
       )}
 
       <MiniMap />
+      {G.isMobile && <TouchControls />}
       <div className="absolute left-6 top-6 w-72 space-y-3 rounded bg-hud-panel p-3 text-xs font-bold uppercase tracking-widest">
         <div className="flex h-28 items-stretch gap-5">
           <div className="flex min-w-0 flex-1 flex-col justify-between">
@@ -285,7 +298,7 @@ function HUD() {
         <Bar label="Your Health" value={G.playerHp} max={cfg.maxHp()} tone="crosshair" />
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold uppercase tracking-widest">
           <span className={G.buff > 0 ? "text-shield" : ""}>
-            [{kl("parry")}] Parry {G.buff > 0 ? `POWER ${G.buff.toFixed(1)}s` : G.parryLocked ? "COMPROMISED" : G.parryWin > 0 ? "ACTIVE" : G.parryCd > 0 ? G.parryCd.toFixed(1) : "ready"}
+            [{kl("parry")}] Parry {G.buff > 0 ? `POWER ${G.buff.toFixed(1)}s` : G.parryLocked ? "COMPROMISED" : G.parryWin > 0 ? "ACTIVE" : G.parryCd > 0 ? `${G.parryCd.toFixed(1)}s` : "ready"} · hit 4s / miss 7s
           </span>
           <span>[{kl("dash")}] Dash {G.dashCd > 0 ? G.dashCd.toFixed(1) : "ready"}</span>
           <span>[{kl("bomb")}] Bomb {G.bombCd > 0 ? G.bombCd.toFixed(1) : "ready"}</span>
@@ -631,6 +644,41 @@ function WinScreen() {
   );
 }
 
+const MOBILE_TUT = [
+  { title: "Move", text: "Left stick moves your table. Right stick looks around." },
+  { title: "Fire ⦿", text: "Hold fire to shoot. Double-tap fire to throw a bomb." },
+  { title: "Jump ⬆", text: "Tap jump to jump. Double-tap jump when the crosshair is yellow to grapple." },
+  { title: "Dash ⇢", text: "Dash auto-jumps on the ground. Tap again near landing to bunny-hop (no air-jump cost)." },
+  { title: "Reload / Slam ↻⬇", text: "On the ground: reload. In the air: slam. After slam land, tap again to bounce." },
+  { title: "Parry ⛨", text: "Tap parry just before a bullet hits. Success = 4s cooldown, miss = 7s." },
+  { title: "Crosshair", text: "Blue + tilted = enemy under aim. Yellow = can grapple. Good luck!" },
+];
+
+function MobileTutorial() {
+  useTick(200);
+  if (!G.isMobile || !G.mobileTut || G.phase !== "playing") return null;
+  const step = MOBILE_TUT[G.mobileTutStep] ?? MOBILE_TUT[0]!;
+  return (
+    <div className="pointer-events-auto absolute inset-x-0 bottom-36 z-40 mx-auto max-w-sm rounded-xl border-2 border-crosshair/50 bg-hud-panel/95 p-4 text-center text-hud shadow-2xl">
+      <div className="text-xs font-black uppercase tracking-widest text-crosshair">Mobile tips · {G.mobileTutStep + 1}/{MOBILE_TUT.length}</div>
+      <div className="mt-1 text-lg font-black uppercase">{step.title}</div>
+      <p className="mt-2 text-sm opacity-90">{step.text}</p>
+      <button
+        type="button"
+        className="mt-3 rounded bg-crosshair px-6 py-2 text-sm font-black uppercase text-hud-ink"
+        onClick={() => {
+          if (G.mobileTutStep >= MOBILE_TUT.length - 1) {
+            G.mobileTut = false;
+            try { localStorage.setItem("tw-mobile-tut", "1"); } catch { /* ignore */ }
+          } else G.mobileTutStep++;
+        }}
+      >
+        {G.mobileTutStep >= MOBILE_TUT.length - 1 ? "Got it" : "Next"}
+      </button>
+    </div>
+  );
+}
+
 export function Game() {
   const [, force] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -651,11 +699,20 @@ export function Game() {
     try { done = localStorage.getItem("tw-tutorial-done") === "1"; } catch { /* ignore */ }
     void done;
     G.phase = "home";
+    G.isMobile = isTouchDevice();
+    if (G.isMobile) {
+      try {
+        if (localStorage.getItem("tw-mobile-tut") !== "1") {
+          G.mobileTut = true;
+          G.mobileTutStep = 0;
+        }
+      } catch { G.mobileTut = true; }
+    }
     force((n) => n + 1);
   }, []);
   return (
     <div className="gui fixed inset-0 bg-black">
-      <Canvas shadows dpr={[1, 1.75]} camera={{ position: [0, 3.2, 12], fov: 72, near: 0.1, far: 3000 }}>
+      <Canvas shadows dpr={G.isMobile ? [1, 1.25] : [1, 1.75]} camera={{ position: [0, 3.2, 12], fov: 72, near: 0.1, far: 3000 }}>
         <SceneLighting />
         <ShadowToggle />
         <World />
@@ -665,6 +722,7 @@ export function Game() {
       <TrainingMenu />
       <Home />
       <WinScreen />
+      <MobileTutorial />
       <QueueOverlay />
       <MapPick />
       <Scoreboard />

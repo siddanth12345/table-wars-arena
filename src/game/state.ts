@@ -2,7 +2,9 @@ export const MAG = 40;
 export const FIRE_INTERVAL = 5 / 24; // 24 splinters in 5s
 export const DMG = 5;
 export const PARRY_WINDOW = 1;
-export const PARRY_CD = 9; // starts on activation
+export const PARRY_CD = 7; // miss / activate cooldown
+export const PARRY_CD_HIT = 4; // successful parry cooldown
+export const PARRY_CD_MISS = 7;
 export const BUFF_TIME = 2;
 export const PARRY_DMG = 10; // damage of a parried (reflected) bullet
 export const MAX_HP = 150;
@@ -34,11 +36,12 @@ export const TUT_STEPS: { title: string; text: string; enter?: boolean }[] = [
   { title: "Jump", text: "Press SPACE to jump — then press SPACE twice more in the air (triple jump)." },
   { title: "Wallrun", text: "Jump next to a wall or furniture and HOLD SPACE to wallrun for up to 3 seconds. Land for 1 second to recharge it." },
   { title: "Dash", text: "Press Q to dash (works in the air too)." },
+  { title: "Ground pound / slam", text: "In the air, press R to SLAM (ground pound). Right after you land, press R again quickly to bounce back up to the height you slammed from. The crosshair turns blue and tilts when aimed at an attackable enemy, and yellow when you can grapple." },
   { title: "Grapple", text: "Look at a wall or furniture and HOLD C to swing on a rope." },
   { title: "Scope", text: "HOLD RIGHT CLICK to scope in, then SCROLL the mouse wheel to change zoom." },
   { title: "Brown tables", text: "Brown tables are the normal enemies — they hop around and shoot splinters. LEFT CLICK to shoot this one: your splinters explode on impact and hurt everything nearby. R reloads (on the ground). In the air, R is a GROUND POUND." },
   { title: "Bombs", text: "Press F to throw a bomb. It explodes in a big area. Blow this table up!" },
-  { title: "Parry", text: "This table shoots back! Press E right before a bullet hits you to PARRY it — the reflected shot deals 10 damage and you get a 2 second power boost (infinite ammo, 2x damage). Parry has a 9s cooldown." },
+  { title: "Parry", text: "This table shoots back! Press E right before a bullet hits you to PARRY it — the reflected shot deals 10 damage and you get a 2 second power boost (infinite ammo, 2x damage). Successful parry: 4s cooldown. Missed parry: 7s cooldown." },
   { title: "Blue tables", text: "Blue tables are fast chasers. They rush at you and explode on contact. Shoot them before they reach you!" },
   { title: "The Boss", text: "After you clear every table, the huge RED boss drops from the ceiling (stay out of the red circle!). He shoots, drops swords that stun you, stomps out expanding shockwaves you must JUMP over, and summons minions. 5 seconds in, your parry gets COMPROMISED. Press ENTER to continue.", enter: true },
   { title: "Party campaign revives", text: "In party campaign: when you die you stay dead. Teammates can revive you by collecting 7 player shards. Two shards spawn every 3 seconds and despawn 2 seconds later. First player to die is revived first. If the whole team dies, the run restarts — or restarts at the boss checkpoint if you had reached it." },
@@ -117,7 +120,13 @@ export const G = {
   pvpDead: false,
   frozen: false,
   bossMax: BOSS_HITS,
-  tut: { enter: false, dashed: false, zoomed: false, bombed: false },
+  tut: { enter: false, dashed: false, zoomed: false, bombed: false, slammed: false },
+  /** Crosshair feedback: normal | enemy (blue tilt) | grapple (yellow) */
+  crosshair: "normal" as "normal" | "enemy" | "grapple",
+  canGrapple: false,
+  isMobile: false,
+  mobileTut: false,
+  mobileTutStep: 0,
   /** Party campaign: local player is waiting for a revive. */
   campaignDead: false,
   /** Shard boxes collected toward next revive (0..SHARD_NEED). */
@@ -141,7 +150,8 @@ export function resetGame(mode: Mode = G.mode) {
     hitFlash: 0, hurtFlash: 0, parryFlash: 0, redFlash: 0, shake: 0, alive: 1, bluesAlive: 0, kills: 0, capReached: false,
     bossWarn: 0, bossHits: 0, bossTime: 0, parryLocked: false, compromisedT: 0, stun: 0, bombBig: 0, countdown: 0,
     shots: 0, hits: 0, parries: 0, time: 0, firing: false, scoped: false, respawnMsg: 0, tutStep: 0,
-    tut: { enter: false, dashed: false, zoomed: false, bombed: false },
+    tut: { enter: false, dashed: false, zoomed: false, bombed: false, slammed: false },
+    crosshair: "normal", canGrapple: false, mobileTut: false, mobileTutStep: 0,
     trainMenu: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
     campaignDead: false, shardProgress: 0, reviveQueue: [], freecam: false, freecamSpeedIdx: 0, lobbyRespawnT: 0, onlineTut: false, diedThisRun: [],
   });

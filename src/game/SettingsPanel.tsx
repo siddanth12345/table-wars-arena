@@ -53,6 +53,44 @@ function Switch({ on, onChange, a, b }: { on: boolean; onChange: (v: boolean) =>
   );
 }
 
+function MobileLayoutEditor({ draft, setDraft, setSaved }: { draft: Settings; setDraft: (fn: (d: Settings) => Settings) => void; setSaved: (v: boolean) => void }) {
+  const layout = draft.mobileLayout ?? DEFAULT_MOBILE_LAYOUT;
+  const labels: Record<string, string> = { move: "Move", look: "Look", fire: "⦿", jump: "⬆", dash: "⇢", reload: "↻", parry: "⛨", bomb: "⬤" };
+  return (
+    <div className="relative mx-auto h-56 w-full max-w-md rounded-xl border-2 border-hud/30 bg-black/40">
+      {(Object.keys(labels) as (keyof MobileLayout)[]).map((id) => {
+        const pos = layout[id] ?? DEFAULT_MOBILE_LAYOUT[id];
+        return (
+          <div
+            key={id}
+            className="absolute flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 cursor-grab items-center justify-center rounded-full border border-white/40 bg-black/60 text-xs font-black active:cursor-grabbing"
+            style={{ left: `${pos.x * 100}%`, bottom: `${pos.y * 100}%` }}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              const parent = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+              const move = (ev: PointerEvent) => {
+                const x = Math.min(0.95, Math.max(0.05, (ev.clientX - parent.left) / parent.width));
+                const y = Math.min(0.95, Math.max(0.05, 1 - (ev.clientY - parent.top) / parent.height));
+                setSaved(false);
+                setDraft((d) => ({ ...d, mobileLayout: { ...d.mobileLayout, [id]: { x, y } } }));
+              };
+              const up = () => {
+                window.removeEventListener("pointermove", move);
+                window.removeEventListener("pointerup", up);
+              };
+              window.addEventListener("pointermove", move);
+              window.addEventListener("pointerup", up);
+            }}
+          >
+            {labels[id]}
+          </div>
+        );
+      })}
+      <button type="button" className="absolute bottom-1 right-1 rounded border border-white/30 px-2 py-0.5 text-[10px] font-bold uppercase" onClick={() => { setSaved(false); setDraft((d) => ({ ...d, mobileLayout: { ...DEFAULT_MOBILE_LAYOUT } })); }}>Reset layout</button>
+    </div>
+  );
+}
+
 export function SettingsPanel() {
   const applied = useSettings();
   const [draft, setDraft] = useState<Settings>(() => structuredClone(applied));
@@ -117,22 +155,40 @@ export function SettingsPanel() {
         <Row label="Shadows"><Switch on={draft.shadows} onChange={(v) => set("shadows", v)} a="On" b="Off" /></Row>
         <Row label="Screen shake"><Switch on={draft.screenShake} onChange={(v) => set("screenShake", v)} a="On" b="Off" /></Row>
         <Row label="Shooting"><Switch on={draft.fireMode === "hold"} onChange={(v) => set("fireMode", v ? "hold" : "toggle")} a="Hold" b="Toggle" /></Row>
+        <Row label={`Aim assist · ${Math.round((draft.aimAssist ?? 0) * 100)}%`}>
+          <input type="range" min={0} max={0.45} step={0.01} value={draft.aimAssist ?? 0} onChange={(e) => set("aimAssist", Number(e.target.value))} className="w-56 accent-[var(--crosshair)]" />
+        </Row>
+        <Row label="Auto bunny-hop"><Switch on={draft.autoBunnyHop !== false} onChange={(v) => set("autoBunnyHop", v)} a="On" b="Off" /></Row>
+        {(G.isMobile || isTouchDevice()) && (
+          <Row label={`Mobile look sens · ${(draft.mobileSensitivity ?? 1).toFixed(2)}`}>
+            <input type="range" min={0.5} max={2.5} step={0.05} value={draft.mobileSensitivity ?? 1} onChange={(e) => set("mobileSensitivity", Number(e.target.value))} className="w-56 accent-[var(--crosshair)]" />
+          </Row>
+        )}
       </div>
 
-      <div className="mb-2 mt-5 text-xs font-bold uppercase tracking-widest opacity-70">Key bindings · click, then press a key (Esc cancels)</div>
-      <div className="grid grid-cols-2 gap-x-6">
-        {ACTIONS.map((a) => (
-          <div key={a.id} className="flex items-center justify-between border-b border-hud/15 py-2 text-sm">
-            <span>{a.label}</span>
-            <button
-              onClick={() => setBinding(a.id)}
-              className={`min-w-20 rounded border-2 px-3 py-1 font-black ${binding === a.id ? "animate-pulse border-crosshair text-crosshair" : "border-hud/40"}`}
-            >
-              {binding === a.id ? "Press…" : keyLabel(draft.keys[a.id])}
-            </button>
+      {(G.isMobile || isTouchDevice()) ? (
+        <>
+          <div className="mb-2 mt-5 text-xs font-bold uppercase tracking-widest opacity-70">Mobile layout · drag controls on the preview</div>
+          <MobileLayoutEditor draft={draft} setDraft={setDraft} setSaved={setSaved} />
+        </>
+      ) : (
+        <>
+          <div className="mb-2 mt-5 text-xs font-bold uppercase tracking-widest opacity-70">Key bindings · click, then press a key (Esc cancels)</div>
+          <div className="grid grid-cols-2 gap-x-6">
+            {ACTIONS.map((a) => (
+              <div key={a.id} className="flex items-center justify-between border-b border-hud/15 py-2 text-sm">
+                <span>{a.label}</span>
+                <button
+                  onClick={() => setBinding(a.id)}
+                  className={`min-w-20 rounded border-2 px-3 py-1 font-black ${binding === a.id ? "animate-pulse border-crosshair text-crosshair" : "border-hud/40"}`}
+                >
+                  {binding === a.id ? "Press…" : keyLabel(draft.keys[a.id])}
+                </button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button

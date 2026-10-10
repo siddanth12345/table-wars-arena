@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSettings, type MobileLayout } from "./settings";
 import { MOB } from "./mobileInput";
 import { G } from "./state";
+import { NET } from "./net";
 import { useSyncExternalStore } from "react";
 
 function useTick(ms: number) {
@@ -96,12 +97,49 @@ export function TouchControls() {
     return () => { MOB.active = false; };
   }, []);
 
-  if (G.phase !== "playing" || G.freecam && !G.campaignDead) {
-    // still show when freecam dead spectate
-  }
+  if (G.phase !== "playing") return null;
+  if (G.mobilePaused) return null;
+
+  const canFreecam = G.mode === "training" || (typeof NET !== "undefined" && (NET.kind === "lobby" || NET.kind === "pvp")) || G.campaignDead;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30 select-none" style={{ touchAction: "none" }}>
+      {/* Pause */}
+      <button
+        type="button"
+        aria-label="Pause"
+        className="pointer-events-auto absolute right-3 top-3 z-40 flex h-11 w-11 items-center justify-center rounded-full border-2 border-white/40 bg-black/50 text-xl font-black text-white touch-none"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          G.mobilePaused = true;
+          G.locked = false;
+        }}
+      >
+        ❚❚
+      </button>
+      {/* Freecam camera toggle */}
+      {canFreecam && (
+        <button
+          type="button"
+          aria-label="Freecam"
+          className={`pointer-events-auto absolute left-3 top-3 z-40 flex h-11 w-11 items-center justify-center rounded-full border-2 text-xl font-black touch-none ${
+            G.freecam ? "border-yellow-300 bg-yellow-400/40 text-yellow-100" : "border-white/40 bg-black/50 text-white"
+          }`}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (G.campaignDead) {
+              G.freecam = true;
+              return;
+            }
+            G.freecam = !G.freecam;
+            if (!G.freecam) G.freecamSpeedIdx = 0;
+          }}
+        >
+          📷
+        </button>
+      )}
       <Stick id="move" onChange={(x, y) => { MOB.moveX = x; MOB.moveY = -y; }} />
       <Stick
         id="look"

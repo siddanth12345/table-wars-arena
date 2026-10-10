@@ -178,7 +178,7 @@ function HUD() {
   const step = tutList[G.tutStep];
   return (
     <div className="pointer-events-none fixed inset-0 z-10 select-none font-mono text-hud">
-      {playing && G.locked && G.countdown <= 0.6 && !G.scoped && (
+      {playing && (G.locked || G.isMobile) && G.countdown <= 0.6 && !G.scoped && (
         <div className="absolute inset-0 overflow-hidden transition-opacity duration-500" aria-hidden="true" style={{ opacity: Math.max(0, Math.min(1, (G.speed - 28) / 80)) }}>
           {([-1, 1] as const).flatMap((side) => Array.from({ length: Math.min(8, 2 + Math.floor((G.speed - 38) / 24)) }, (_, i) => {
             const intensity = Math.max(0, Math.min(1, (G.speed - 28) / 150));
@@ -196,7 +196,7 @@ function HUD() {
       {G.redFlash > 0 && <div className="absolute inset-0 bg-destructive/40" />}
       {(G.buff > 0 || G.parryFlash > 0) && <div className="absolute inset-0 shadow-[inset_0_0_120px_var(--shield)]" />}
       {G.scoped && playing && <div className="absolute inset-0 bg-[radial-gradient(circle,transparent_32%,var(--scope)_34%)]" />}
-      {playing && G.locked && G.countdown > 0 && (
+      {playing && (G.locked || G.isMobile) && G.countdown > 0 && (
         <div className="absolute inset-0 flex items-center justify-center text-9xl font-black drop-shadow-[0_4px_0_rgba(0,0,0,0.6)]">
           {G.countdown > 0.6 ? Math.ceil(G.countdown - 0.6) : "GO!"}
         </div>
@@ -363,8 +363,10 @@ function startTutorial() {
   lockPointer();
 }
 function resume() {
+  G.mobilePaused = false;
   G.countdown = 3.6;
-  lockPointer();
+  if (!G.isMobile) lockPointer();
+  else G.locked = true;
 }
 
 const BOTS: [string, string, string][] = [
@@ -516,8 +518,11 @@ function Menu() {
       </div>
     );
   }
+  // Mobile has no pointer-lock; treat as engaged unless user opens pause
+  if (G.isMobile && !G.mobilePaused && phase === "playing") return null;
   if (phase !== "playing" || G.locked || G.trainMenu || G.freecam) return null;
-  if (NET.online && !showSettings) return <OnlinePause onSettings={() => setShowSettings(true)} />;
+  if (NET.online && !showSettings && !G.isMobile) return <OnlinePause onSettings={() => setShowSettings(true)} />;
+  if (NET.online && !showSettings && G.isMobile && G.mobilePaused) return <OnlinePause onSettings={() => setShowSettings(true)} />;
   const tut = G.mode === "tutorial";
   const train = G.mode === "training";
   if (showSettings) {

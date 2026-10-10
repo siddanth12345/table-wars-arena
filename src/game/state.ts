@@ -127,6 +127,7 @@ export const G = {
   isMobile: false,
   mobileTut: false,
   mobileTutStep: 0,
+  mobilePaused: false,
   /** Party campaign: local player is waiting for a revive. */
   campaignDead: false,
   /** Shard boxes collected toward next revive (0..SHARD_NEED). */
@@ -151,7 +152,7 @@ export function resetGame(mode: Mode = G.mode) {
     bossWarn: 0, bossHits: 0, bossTime: 0, parryLocked: false, compromisedT: 0, stun: 0, bombBig: 0, countdown: 0,
     shots: 0, hits: 0, parries: 0, time: 0, firing: false, scoped: false, respawnMsg: 0, tutStep: 0,
     tut: { enter: false, dashed: false, zoomed: false, bombed: false, slammed: false },
-    crosshair: "normal", canGrapple: false, mobileTut: false, mobileTutStep: 0,
+    crosshair: "normal", canGrapple: false, mobileTut: false, mobileTutStep: 0, mobilePaused: false,
     trainMenu: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
     campaignDead: false, shardProgress: 0, reviveQueue: [], freecam: false, freecamSpeedIdx: 0, lobbyRespawnT: 0, onlineTut: false, diedThisRun: [],
   });

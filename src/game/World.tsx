@@ -1018,7 +1018,8 @@ const kd = (e: KeyboardEvent) => {
       G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.campaignDead || (NET.kind === "lobby" && G.pvpDead)
     );
 
-    const engaged = G.locked || NET.online || G.freecam || MOB.active; // mobile has no pointer lock
+    if ((MOB.active || G.isMobile) && G.phase === "playing" && !G.mobilePaused) G.locked = true;
+    const engaged = G.locked || NET.online || G.freecam || MOB.active || G.isMobile; // mobile has no pointer lock
     if (G.phase === "playing" && engaged && !G.frozen && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
     const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;
@@ -1997,27 +1998,38 @@ const kd = (e: KeyboardEvent) => {
 
     // freecam camera: world sim already ran; only the view is detached
     if (freecamOn) {
+      if (MOB.active && (MOB.lookDX || MOB.lookDY)) {
+        const euler = new THREE.Euler(0, 0, 0, "YXZ");
+        euler.setFromQuaternion(cam.quaternion);
+        euler.y -= MOB.lookDX * 0.045 * SETTINGS.sensitivity;
+        euler.x -= MOB.lookDY * 0.035 * SETTINGS.sensitivity;
+        euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.x));
+        cam.quaternion.setFromEuler(euler);
+        MOB.lookDX = 0;
+        MOB.lookDY = 0;
+      }
       const spd = FREECAM_SPEEDS[G.freecamSpeedIdx] ?? 44;
       const forward = new THREE.Vector3();
       cam.getWorldDirection(forward);
       const right = new THREE.Vector3().crossVectors(forward, cam.up).normalize();
       const move = new THREE.Vector3();
-      if (keys.current["KeyW"] || keys.current[SETTINGS.keys.forward]) move.add(forward);
-      if (keys.current["KeyS"] || keys.current[SETTINGS.keys.back]) move.sub(forward);
-      if (keys.current["KeyA"] || keys.current[SETTINGS.keys.left]) move.sub(right);
-      if (keys.current["KeyD"] || keys.current[SETTINGS.keys.right]) move.add(right);
+      if (keys.current["KeyW"] || keys.current[SETTINGS.keys.forward] || (MOB.active && MOB.moveY > 0.2)) move.add(forward);
+      if (keys.current["KeyS"] || keys.current[SETTINGS.keys.back] || (MOB.active && MOB.moveY < -0.2)) move.sub(forward);
+      if (keys.current["KeyA"] || keys.current[SETTINGS.keys.left] || (MOB.active && MOB.moveX < -0.2)) move.sub(right);
+      if (keys.current["KeyD"] || keys.current[SETTINGS.keys.right] || (MOB.active && MOB.moveX > 0.2)) move.add(right);
       if (move.lengthSq() > 0) {
         move.normalize().multiplyScalar(spd * dt);
         cam.position.add(move);
       }
+      // Freecam can leave the room into the neighborhood (soft outer bound only)
       const flat = Math.hypot(cam.position.x, cam.position.z);
-      const maxR = ROOM.r - 2;
+      const maxR = ROOM.r * 3.5;
       if (flat > maxR) {
         const k = maxR / flat;
         cam.position.x *= k;
         cam.position.z *= k;
       }
-      cam.position.y = THREE.MathUtils.clamp(cam.position.y, 1, ROOM.h - 2);
+      cam.position.y = THREE.MathUtils.clamp(cam.position.y, 0.5, ROOM.h + 80);
     }
 
     if (NET.online && G.phase === "playing") sendPose(pos.current.x, pos.current.y, pos.current.z, freecamOn ? localBody.playerYaw : MAP.yaw);

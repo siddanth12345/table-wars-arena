@@ -206,7 +206,7 @@ export function TableBot({
       </mesh>
       <Legs design={skin.legDesign} color={skin.tablePrimary} />
       <Eyes design={skin.eyeDesign} color={skin.eyeColor} />
-      <Decorations kind={skin.decoration} color={skin.decorationColor} />
+      <Decoration kind={skin.decoration} color={skin.decorationColor} />
       {emitLight && (
         <pointLight
           position={[0, 4.5, 0]}

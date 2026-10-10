@@ -16,9 +16,11 @@ export const TABLE_CAP = 30;
 export const BOSS_HITS = 200;
 export const BOSS_WARN = 10;
 export const PARRY_LOCK_AT = 5; // seconds into the boss fight
-export const SHARD_NEED = 5;
+export const SHARD_NEED = 7;
 export const SHARD_INTERVAL = 3;
-export const SHARD_LIFE = 3;
+export const SHARD_LIFE = 2;
+export const SHARD_SPAWN_N = 2; // how many spawn each interval
+/** Shard pickup radius = 3× health-ring radius (set in World from HEALTH_R). */
 export const LOBBY_RESPAWN = 5;
 export const FREECAM_SPEEDS = [44, 100, 200, 300, 400] as const;
 
@@ -39,7 +41,7 @@ export const TUT_STEPS: { title: string; text: string; enter?: boolean }[] = [
   { title: "Parry", text: "This table shoots back! Press E right before a bullet hits you to PARRY it — the reflected shot deals 10 damage and you get a 2 second power boost (infinite ammo, 2x damage). Parry has a 9s cooldown." },
   { title: "Blue tables", text: "Blue tables are fast chasers. They rush at you and explode on contact. Shoot them before they reach you!" },
   { title: "The Boss", text: "After you clear every table, the huge RED boss drops from the ceiling (stay out of the red circle!). He shoots, drops swords that stun you, stomps out expanding shockwaves you must JUMP over, and summons minions. 5 seconds in, your parry gets COMPROMISED. Press ENTER to continue.", enter: true },
-  { title: "Party campaign revives", text: "In party campaign: when you die you stay dead. Teammates can revive you by collecting 5 player shards. Shard boxes spawn every 3 seconds and despawn 3 seconds later. If the whole team dies, the run restarts — or restarts at the boss checkpoint if you had reached it." },
+  { title: "Party campaign revives", text: "In party campaign: when you die you stay dead. Teammates can revive you by collecting 7 player shards. Two shards spawn every 3 seconds and despawn 2 seconds later. First player to die is revived first. If the whole team dies, the run restarts — or restarts at the boss checkpoint if you had reached it." },
   { title: "Freecam (lobby & training)", text: "In Lobby and Training, press X to enter freecam (X again to exit). While in freecam: W flies toward where you're looking, S goes back, A/D strafe, scroll wheel zooms. Base speed is 44 (same as your table). Left-click cycles speed: 100 → 200 → 300 → 400 → back to 44. Freecam stops at the solid map edge — you can pass through walls and go outside into the neighborhood, but not past the map boundary." },
   { title: "Online modes", text: "From the home Play menu you can queue 1v1, create/join a Lobby with a 6-letter code, or party up with invites. In a party the leader starts Campaign, Training, 1v1, or Lobby for everyone. Party campaign shares enemies (host simulates). When you're partied, the Tutorial button becomes the Online tutorial covering 1v1, lobby, party campaign, invites, codes, and revives. Press ENTER to finish.", enter: true },
 ];
@@ -50,8 +52,8 @@ export const ONLINE_TUT_STEPS: { title: string; text: string; enter?: boolean }[
   { title: "Parties & invites", text: "Open Play → Party to invite by username. Guests get names like guest482913 and can be invited. The party leader starts modes; members wait. Disband or leave from the same menu." },
   { title: "Lobby codes", text: "Create Lobby to get a 6-letter code, or type a code to join. Lobby is free-for-all PvP with a 5-second respawn delay after you die." },
   { title: "1v1", text: "Queue 1v1 (or start 1v1 from a party). Both players pick a map — same pick wins, different picks are random. First to 3 wins. On the win screen both cameras zoom into the winner." },
-  { title: "Party campaign", text: "Campaign with party shares the host's enemies. When you die you stay dead until a teammate collects 5 player shards. Shard boxes spawn every 3s and last 3s. Whole team wipe restarts the run (or boss checkpoint if reached)." },
-  { title: "Revives & shards", text: "Shards replace the old health rings in party campaign. Collect 5 to bring a fallen teammate back. Your own death doesn't end the run — only a full team wipe does." },
+  { title: "Party campaign", text: "Campaign with party shares the host's enemies. When you die you stay dead until a teammate collects 7 player shards. Two spawn every 3s and last 2s. First dead player is revived first. Whole team wipe restarts the run (or boss checkpoint if reached)." },
+  { title: "Revives & shards", text: "Shards replace the old health rings in party campaign. Collect 7 to revive the teammate who has been dead the longest (FIFO). No shards spawn if nobody is waiting. Your own death doesn't end the run — only a full team wipe does." },
   { title: "Freecam", text: "In Lobby and Training press X for freecam (X to exit). W toward look direction, S back, A/D strafe, scroll to zoom. Left-click cycles speed 44→100→200→300→400→44. Clamped to the solid map edge.", enter: true },
 ];
 
@@ -120,6 +122,8 @@ export const G = {
   campaignDead: false,
   /** Shard boxes collected toward next revive (0..SHARD_NEED). */
   shardProgress: 0,
+  /** Player ids waiting for revive, oldest first (FIFO). */
+  reviveQueue: [] as string[],
   freecam: false,
   freecamSpeedIdx: 0,
   lobbyRespawnT: 0,
@@ -139,7 +143,7 @@ export function resetGame(mode: Mode = G.mode) {
     shots: 0, hits: 0, parries: 0, time: 0, firing: false, scoped: false, respawnMsg: 0, tutStep: 0,
     tut: { enter: false, dashed: false, zoomed: false, bombed: false },
     trainMenu: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
-    campaignDead: false, shardProgress: 0, freecam: false, freecamSpeedIdx: 0, lobbyRespawnT: 0, onlineTut: false, diedThisRun: [],
+    campaignDead: false, shardProgress: 0, reviveQueue: [], freecam: false, freecamSpeedIdx: 0, lobbyRespawnT: 0, onlineTut: false, diedThisRun: [],
   });
   TRAIN_Q.length = 0;
   if (mode === "training") Object.assign(G, { playerHp: TRAIN.maxHp, airJumps: TRAIN.airJumps, airDashes: TRAIN.airDashes });

@@ -89,6 +89,7 @@ export const NET_HOOKS = {
   /** lobby: a follower asked the host to spawn training enemies */
   onEspawn: (_q: { kind: string; n: number }) => {},
   onWon: () => {},
+  onRevive: (_id: string) => {},
 };
 export type EntSnap = { t: number[]; b: number[]; boss: number[] | null; stage: string; bh: number; bm: number; s: number[] };
 export type EHit = { k: "t" | "b" | "boss"; i: number; dmg: number };
@@ -143,7 +144,24 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
   ch.on("broadcast", { event: "eshot" }, ({ payload }) => { if (!NET.isHost) NET_HOOKS.onEshot(payload.b as number[]); });
   ch.on("broadcast", { event: "espawn" }, ({ payload }) => { if (NET.isHost) NET_HOOKS.onEspawn(payload as { kind: string; n: number }); });
   ch.on("broadcast", { event: "won" }, () => { if (!NET.isHost) NET_HOOKS.onWon(); });
-  ch.on("broadcast", { event: "death" }, ({ payload }) => onDeath(payload.id as string));
+  ch.on("broadcast", { event: "death" }, ({ payload }) => {
+    const id = payload.id as string;
+    if (NET.kind === "coop") {
+      if (!G.reviveQueue.includes(id)) G.reviveQueue.push(id);
+      const pr = NET.peers.get(id);
+      if (pr) pr.dead = true;
+      bump();
+      return;
+    }
+    onDeath(id);
+  });
+  ch.on("broadcast", { event: "revive" }, ({ payload }) => {
+    const id = payload.id as string;
+    G.reviveQueue = G.reviveQueue.filter((x) => x !== id);
+    NET_HOOKS.onRevive(id);
+    bump();
+  });
+  ch.on("broadcast", { event: "shards" }, ({ payload }) => { G.shardProgress = payload.n as number; });
   ch.on("broadcast", { event: "pickstart" }, ({ payload }) => beginPick(payload.ms as number));
   ch.on("broadcast", { event: "pick" }, ({ payload }) => { picks[payload.id as string] = payload.tod as TimeOfDay; });
   ch.on("broadcast", { event: "start" }, ({ payload }) => onStart(payload as StartMsg));
@@ -358,11 +376,11 @@ export function reportDeath() {
     onDeath(myId());
     return;
   }
-  // Party campaign: broadcast death so peers can mark us dead for shard revives
+  // Party campaign: broadcast death so peers queue us for FIFO shard revives
   if (NET.kind === "coop") {
-    send("death", { id: myId() });
-    const me = NET.peers.get(myId());
-    // peers track via pose.dead; local flag is G.campaignDead
+    const id = myId();
+    send("death", { id });
+    if (!G.reviveQueue.includes(id)) G.reviveQueue.push(id);
   }
 }
 

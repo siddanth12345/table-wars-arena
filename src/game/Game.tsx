@@ -127,7 +127,17 @@ function MiniMap() {
   for (let i = 0; i < MAP.tables.length; i += 2) t.push(dot(MAP.tables[i]!, MAP.tables[i + 1]!, "#22c55e", 7, "t" + i));
   for (let i = 0; i < MAP.blues.length; i += 2) t.push(dot(MAP.blues[i]!, MAP.blues[i + 1]!, "#60a5fa", 6, "u" + i));
   for (let i = 0; i < MAP.peers.length; i += 2) t.push(dot(MAP.peers[i]!, MAP.peers[i + 1]!, "#f59e0b", 9, "p" + i));
-  for (let i = 0; i < MAP.health.length; i += 2) t.push(<circle key={"h" + i} cx={MAP.health[i]} cy={MAP.health[i + 1]} r={8} fill="none" stroke="var(--crosshair)" strokeWidth={4} />);
+  const blink = Math.floor(Date.now() / 250) % 2 === 0;
+  const partyShards = NET.online && NET.kind === "coop" && G.mode === "game";
+  for (let i = 0; i < MAP.health.length; i += 2) {
+    const x = MAP.health[i]!, z = MAP.health[i + 1]!;
+    if (partyShards) {
+      if (blink) t.push(<rect key={"h" + i} x={x - 10} y={z - 10} width={20} height={20} fill="#3a9eff" stroke="#9ed0ff" strokeWidth={3} />);
+      else t.push(<rect key={"h" + i} x={x - 10} y={z - 10} width={20} height={20} fill="none" stroke="#3a9eff" strokeWidth={3} opacity={0.35} />);
+    } else {
+      t.push(<circle key={"h" + i} cx={x} cy={z} r={8} fill="none" stroke="var(--crosshair)" strokeWidth={4} />);
+    }
+  }
   const hx = MAP.px - Math.sin(MAP.yaw) * 30, hz = MAP.pz - Math.cos(MAP.yaw) * 30;
   return (
     <div className="absolute right-6 top-6 rounded-full border border-hud/30 bg-hud-panel p-1 shadow-2xl">
@@ -188,17 +198,17 @@ function HUD() {
       )}
       {G.respawnMsg > 0 && playing && (
         <div className="absolute left-1/2 top-[20%] -translate-x-1/2 rounded bg-hud-panel px-6 py-3 text-2xl font-black uppercase">
-          {G.lobbyRespawnT > 0 ? `Respawning in ${Math.ceil(G.lobbyRespawnT)}s` : G.campaignDead ? "Waiting for revive — teammates need 5 shards" : "Back to the boss checkpoint"}
+          {G.lobbyRespawnT > 0 ? `Respawning in ${Math.ceil(G.lobbyRespawnT)}s` : G.campaignDead ? "Waiting for revive — teammates need 7 shards" : "Back to the boss checkpoint"}
         </div>
       )}
       {G.campaignDead && playing && G.respawnMsg <= 0 && (
         <div className="absolute left-1/2 top-[20%] -translate-x-1/2 rounded bg-hud-panel px-6 py-3 text-center text-xl font-black uppercase">
-          You are down · shards {G.shardProgress}/{5}
+          You are down · shards {G.shardProgress}/{7}
         </div>
       )}
       {(NET.online && NET.kind === "coop" && G.mode === "game") && playing && !G.campaignDead && (
         <div className="absolute right-6 top-24 rounded bg-hud-panel px-3 py-2 text-xs font-black uppercase tracking-widest">
-          Shards {G.shardProgress}/5
+          Shards {G.shardProgress}/7
         </div>
       )}
       {G.mode === "training" && playing && !G.trainMenu && (

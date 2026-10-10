@@ -1,5 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { NET, NET_HOOKS, PVP_DMG, PVP_HITBOX, PVP_CENTER_Y, hitPeer, reportDeath, sendPose, sharesEnemies, isFollower, sendNet, enemyHitPeer, type EntSnap } from "./net";
+import { NET, NET_HOOKS, PVP_DMG, PVP_HITBOX, PVP_CENTER_Y, hitPeer, reportDeath, sendPose, sharesEnemies, isFollower, sendNet, enemyHitPeer, myId, type EntSnap } from "./net";
 import { RemotePlayers } from "./RemotePlayers";
 import { PointerLockControls } from "@react-three/drei";
 import { SETTINGS, useSettings, lampIntensity } from "./settings";
@@ -9,7 +9,7 @@ import {
   G, MAG, FIRE_INTERVAL, DMG, PARRY_WINDOW, PARRY_CD, BUFF_TIME, DASH_CD, AIR_JUMPS, AIR_DASHES,
   BOMB_CD, BOMB_CD_BUFF, TABLE_HP, TABLE_CAP, BOSS_HITS, BOSS_WARN, setLocker,
   MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, type TrainSpawn,
-  SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, LOBBY_RESPAWN, FREECAM_SPEEDS,
+  SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, SHARD_SPAWN_N, LOBBY_RESPAWN, FREECAM_SPEEDS,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
 import { createTableBot, skinKey } from "./tableBotFactory";
@@ -61,6 +61,7 @@ const HEALTH_AMOUNT = 10;
 const HEALTH_INTERVAL = 5;
 const HEALTH_LIFE = 10;
 const HEALTH_R = (TABLE_W * 1.5) / 2; // ring diameter = 1.5 table lengths
+const SHARD_R = HEALTH_R * 3; // player shards are 3× health rings
 const BULLET_AOE_R = TABLE_W / 2; // splinter blast diameter = one brown table
 const BOSS_H = 3.45 * BOSS_S; // boss table height
 const SLAM_SPEED = BOT_BULLET_SPEED * 2;
@@ -309,7 +310,7 @@ export function World() {
   const blueT = useRef(6);
   const summonT = useRef(10);
   const healthT = useRef(HEALTH_INTERVAL);
-  const health = useMemo(() => Array.from({ length: 16 }, () => ({ active: false, pos: new THREE.Vector3(), t: 0 })), []);
+  const health = useMemo(() => Array.from({ length: 24 }, () => ({ active: false, pos: new THREE.Vector3(), t: 0, isShard: false })), []);
   const slam = useRef({ on: false, fromY: 0, h: 0 });
   const bounce = useRef({ t: 0, y: 0 });
   const demoAng = useRef(0);
@@ -390,11 +391,13 @@ export function World() {
       return;
     }
     if (G.playerHp <= 0 && sharesEnemies() && G.mode === "game") {
-      // party campaign: stay dead until a teammate collects SHARD_NEED shards
+      // party campaign: stay dead until teammates collect SHARD_NEED shards (FIFO revive)
       G.campaignDead = true;
       G.playerHp = 0;
       G.respawnMsg = 2.5;
-      const name = (typeof window !== "undefined" && (window as unknown as { __tbleName?: string }).__tbleName) || "player";
+      const id = myId();
+      if (!G.reviveQueue.includes(id)) G.reviveQueue.push(id);
+      const name = NET.names[id] ?? "player";
       if (!G.diedThisRun.includes(name)) G.diedThisRun.push(name);
       reportDeath();
       return;
@@ -562,31 +565,37 @@ export function World() {
     }
   };
   // healing ring / party shard: heal, or (when full) reset the bomb cooldown. Returns true if consumed.
+  const revivePlayer = (id: string) => {
+    if (id === myId()) {
+      G.campaignDead = false;
+      G.playerHp = MAX_HP;
+      pos.current.copy(START);
+      hv.current.set(0, 0, 0);
+      vy.current = 0;
+      G.respawnMsg = 2.5;
+      G.respawnToken++;
+    }
+    const pr = NET.peers.get(id);
+    if (pr) pr.dead = false;
+    sendNet("revive", { id });
+  };
   const collectRing = (h: (typeof health)[number]) => {
     if (!h.active) return false;
-    // Party campaign: shards revive teammates (replace health rings)
-    if (sharesEnemies() && G.mode === "game") {
+    // Party campaign shards: only when someone is waiting; FIFO revive at SHARD_NEED
+    if (h.isShard && sharesEnemies() && G.mode === "game") {
       h.active = false;
+      if (G.reviveQueue.length === 0) return true;
       G.shardProgress = Math.min(SHARD_NEED, G.shardProgress + 1);
+      sendNet("shards", { n: G.shardProgress });
       if (G.shardProgress >= SHARD_NEED) {
         G.shardProgress = 0;
-        // Revive self if dead, and signal peers via net (simple: local revive; peers hear death clear on next pose)
-        if (G.campaignDead) {
-          G.campaignDead = false;
-          G.playerHp = MAX_HP;
-          pos.current.copy(START);
-          hv.current.set(0, 0, 0);
-          vy.current = 0;
-          G.respawnMsg = 2.5;
-          G.respawnToken++;
-        }
-        // Also clear dead flag for local display of peers — host path will stream poses
-        for (const pr of NET.peers.values()) {
-          if (pr.dead) pr.dead = false;
-        }
+        sendNet("shards", { n: 0 });
+        const next = G.reviveQueue.shift();
+        if (next) revivePlayer(next);
       }
       return true;
     }
+    if (h.isShard) return false;
     if (G.stage !== "boss") return false;
     if (G.playerHp < cfg.maxHp()) G.playerHp = Math.min(cfg.maxHp(), G.playerHp + HEALTH_AMOUNT);
     else if (G.bombCd > 0) G.bombCd = 0;
@@ -595,7 +604,11 @@ export function World() {
     return true;
   };
   const ringsIn = (at: THREE.Vector3, r: number) => {
-    for (const h of health) if (h.active && Math.hypot(h.pos.x - at.x, h.pos.z - at.z) < r + HEALTH_R && at.y < r + 4) collectRing(h);
+    for (const h of health) {
+      if (!h.active) continue;
+      const hr = h.isShard ? SHARD_R : HEALTH_R;
+      if (Math.hypot(h.pos.x - at.x, h.pos.z - at.z) < r + hr && at.y < r + 4) collectRing(h);
+    }
   };
   const distToBossBox = (at: THREE.Vector3) => {
     bossBox(_mn, _mx);
@@ -810,6 +823,20 @@ export function World() {
   NET_HOOKS.onHit = (d, stun) => {
     damagePlayer(d);
     if (stun && !G.pvpDead) G.stun = STUN_TIME;
+  };
+  NET_HOOKS.onRevive = (id) => {
+    G.reviveQueue = G.reviveQueue.filter((x) => x !== id);
+    if (id === myId() && G.campaignDead) {
+      G.campaignDead = false;
+      G.playerHp = MAX_HP;
+      pos.current.copy(START);
+      hv.current.set(0, 0, 0);
+      vy.current = 0;
+      G.respawnMsg = 2.5;
+      G.respawnToken++;
+    }
+    const pr = NET.peers.get(id);
+    if (pr) pr.dead = false;
   };
 
   useFrame((_, raw) => {
@@ -1227,18 +1254,21 @@ export function World() {
         }
       } else if (G.stage === "boss") {
         G.bossTime += dt;
-        healthT.current -= dt;
-        if (healthT.current <= 0) {
-          const partyShards = sharesEnemies() && G.mode === "game";
-          healthT.current += partyShards ? SHARD_INTERVAL : cfg.ringInterval(HEALTH_INTERVAL);
-          const h = health.find((item) => !item.active) ?? health[Math.floor(Math.random() * health.length)];
-          if (h) {
-            h.pos.copy(randomFloor(p));
-            h.active = true;
-            h.t = partyShards ? SHARD_LIFE : HEALTH_LIFE;
+        // Offline / non-party: normal health rings on boss only
+        if (!(sharesEnemies() && G.mode === "game")) {
+          healthT.current -= dt;
+          if (healthT.current <= 0) {
+            healthT.current += cfg.ringInterval(HEALTH_INTERVAL);
+            const h = health.find((item) => !item.active) ?? health[Math.floor(Math.random() * health.length)];
+            if (h) {
+              h.pos.copy(randomFloor(p));
+              h.active = true;
+              h.t = HEALTH_LIFE;
+              h.isShard = false;
+            }
           }
         }
-        for (const h of health) if (h.active && (h.t -= dt) <= 0) h.active = false;
+        for (const h of health) if (h.active && !h.isShard && (h.t -= dt) <= 0) h.active = false;
         if (G.bossTime >= PARRY_LOCK_AT && !G.parryLocked) {
           G.parryLocked = true;
           G.parryWin = 0;
@@ -1319,7 +1349,11 @@ export function World() {
 
       // Collect health rings only while fighting the boss; never exceed full health.
       if (G.stage === "boss") {
-        for (const h of health) if (h.active && p.y < 8 && Math.hypot(p.x - h.pos.x, p.z - h.pos.z) < HEALTH_R) collectRing(h);
+        for (const h of health) {
+          if (!h.active || p.y >= 8) continue;
+          const hr = h.isShard ? SHARD_R : HEALTH_R;
+          if (Math.hypot(p.x - h.pos.x, p.z - h.pos.z) < hr) collectRing(h);
+        }
       }
 
       // --- blue chaser tables ---
@@ -1587,10 +1621,12 @@ export function World() {
             // healing rings block player bullets
             let ringT = Infinity;
             let ringHit: (typeof health)[number] | null = null;
-            if (G.stage === "boss") for (const h of health) {
+            for (const h of health) {
               if (!h.active) continue;
-              _mn.set(h.pos.x - HEALTH_R, 0, h.pos.z - HEALTH_R);
-              _mx.set(h.pos.x + HEALTH_R, 2.5, h.pos.z + HEALTH_R);
+              if (!h.isShard && G.stage !== "boss") continue;
+              const hr = h.isShard ? SHARD_R : HEALTH_R;
+              _mn.set(h.pos.x - hr, 0, h.pos.z - hr);
+              _mx.set(h.pos.x + hr, 2.5, h.pos.z + hr);
               const tt = segAABB(bl.prev, bl.pos, _mn, _mx);
               if (tt < ringT) { ringT = tt; ringHit = h; }
             }
@@ -1707,6 +1743,38 @@ export function World() {
       blueTop.current.instanceMatrix.needsUpdate = true;
       blueLeg.current.instanceMatrix.needsUpdate = true;
     }
+    // --- party campaign player shards (only while someone is waiting for revive) ---
+    if (active && sharesEnemies() && G.mode === "game") {
+      // keep queue in sync with peer dead flags
+      for (const pr of NET.peers.values()) {
+        if (pr.dead && !G.reviveQueue.includes(pr.id)) G.reviveQueue.push(pr.id);
+      }
+      G.reviveQueue = G.reviveQueue.filter((id) => {
+        if (id === myId()) return G.campaignDead;
+        const pr = NET.peers.get(id);
+        return pr ? pr.dead : false;
+      });
+      const waiting = G.reviveQueue.length > 0;
+      if (!waiting) {
+        for (const h of health) if (h.isShard) h.active = false;
+        G.shardProgress = 0;
+      } else {
+        healthT.current -= dt;
+        if (healthT.current <= 0) {
+          healthT.current += SHARD_INTERVAL;
+          for (let n = 0; n < SHARD_SPAWN_N; n++) {
+            const h = health.find((item) => !item.active);
+            if (!h) break;
+            h.pos.copy(randomFloor(p));
+            h.active = true;
+            h.t = SHARD_LIFE;
+            h.isShard = true;
+          }
+        }
+        for (const h of health) if (h.active && h.isShard && (h.t -= dt) <= 0) h.active = false;
+      }
+    }
+
     MAP.px = pos.current.x;
     MAP.pz = pos.current.z;
     MAP.yaw = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ").y;
@@ -1837,9 +1905,29 @@ export function World() {
     health.forEach((h, i) => {
       const ring = healthRefs.current[i];
       if (!ring) return;
-      ring.visible = h.active && G.stage === "boss" && G.phase === "playing";
+      const show = h.active && G.phase === "playing" && (h.isShard || G.stage === "boss");
+      ring.visible = show;
       ring.position.set(h.pos.x, 0.45, h.pos.z);
-      if (active) ring.rotation.z += dt * 0.6;
+      const scale = h.isShard ? 3 : 1;
+      ring.scale.setScalar(scale);
+      if (active) ring.rotation.y += dt * 0.6;
+      // tint: green health + | blue shard square
+      ring.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.material) return;
+        const mat = mesh.material as THREE.MeshBasicMaterial;
+        if (!mat.color) return;
+        if (h.isShard) {
+          mat.color.set("#3a9eff");
+          // hide plus arms (userData.kind === "plus"), show square
+          if (mesh.userData?.kind === "plus") mesh.visible = false;
+          if (mesh.userData?.kind === "square") mesh.visible = true;
+        } else {
+          mat.color.set("#3cff70");
+          if (mesh.userData?.kind === "plus") mesh.visible = true;
+          if (mesh.userData?.kind === "square") mesh.visible = false;
+        }
+      });
     });
     if (ropeRef.current) {
       ropeRef.current.visible = G.grappling;
@@ -2030,13 +2118,19 @@ export function World() {
             <ringGeometry args={[0, HEALTH_R * 0.75, 40]} />
             <meshBasicMaterial color="#3cff70" transparent opacity={0.2} depthWrite={false} side={THREE.DoubleSide} />
           </mesh>
-          <mesh position={[0, 0.2, 0]}>
+          {/* plus (health) */}
+          <mesh position={[0, 0.2, 0]} userData={{ kind: "plus" }}>
             <boxGeometry args={[4, 0.25, 1]} />
             <meshBasicMaterial color="#3cff70" toneMapped={false} />
           </mesh>
-          <mesh position={[0, 0.2, 0]}>
+          <mesh position={[0, 0.2, 0]} userData={{ kind: "plus" }}>
             <boxGeometry args={[1, 0.25, 4]} />
             <meshBasicMaterial color="#3cff70" toneMapped={false} />
+          </mesh>
+          {/* square (player shard) */}
+          <mesh position={[0, 0.25, 0]} userData={{ kind: "square" }} visible={false}>
+            <boxGeometry args={[2.8, 0.35, 2.8]} />
+            <meshBasicMaterial color="#3a9eff" toneMapped={false} />
           </mesh>
         </group>
       ))}

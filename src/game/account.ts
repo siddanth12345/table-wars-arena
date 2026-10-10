@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { applySettings, setSettingsPersister, type Settings } from "./settings";
+import { applySettings, setSettingsPersister, SETTINGS, type Settings } from "./settings";
+import { applySkin, setSkinPersister, SKIN, type Skin } from "./skins";
 import { TRAIN, type TrainCfg } from "./state";
 
 export type Account = { status: "loading" | "signedOut" | "guest" | "user"; userId: string | null; username: string; email: string | null };
@@ -49,12 +50,25 @@ export function validatePassword(p: string): string | null {
   return null;
 }
 
+type StoredSettings = Settings & { _skin?: Skin };
+
 async function loadProfile(userId: string) {
   const { data } = await supabase.from("profiles").select("username, email, settings, training").eq("id", userId).maybeSingle();
   if (!data) return;
   set({ status: "user", userId, username: data.username, email: data.email });
-  if (data.settings) applySettings(data.settings as unknown as Settings, true);
+  if (data.settings) {
+    const raw = data.settings as unknown as StoredSettings;
+    const { _skin, ...rest } = raw;
+    applySettings(rest as Settings, true);
+    if (_skin) applySkin(_skin, true);
+  }
   if (data.training) Object.assign(TRAIN, data.training as unknown as TrainCfg);
+}
+
+function persistProfileSettings(s: Settings) {
+  if (ACC.status !== "user" || !ACC.userId) return;
+  const payload: StoredSettings = { ...s, _skin: SKIN };
+  void supabase.from("profiles").update({ settings: payload as never, updated_at: new Date().toISOString() }).eq("id", ACC.userId);
 }
 
 let started = false;
@@ -62,8 +76,11 @@ let started = false;
 export async function initAccount() {
   if (started) return;
   started = true;
-  setSettingsPersister((s) => {
-    if (ACC.status === "user" && ACC.userId) void supabase.from("profiles").update({ settings: s as never, updated_at: new Date().toISOString() }).eq("id", ACC.userId);
+  setSettingsPersister((s) => persistProfileSettings(s));
+  setSkinPersister((skin) => {
+    if (ACC.status !== "user" || !ACC.userId) return;
+    const payload: StoredSettings = { ...SETTINGS, _skin: skin };
+    void supabase.from("profiles").update({ settings: payload as never, updated_at: new Date().toISOString() }).eq("id", ACC.userId);
   });
   supabase.auth.onAuthStateChange((event, session) => {
     if (event === "SIGNED_OUT") set({ status: "signedOut", userId: null, username: "guest", email: null });

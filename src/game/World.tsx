@@ -8,8 +8,10 @@ import * as THREE from "three";
 import {
   G, MAG, FIRE_INTERVAL, DMG, PARRY_WINDOW, PARRY_CD, BUFF_TIME, DASH_CD, AIR_JUMPS, AIR_DASHES,
   BOMB_CD, BOMB_CD_BUFF, TABLE_HP, TABLE_CAP, BOSS_HITS, BOSS_WARN, setLocker,
-  MAP, PARRY_LOCK_AT, TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, type TrainSpawn,
+  MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, type TrainSpawn,
+  SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, LOBBY_RESPAWN, FREECAM_SPEEDS,
 } from "./state";
+import { SKIN } from "./skins";
 import { Room, ROOM, SOLIDS } from "./Room";
 import { tableWood } from "./textures";
 import { HomeShowcase } from "./HomeShowcase";
@@ -344,15 +346,23 @@ export function World() {
       return;
     }
     if (G.playerHp <= 0 && sharesEnemies() && G.mode === "game") {
-      // party campaign: you respawn so your partner can keep fighting
-      G.playerHp = MAX_HP;
-      pos.current.copy(START);
-      hv.current.set(0, 0, 0);
-      vy.current = 0;
+      // party campaign: stay dead until a teammate collects SHARD_NEED shards
+      G.campaignDead = true;
+      G.playerHp = 0;
       G.respawnMsg = 2.5;
+      const name = (typeof window !== "undefined" && (window as unknown as { __tbleName?: string }).__tbleName) || "player";
+      if (!G.diedThisRun.includes(name)) G.diedThisRun.push(name);
+      reportDeath();
       return;
     }
     if (G.playerHp <= 0) {
+      // Lobby PvP: 5-second respawn delay
+      if (NET.kind === "lobby") {
+        G.pvpDead = true;
+        G.lobbyRespawnT = LOBBY_RESPAWN;
+        G.respawnMsg = LOBBY_RESPAWN;
+        return;
+      }
       if (G.mode === "training") {
         // training death: back to the usual spawn point, refill, open the (pausing) training menu
         G.playerHp = cfg.maxHp();
@@ -505,9 +515,33 @@ export function World() {
       if (tmpV.set(pr.x, pr.y + PVP_CENTER_Y, pr.z).distanceTo(at) < r + PVP_HITBOX) hitPeer(pr.id, dmg, stun);
     }
   };
-  // healing ring: heal, or (when full) reset the bomb cooldown. Returns true if consumed.
+  // healing ring / party shard: heal, or (when full) reset the bomb cooldown. Returns true if consumed.
   const collectRing = (h: (typeof health)[number]) => {
-    if (!h.active || G.stage !== "boss") return false;
+    if (!h.active) return false;
+    // Party campaign: shards revive teammates (replace health rings)
+    if (sharesEnemies() && G.mode === "game") {
+      h.active = false;
+      G.shardProgress = Math.min(SHARD_NEED, G.shardProgress + 1);
+      if (G.shardProgress >= SHARD_NEED) {
+        G.shardProgress = 0;
+        // Revive self if dead, and signal peers via net (simple: local revive; peers hear death clear on next pose)
+        if (G.campaignDead) {
+          G.campaignDead = false;
+          G.playerHp = MAX_HP;
+          pos.current.copy(START);
+          hv.current.set(0, 0, 0);
+          vy.current = 0;
+          G.respawnMsg = 2.5;
+          G.respawnToken++;
+        }
+        // Also clear dead flag for local display of peers — host path will stream poses
+        for (const pr of NET.peers.values()) {
+          if (pr.dead) pr.dead = false;
+        }
+      }
+      return true;
+    }
+    if (G.stage !== "boss") return false;
     if (G.playerHp < cfg.maxHp()) G.playerHp = Math.min(cfg.maxHp(), G.playerHp + HEALTH_AMOUNT);
     else if (G.bombCd > 0) G.bombCd = 0;
     else return false;
@@ -577,7 +611,14 @@ export function World() {
       if (e.code === SETTINGS.keys.jump) e.preventDefault();
       const wasDown = keys.current[e.code];
       keys.current[e.code] = true;
+      // Freecam toggle (lobby & training only)
+      if (e.code === "KeyX" && !wasDown && !e.repeat && G.phase === "playing" && (G.mode === "training" || NET.kind === "lobby")) {
+        G.freecam = !G.freecam;
+        if (!G.freecam) G.freecamSpeedIdx = 0;
+        return;
+      }
       if (G.phase !== "playing" || !G.locked || wasDown || e.repeat) return;
+      if (G.freecam) return; // movement handled in useFrame
       if (e.code === "Enter") G.tut.enter = true;
       if (e.code === "Enter" && G.mode === "training") {
         G.trainMenu = true;
@@ -658,6 +699,10 @@ export function World() {
     };
     const md = (e: MouseEvent) => {
       if (!G.locked) return;
+      if (G.freecam) {
+        if (e.button === 0) G.freecamSpeedIdx = (G.freecamSpeedIdx + 1) % FREECAM_SPEEDS.length;
+        return;
+      }
       if (e.button === 0) G.firing = SETTINGS.fireMode === "toggle" ? !G.firing : true;
       if (e.button === 2) G.scoped = true;
     };
@@ -672,7 +717,16 @@ export function World() {
     window.addEventListener("mouseup", mu);
     window.addEventListener("contextmenu", cm);
     const wh = (e: WheelEvent) => {
-      if (!G.locked || !G.scoped) return;
+      if (!G.locked) return;
+      if (G.freecam) {
+        e.preventDefault();
+        const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+        const c = camera as THREE.PerspectiveCamera;
+        c.fov = THREE.MathUtils.clamp(c.fov * Math.exp(dy * 0.0015), 12, 110);
+        c.updateProjectionMatrix();
+        return;
+      }
+      if (!G.scoped) return;
       e.preventDefault();
       const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
       G.zoomFov = THREE.MathUtils.clamp(G.zoomFov * Math.exp(dy * 0.0015), 6, 60);
@@ -809,9 +863,53 @@ export function World() {
       }
     }
 
+    // --- 1v1 win screen: both cameras zoom into the winner ---
+    if (NET.kind === "pvp" && NET.stage === "over" && NET.winner) {
+      const winId = NET.winner;
+      let tx = 0, ty = EYE, tz = 0;
+      if (winId === NET.myId) {
+        tx = pos.current.x; ty = pos.current.y + EYE; tz = pos.current.z;
+      } else {
+        const pr = NET.peers.get(winId);
+        if (pr) { tx = pr.x; ty = pr.y + EYE; tz = pr.z; }
+      }
+      cam.position.lerp(new THREE.Vector3(tx + 4, ty + 3, tz + 6), 1 - Math.exp(-2 * dt));
+      cam.lookAt(tx, ty, tz);
+      cam.fov = THREE.MathUtils.lerp(cam.fov, 28, 1 - Math.exp(-2 * dt));
+      cam.updateProjectionMatrix();
+      return;
+    }
+
+    // --- freecam (lobby & training) ---
+    if (G.freecam && G.phase === "playing" && (G.mode === "training" || NET.kind === "lobby")) {
+      const spd = FREECAM_SPEEDS[G.freecamSpeedIdx] ?? 44;
+      const forward = new THREE.Vector3();
+      cam.getWorldDirection(forward);
+      const right = new THREE.Vector3().crossVectors(forward, cam.up).normalize();
+      const move = new THREE.Vector3();
+      if (keys.current["KeyW"] || keys.current[SETTINGS.keys.forward]) move.add(forward);
+      if (keys.current["KeyS"] || keys.current[SETTINGS.keys.back]) move.sub(forward);
+      if (keys.current["KeyA"] || keys.current[SETTINGS.keys.left]) move.sub(right);
+      if (keys.current["KeyD"] || keys.current[SETTINGS.keys.right]) move.add(right);
+      if (move.lengthSq() > 0) {
+        move.normalize().multiplyScalar(spd * dt);
+        cam.position.add(move);
+      }
+      // clamp to solid map edge (ROOM.r)
+      const flat = Math.hypot(cam.position.x, cam.position.z);
+      const maxR = ROOM.r - 2;
+      if (flat > maxR) {
+        const k = maxR / flat;
+        cam.position.x *= k;
+        cam.position.z *= k;
+      }
+      cam.position.y = THREE.MathUtils.clamp(cam.position.y, 1, ROOM.h - 2);
+      return;
+    }
+
     const engaged = G.locked || NET.online; // online games never pause
     if (G.phase === "playing" && engaged && !G.frozen && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
-    const active = G.phase === "playing" && engaged && !G.frozen && !G.pvpDead && G.countdown <= 0.6;
+    const active = G.phase === "playing" && engaged && !G.frozen && !G.pvpDead && !G.campaignDead && G.countdown <= 0.6;
     G.hitFlash = Math.max(0, G.hitFlash - dt);
     G.hurtFlash = Math.max(0, G.hurtFlash - dt);
     G.parryFlash = Math.max(0, G.parryFlash - dt);
@@ -828,6 +926,19 @@ export function World() {
       G.bombBig = Math.max(0, G.bombBig - dt);
       G.compromisedT = Math.max(0, G.compromisedT - dt);
       G.respawnMsg = Math.max(0, G.respawnMsg - dt);
+      if (G.lobbyRespawnT > 0) {
+        G.lobbyRespawnT = Math.max(0, G.lobbyRespawnT - dt);
+        G.respawnMsg = G.lobbyRespawnT;
+        if (G.lobbyRespawnT <= 0 && G.pvpDead && NET.kind === "lobby") {
+          G.pvpDead = false;
+          G.playerHp = cfg.maxHp();
+          pos.current.copy(START);
+          hv.current.set(0, 0, 0);
+          vy.current = 0;
+          grounded.current = true;
+          G.respawnToken++;
+        }
+      }
       G.slamCd = Math.max(0, G.slamCd - dt);
       bounce.current.t = Math.max(0, bounce.current.t - dt);
       G.bounceWin = bounce.current.t;
@@ -1089,12 +1200,13 @@ export function World() {
         G.bossTime += dt;
         healthT.current -= dt;
         if (healthT.current <= 0) {
-          healthT.current += cfg.ringInterval(HEALTH_INTERVAL);
+          const partyShards = sharesEnemies() && G.mode === "game";
+          healthT.current += partyShards ? SHARD_INTERVAL : cfg.ringInterval(HEALTH_INTERVAL);
           const h = health.find((item) => !item.active) ?? health[Math.floor(Math.random() * health.length)];
           if (h) {
             h.pos.copy(randomFloor(p));
             h.active = true;
-            h.t = HEALTH_LIFE;
+            h.t = partyShards ? SHARD_LIFE : HEALTH_LIFE;
           }
         }
         for (const h of health) if (h.active && (h.t -= dt) <= 0) h.active = false;
@@ -1329,22 +1441,29 @@ export function World() {
         if (s === 1 && grounded.current) tutDist.current += v.length() * dt;
         if (s === 9 && aliveCount() === 0) spawnTable(randomFloor(p));
         const alive = blues.some((u) => u.alive);
-        const done = [
-          G.tut.enter,
-          tutDist.current > 40,
-          G.airJumps === 0,
-          G.wallrun,
-          G.tut.dashed,
-          G.grappling,
-          G.tut.zoomed,
-          G.kills > tutKills.current,
-          G.tut.bombed,
-          G.parries > 0,
-          !alive,
-          G.tut.enter,
-        ][s];
+        const steps = G.onlineTut ? ONLINE_TUT_STEPS : TUT_STEPS;
+        const done = G.onlineTut
+          ? G.tut.enter // online tutorial is ENTER-driven
+          : [
+              G.tut.enter,
+              tutDist.current > 40,
+              G.airJumps === 0,
+              G.wallrun,
+              G.tut.dashed,
+              G.grappling,
+              G.tut.zoomed,
+              G.kills > tutKills.current,
+              G.tut.bombed,
+              G.parries > 0,
+              !alive,
+              G.tut.enter, // boss
+              G.tut.enter, // party revives
+              G.tut.enter, // freecam
+              G.tut.enter, // online modes
+            ][s];
         if (done) {
-          if (s >= TUT_STEPS.length - 1) finishTutorial();
+          G.tut.enter = false;
+          if (s >= steps.length - 1) finishTutorial();
           else G.tutStep++;
         }
       }

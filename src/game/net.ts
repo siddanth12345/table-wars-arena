@@ -204,7 +204,7 @@ export function sendPose(x: number, y: number, z: number, yaw: number) {
   const now = performance.now();
   if (now - lastPose < 100) return;
   lastPose = now;
-  send("pose", { id: myId(), x, y, z, yaw, hp: G.playerHp, dead: G.pvpDead });
+  send("pose", { id: myId(), x, y, z, yaw, hp: G.playerHp, dead: G.pvpDead || G.campaignDead });
 }
 
 export function hitPeer(to: string, dmg: number, stun = false) {
@@ -351,9 +351,17 @@ function onDeath(id: string) {
 }
 
 export function reportDeath() {
-  if (NET.kind !== "pvp") return;
-  send("death", { id: myId() });
-  onDeath(myId());
+  if (NET.kind === "pvp") {
+    send("death", { id: myId() });
+    onDeath(myId());
+    return;
+  }
+  // Party campaign: broadcast death so peers can mark us dead for shard revives
+  if (NET.kind === "coop") {
+    send("death", { id: myId() });
+    const me = NET.peers.get(myId());
+    // peers track via pose.dead; local flag is G.campaignDead
+  }
 }
 
 function onRound(m: RoundMsg) {

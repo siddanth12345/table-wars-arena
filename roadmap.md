@@ -23,11 +23,13 @@
 
 ## Round 2
 - [ ] Enlarge current online models 2.5x with matching hitboxes
-- [ ] Party campaign: five timed shard boxes revive teammates; team wipe restarts at checkpoint
-- [ ] Lobby: five-second respawn delay
-- [ ] Explain revives in both tutorials; replace party Tutorial with online guide
-- [ ] 1v1 winner camera zoom for both clients
-- [ ] Party victory dancers, ghosted death history, selectable player/group statistics
+- [x] Party campaign: five timed shard boxes revive teammates; team wipe restarts at checkpoint
+- [x] Lobby: five-second respawn delay
+- [x] Explain revives in both tutorials; replace party Tutorial with online guide
+- [x] 1v1 winner camera zoom for both clients
+- [x] Party victory dancers, ghosted death history, selectable player/group statistics
+- [x] Skins menu (home): eye/table colors, eye design, decoration, light, leg design; saved per account
+- [x] Freecam in lobby & training (X toggle, WASD, scroll zoom, click speed cycle)
 - [x] Party campaign/training + lobby share the host's enemies (host simulates, streams snapshots + enemy shots; teammates' hits go to host)
 - [x] Lobby PvP; players 3x bigger (hitbox + model) in 1v1 and lobby
 - [x] Guests get guest###### names, can party/invite

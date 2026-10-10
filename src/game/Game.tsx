@@ -7,7 +7,8 @@ import { Environment, Lightformer } from "@react-three/drei";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { World } from "./World";
-import { G, MAG, PARRY_CD, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, MAP, TUT_STEPS, goHome, finishTutorial } from "./state";
+import { G, MAG, PARRY_CD, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial } from "./state";
+import { SkinsPanel } from "./SkinsPanel";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
 import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
@@ -150,7 +151,8 @@ function HUD() {
   const kl = (a: keyof typeof keys) => keyLabel(keys[a]);
   const playing = G.phase === "playing";
   if (G.phase === "won" || G.phase === "home") return null;
-  const step = TUT_STEPS[G.tutStep];
+  const tutList = G.onlineTut ? ONLINE_TUT_STEPS : TUT_STEPS;
+  const step = tutList[G.tutStep];
   return (
     <div className="pointer-events-none fixed inset-0 z-10 select-none font-mono text-hud">
       {playing && G.locked && G.countdown <= 0.6 && !G.scoped && (
@@ -185,7 +187,19 @@ function HUD() {
         </div>
       )}
       {G.respawnMsg > 0 && playing && (
-        <div className="absolute left-1/2 top-[20%] -translate-x-1/2 rounded bg-hud-panel px-6 py-3 text-2xl font-black uppercase">Back to the boss checkpoint</div>
+        <div className="absolute left-1/2 top-[20%] -translate-x-1/2 rounded bg-hud-panel px-6 py-3 text-2xl font-black uppercase">
+          {G.lobbyRespawnT > 0 ? `Respawning in ${Math.ceil(G.lobbyRespawnT)}s` : G.campaignDead ? "Waiting for revive — teammates need 5 shards" : "Back to the boss checkpoint"}
+        </div>
+      )}
+      {G.campaignDead && playing && G.respawnMsg <= 0 && (
+        <div className="absolute left-1/2 top-[20%] -translate-x-1/2 rounded bg-hud-panel px-6 py-3 text-center text-xl font-black uppercase">
+          You are down · shards {G.shardProgress}/{5}
+        </div>
+      )}
+      {(NET.online && NET.kind === "coop" && G.mode === "game") && playing && !G.campaignDead && (
+        <div className="absolute right-6 top-24 rounded bg-hud-panel px-3 py-2 text-xs font-black uppercase tracking-widest">
+          Shards {G.shardProgress}/5
+        </div>
       )}
       {G.mode === "training" && playing && !G.trainMenu && (
         <div className="absolute left-1/2 top-6 -translate-x-1/2 rounded border-2 border-crosshair/60 bg-hud-panel px-5 py-2 text-center text-sm font-black uppercase tracking-widest">
@@ -194,7 +208,7 @@ function HUD() {
       )}
       {G.mode === "tutorial" && playing && step && (
         <div className="absolute left-1/2 top-6 w-[min(40rem,60vw)] -translate-x-1/2 rounded border-2 border-shield/60 bg-hud-panel p-4 text-center">
-          <div className="text-xs uppercase tracking-widest opacity-70">Tutorial {G.tutStep + 1} / {TUT_STEPS.length} · Esc for menu</div>
+          <div className="text-xs uppercase tracking-widest opacity-70">{G.onlineTut ? "Online tutorial" : "Tutorial"} {G.tutStep + 1} / {tutList.length} · Esc for menu</div>
           <div className="mt-1 text-2xl font-black uppercase">{step.title}</div>
           <div className="mt-2 text-sm">{step.text}</div>
         </div>
@@ -301,7 +315,9 @@ function startTraining() {
   lockPointer();
 }
 function startTutorial() {
+  const party = !!(NET.party && NET.party.members.length > 0);
   resetGame("tutorial");
+  G.onlineTut = party;
   lockPointer();
 }
 function resume() {
@@ -380,6 +396,8 @@ function Home() {
   const [tab, setTab] = useState<"main" | "controls" | "tutorial" | "settings" | "play">("main");
   const acc = useAccount();
   const [authOpen, setAuthOpen] = useState(false);
+  const [skinsOpen, setSkinsOpen] = useState(false);
+  const inParty = !!(NET.party && NET.party.members.length > 0);
   if (G.phase !== "home") return null;
   return (
     <div className="fixed inset-0 z-20 flex bg-hud-scrim/40 font-mono text-hud">
@@ -389,14 +407,16 @@ function Home() {
         <div className="mt-10 flex flex-col gap-3">
           <button className={btnMain} onClick={() => setTab(tab === "play" ? "main" : "play")}>Play</button>
           <button className={tab === "controls" ? btnMain : btnAlt} onClick={() => setTab(tab === "controls" ? "main" : "controls")}>Controls &amp; Bot Types</button>
-          <button className={tab === "tutorial" ? btnMain : btnAlt} onClick={() => setTab(tab === "tutorial" ? "main" : "tutorial")} data-glow="orange">Tutorial</button>
+          <button className={tab === "tutorial" ? btnMain : btnAlt} onClick={() => setTab(tab === "tutorial" ? "main" : "tutorial")} data-glow="orange">{inParty ? "Online tutorial" : "Tutorial"}</button>
           <button className={btnAlt} onClick={startTraining}>Training</button>
+          <button className={btnAlt} onClick={() => setSkinsOpen(true)}>Skins</button>
           <button className={tab === "settings" ? btnMain : btnAlt} onClick={() => setTab(tab === "settings" ? "main" : "settings")}>Settings</button>
         </div>
         <AccountBadge onLogin={() => setAuthOpen(true)} />
         <p className="mt-4 text-xs opacity-60">Offline modes run on your own private server.</p>
       </div>
       {(authOpen || acc.status === "signedOut") && <AuthPanel onClose={() => setAuthOpen(false)} />}
+      {skinsOpen && <SkinsPanel onClose={() => setSkinsOpen(false)} />}
       {tab === "play" && <PlayMenu onCampaign={playGame} onClose={() => setTab("main")} />}
       {tab !== "main" && tab !== "play" && (
         <div className="m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">
@@ -409,9 +429,9 @@ function Home() {
             </>
           ) : (
             <>
-              <Section title="Basics">
+              <Section title={inParty ? "Online guide" : "Basics"}>
                 <ol className="list-decimal space-y-1 pl-5 text-sm">
-                  {TUT_STEPS.map((s) => (
+                  {(inParty ? ONLINE_TUT_STEPS : TUT_STEPS).map((s) => (
                     <li key={s.title}><b className="uppercase">{s.title}</b> — <span className="opacity-80">{s.text.replace(/ ?Press ENTER to (continue|finish)\./, "")}</span></li>
                   ))}
                 </ol>
@@ -488,7 +508,7 @@ function Menu() {
   );
 }
 
-function VictoryTable() {
+function VictoryTable({ ghost = false, color = "#2fa84f", leg = "#197a37", name = "" }: { ghost?: boolean; color?: string; leg?: string; name?: string }) {
   const table = useRef<THREE.Group>(null);
   useFrame(({ clock }, delta) => {
     const model = table.current;
@@ -497,16 +517,23 @@ function VictoryTable() {
     model.position.y = Math.abs(Math.sin(clock.elapsedTime * 2.2)) * 0.8 - 1;
     model.rotation.z = Math.sin(clock.elapsedTime * 2.2) * 0.08;
   });
+  const opacity = ghost ? 0.35 : 1;
   return (
     <group ref={table} scale={0.9}>
-      <mesh position={[0, 1.7, 0]} castShadow><boxGeometry args={[5, 0.55, 3.4]} /><meshStandardMaterial color="#2fa84f" roughness={0.55} /></mesh>
+      <mesh position={[0, 1.7, 0]} castShadow>
+        <boxGeometry args={[5, 0.55, 3.4]} />
+        <meshStandardMaterial color={color} roughness={0.55} transparent={ghost} opacity={opacity} />
+      </mesh>
       {([[-2, 0.6, -1.2], [2, 0.6, -1.2], [-2, 0.6, 1.2], [2, 0.6, 1.2]] as const).map((p, i) => (
-        <mesh key={i} position={p} castShadow><boxGeometry args={[0.45, 2.6, 0.45]} /><meshStandardMaterial color="#197a37" /></mesh>
+        <mesh key={i} position={p} castShadow>
+          <boxGeometry args={[0.45, 2.6, 0.45]} />
+          <meshStandardMaterial color={leg} transparent={ghost} opacity={opacity} />
+        </mesh>
       ))}
       {[-0.85, 0.85].map((x) => (
         <group key={x} position={[x, 1.8, 1.72]}>
-          <mesh><sphereGeometry args={[0.32, 18, 12]} /><meshStandardMaterial color="#f5f2dc" /></mesh>
-          <mesh position={[0, 0, 0.29]}><sphereGeometry args={[0.12, 12, 8]} /><meshStandardMaterial color="#172117" /></mesh>
+          <mesh><sphereGeometry args={[0.32, 18, 12]} /><meshStandardMaterial color="#f5f2dc" transparent={ghost} opacity={opacity} /></mesh>
+          <mesh position={[0, 0, 0.29]}><sphereGeometry args={[0.12, 12, 8]} /><meshStandardMaterial color="#172117" transparent={ghost} opacity={opacity} /></mesh>
         </group>
       ))}
     </group>
@@ -515,9 +542,24 @@ function VictoryTable() {
 
 function WinScreen() {
   useTick(200);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [groupStats, setGroupStats] = useState(false);
   if (G.phase !== "won") return null;
   const acc = G.shots ? (G.hits / G.shots) * 100 : 0;
   const m = Math.floor(G.time / 60), s = Math.floor(G.time % 60);
+  const party = NET.online && (NET.kind === "coop" || (NET.party && NET.party.members.length > 0));
+  const members = party
+    ? [{ id: "me", name: NET.names[NET.myId] ?? "you" }, ...[...NET.peers.values()].map((pr) => ({ id: pr.id, name: pr.name || NET.names[pr.id] || pr.id.slice(0, 6) }))]
+    : [{ id: "me", name: "you" }];
+  const n = members.length;
+  const statsRows = [
+    ["Time", `${m}:${s.toString().padStart(2, "0")}`],
+    ["Bullets shot", G.shots],
+    ["Bullets hit", G.hits],
+    ["Accuracy", `${acc.toFixed(1)}%`],
+    ["Tables defeated", G.kills],
+    ["Shots parried", G.parries],
+  ] as const;
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-hud-scrim p-6 font-mono text-hud">
       <div className="grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-lg border-2 border-hud/30 bg-hud-panel shadow-2xl md:grid-cols-[0.9fr_1.1fr]">
@@ -526,24 +568,39 @@ function WinScreen() {
           <Canvas shadows camera={{ position: [8, 5, 10], fov: 42 }}>
             <ambientLight intensity={1.1} />
             <directionalLight position={[5, 10, 6]} intensity={2.2} castShadow />
-            <VictoryTable />
-            <mesh rotation-x={-Math.PI / 2} position={[0, -1.1, 0]} receiveShadow><circleGeometry args={[7, 48]} /><meshStandardMaterial color="#314438" roughness={1} /></mesh>
+            {members.map((mem, i) => {
+              const ghost = G.diedThisRun.includes(mem.name);
+              const spread = (i - (n - 1) / 2) * 6;
+              return (
+                <group key={mem.id} position={[spread, 0, 0]} onClick={() => setPicked(mem.id)}>
+                  <VictoryTable ghost={ghost} name={mem.name} />
+                </group>
+              );
+            })}
+            <mesh rotation-x={-Math.PI / 2} position={[0, -1.1, 0]} receiveShadow><circleGeometry args={[Math.max(7, n * 4), 48]} /><meshStandardMaterial color="#314438" roughness={1} /></mesh>
           </Canvas>
-          <div className="absolute bottom-6 left-6 text-sm font-black uppercase tracking-widest text-crosshair">The green table wins</div>
+          <div className="absolute bottom-6 left-6 flex flex-wrap gap-2 text-sm font-black uppercase tracking-widest text-crosshair">
+            {members.map((mem) => (
+              <button key={mem.id} type="button" className={`rounded border px-2 py-1 ${picked === mem.id ? "border-crosshair bg-crosshair/20" : "border-white/20"}`} onClick={() => setPicked(mem.id)}>
+                {mem.name}{G.diedThisRun.includes(mem.name) ? " (ghost)" : ""}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex min-h-[34rem] flex-col justify-center p-8 md:p-12">
-          <div className="mb-8 border-b-2 border-hud/30 pb-3 text-3xl font-black uppercase">Results</div>
+          <div className="mb-4 flex items-center justify-between border-b-2 border-hud/30 pb-3">
+            <div className="text-3xl font-black uppercase">{groupStats ? "Group stats" : picked ? `${members.find((x) => x.id === picked)?.name ?? "Player"} stats` : "Results"}</div>
+            {party && (
+              <button type="button" className={btnAlt} onClick={() => setGroupStats((v) => !v)}>
+                {groupStats ? "Player stats" : "Group stats"}
+              </button>
+            )}
+          </div>
           <dl className="space-y-3 text-lg">
-            {[
-              ["Time", `${m}:${s.toString().padStart(2, "0")}`],
-              ["Bullets shot", G.shots],
-              ["Bullets hit", G.hits],
-              ["Accuracy", `${acc.toFixed(1)}%`],
-              ["Tables defeated", G.kills],
-              ["Shots parried", G.parries],
-            ].map(([label, value]) => (
+            {statsRows.map(([label, value]) => (
               <div key={label} className="grid grid-cols-[1fr_auto] items-center border-b border-hud/20 bg-hud-track px-4 py-3">
-                <dt className="font-bold uppercase opacity-75">{label}</dt><dd className="text-2xl font-black">{value}</dd>
+                <dt className="font-bold uppercase opacity-75">{label}{groupStats && label === "Accuracy" ? " (avg)" : ""}</dt>
+                <dd className="text-2xl font-black">{groupStats && typeof value === "number" ? value : value}</dd>
               </div>
             ))}
           </dl>

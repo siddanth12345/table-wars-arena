@@ -12,7 +12,7 @@ import {
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, LOBBY_RESPAWN, FREECAM_SPEEDS,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
-import { TableBot } from "./TableBot";
+import { createTableBot, skinKey } from "./tableBotFactory";
 import { Room, ROOM, SOLIDS } from "./Room";
 import { tableWood } from "./textures";
 import { HomeShowcase } from "./HomeShowcase";
@@ -243,6 +243,30 @@ const localBody = { x: 0, y: 0, z: 0, yaw: 0, show: false, playerYaw: 0 };
 function LocalFreecamBody() {
   const g = useRef<THREE.Group>(null);
   const skin = useSkin();
+  const key = skinKey(skin) + "|" + ((NET.kind === "pvp" || NET.kind === "lobby") ? 3 : 1);
+  const bot = useMemo(() => createTableBot({
+    skin,
+    scale: 0.6 * ((NET.kind === "pvp" || NET.kind === "lobby") ? 3 : 1),
+    emitLight: true,
+    lightIntensity: 1.3,
+  }), [key]);
+
+  useEffect(() => {
+    const host = g.current;
+    if (!host) return;
+    host.clear();
+    host.add(bot);
+    return () => {
+      host.remove(bot);
+      bot.traverse((o) => {
+        const m = o as { geometry?: { dispose: () => void }; material?: { dispose: () => void } | { dispose: () => void }[] };
+        m.geometry?.dispose();
+        if (Array.isArray(m.material)) m.material.forEach((x) => x.dispose());
+        else m.material?.dispose();
+      });
+    };
+  }, [bot]);
+
   useFrame(() => {
     const m = g.current;
     if (!m) return;
@@ -251,11 +275,7 @@ function LocalFreecamBody() {
     m.position.set(localBody.x, localBody.y, localBody.z);
     m.rotation.y = localBody.yaw + Math.PI;
   });
-  return (
-    <group ref={g} visible={false}>
-      <TableBot skin={skin} scale={0.6 * ((NET.kind === "pvp" || NET.kind === "lobby") ? 3 : 1)} emitLight lightIntensity={1.3} />
-    </group>
-  );
+  return <group ref={g} visible={false} />;
 }
 
 export function World() {

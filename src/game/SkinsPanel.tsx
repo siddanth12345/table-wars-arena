@@ -1,11 +1,11 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import {
   applySkin, useSkin, COLOR_CHART, EYE_DESIGNS, DECORATIONS, LEG_DESIGNS,
   type Skin, type EyeDesign, type TableDecoration, type LegDesign,
 } from "./skins";
-import { TableBot, StageDisc } from "./TableBot";
+import { createStageDisc, createTableBot, skinKey } from "./tableBotFactory";
 
 const btn = "rounded-xl border-2 border-white/20 bg-black/50 px-3 py-2 text-sm font-bold uppercase tracking-wide text-white hover:bg-white/10 transition";
 const btnOn = "rounded-xl border-2 border-crosshair bg-crosshair/20 px-3 py-2 text-sm font-bold uppercase tracking-wide text-crosshair";
@@ -41,9 +41,8 @@ function OrbitDrag({ yawRef }: { yawRef: React.MutableRefObject<number> }) {
     };
     const move = (e: PointerEvent) => {
       if (!dragging.current) return;
-      const dx = e.clientX - lastX.current;
+      yawRef.current += (e.clientX - lastX.current) * 0.01;
       lastX.current = e.clientX;
-      yawRef.current += dx * 0.01;
     };
     const up = (e: PointerEvent) => {
       dragging.current = false;
@@ -66,26 +65,37 @@ function OrbitDrag({ yawRef }: { yawRef: React.MutableRefObject<number> }) {
 
 function PreviewScene({ skin }: { skin: Skin }) {
   const yawRef = useRef(0);
-  const group = useRef<THREE.Group>(null);
+  const key = skinKey(skin);
+  const bot = useMemo(() => createTableBot({ skin, scale: 0.85, emitLight: true, lightIntensity: 1.2 }), [key]);
+  const stage = useMemo(() => createStageDisc("#2a2430", skin.lightColor), [skin.lightColor]);
+  const root = useRef<THREE.Group>(null);
+
+  useEffect(() => {
+    return () => {
+      for (const obj of [bot, stage]) {
+        obj.traverse((o) => {
+          const m = o as { geometry?: { dispose: () => void }; material?: { dispose: () => void } | { dispose: () => void }[] };
+          m.geometry?.dispose();
+          if (Array.isArray(m.material)) m.material.forEach((x) => x.dispose());
+          else m.material?.dispose();
+        });
+      }
+    };
+  }, [bot, stage]);
 
   useFrame(() => {
-    if (group.current) group.current.rotation.y = yawRef.current;
+    if (root.current) root.current.rotation.y = yawRef.current;
   });
 
   return (
     <>
-      <color attach="background" args={["#0a0612"]} />
       <ambientLight intensity={0.35} />
       <directionalLight position={[6, 12, 4]} intensity={1.4} castShadow />
       <OrbitDrag yawRef={yawRef} />
-      <group ref={group}>
-        <StageDisc color="#2a2430" lightColor={skin.lightColor} />
-        <TableBot skin={skin} scale={0.85} emitLight lightIntensity={1.2} />
+      <group ref={root}>
+        <primitive object={stage} />
+        <primitive object={bot} />
       </group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
-        <circleGeometry args={[20, 32]} />
-        <meshBasicMaterial color="#050308" />
-      </mesh>
     </>
   );
 }
@@ -105,8 +115,8 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
           <button type="button" className={btn} onClick={onClose}>Close</button>
         </div>
 
-        <div className="relative h-64 w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
-          <Canvas shadows camera={{ position: [7, 6, 9], fov: 40 }} className="h-full w-full cursor-grab active:cursor-grabbing">
+        <div className="relative h-64 w-full overflow-hidden rounded-2xl border border-white/10 bg-[#0a0612]">
+          <Canvas shadows camera={{ position: [7, 6, 9], fov: 40 }} style={{ width: "100%", height: "100%", cursor: "grab" }}>
             <PreviewScene skin={draft} />
           </Canvas>
           <p className="pointer-events-none absolute bottom-2 left-3 text-[10px] font-bold uppercase tracking-widest text-white/50">
@@ -169,16 +179,7 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
 
         <div className="flex justify-end gap-2">
           <button type="button" className={btn} onClick={() => setDraft({ ...live })}>Reset draft</button>
-          <button
-            type="button"
-            className={btnOn}
-            onClick={() => {
-              applySkin(draft);
-              onClose();
-            }}
-          >
-            Save skin
-          </button>
+          <button type="button" className={btnOn} onClick={() => { applySkin(draft); onClose(); }}>Save skin</button>
         </div>
       </div>
     </div>

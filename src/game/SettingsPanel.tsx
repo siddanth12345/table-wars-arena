@@ -1,6 +1,8 @@
 import { NET } from "./net";
 import { useEffect, useState } from "react";
-import { ACTIONS, DEFAULT_SETTINGS, applySettings, keyLabel, useSettings, type Action, type Settings, type TimeOfDay } from "./settings";
+import { ACTIONS, DEFAULT_SETTINGS, DEFAULT_MOBILE_LAYOUT, applySettings, keyLabel, useSettings, type Action, type Settings, type TimeOfDay, type MobileLayout } from "./settings";
+import { isTouchDevice } from "./mobileInput";
+import { G } from "./state";
 
 const TODS: { id: TimeOfDay; label: string; sub: string }[] = [
   { id: "day", label: "Day", sub: "Bright, cool daylight" },

@@ -139,18 +139,29 @@ function MiniMap() {
     }
   }
   const hx = MAP.px - Math.sin(MAP.yaw) * 30, hz = MAP.pz - Math.cos(MAP.yaw) * 30;
+  const showShardHud = NET.online && NET.kind === "coop" && G.mode === "game" && G.phase === "playing";
   return (
-    <div className="absolute right-6 top-6 rounded-full border border-hud/30 bg-hud-panel p-1 shadow-2xl">
-      <svg viewBox={`${-R} ${-R} ${2 * R} ${2 * R}`} className="h-[min(27.2vh,12.8rem)] w-[min(27.2vh,12.8rem)]">
-        <circle cx={0} cy={0} r={R - 2} fill="#e8dcc4" fillOpacity={0.25} stroke="currentColor" strokeWidth={4} />
-        {SOLIDS.slice(0, SOLIDS.length - WINDOW_ANGLES.length * 12).map((s, i) => (
-          <rect key={i} x={s.x - s.hw} y={s.z - s.hd} width={s.hw * 2} height={s.hd * 2} fill={s.c ?? "#8a6a4a"} fillOpacity={0.88} stroke="#e8dcc4" strokeWidth={1.5} />
-        ))}
-        {t}
-        {MAP.boss && dot(MAP.boss.x, MAP.boss.z, "#ef4444", 16, "boss")}
-        <line x1={MAP.px} y1={MAP.pz} x2={hx} y2={hz} stroke="#1d4ed8" strokeWidth={5} />
-        {dot(MAP.px, MAP.pz, "#1d4ed8", 9, "me")}
-      </svg>
+    <div className="absolute right-6 top-6 flex flex-col items-center gap-2">
+      <div className="rounded-full border border-hud/30 bg-hud-panel p-1 shadow-2xl">
+        <svg viewBox={`${-R} ${-R} ${2 * R} ${2 * R}`} className="h-[min(27.2vh,12.8rem)] w-[min(27.2vh,12.8rem)]">
+          <circle cx={0} cy={0} r={R - 2} fill="#e8dcc4" fillOpacity={0.25} stroke="currentColor" strokeWidth={4} />
+          {SOLIDS.slice(0, SOLIDS.length - WINDOW_ANGLES.length * 12).map((s, i) => (
+            <rect key={i} x={s.x - s.hw} y={s.z - s.hd} width={s.hw * 2} height={s.hd * 2} fill={s.c ?? "#8a6a4a"} fillOpacity={0.88} stroke="#e8dcc4" strokeWidth={1.5} />
+          ))}
+          {t}
+          {MAP.boss && dot(MAP.boss.x, MAP.boss.z, "#ef4444", 16, "boss")}
+          <line x1={MAP.px} y1={MAP.pz} x2={hx} y2={hz} stroke="#1d4ed8" strokeWidth={5} />
+          {dot(MAP.px, MAP.pz, "#1d4ed8", 9, "me")}
+        </svg>
+      </div>
+      {showShardHud && (
+        <div className="rounded border-2 border-[#3a9eff]/50 bg-hud-panel px-3 py-1.5 text-center text-xs font-black uppercase tracking-widest text-[#9ed0ff] shadow-2xl">
+          Table shards {G.shardProgress}/7
+          {G.reviveQueue.length > 0 && (
+            <div className="mt-0.5 text-[10px] opacity-80">{G.reviveQueue.length} waiting</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -203,12 +214,8 @@ function HUD() {
       )}
       {G.campaignDead && playing && G.respawnMsg <= 0 && (
         <div className="absolute left-1/2 top-[20%] -translate-x-1/2 rounded bg-hud-panel px-6 py-3 text-center text-xl font-black uppercase">
-          You are down · shards {G.shardProgress}/{7}
-        </div>
-      )}
-      {(NET.online && NET.kind === "coop" && G.mode === "game") && playing && !G.campaignDead && (
-        <div className="absolute right-6 top-24 rounded bg-hud-panel px-3 py-2 text-xs font-black uppercase tracking-widest">
-          Shards {G.shardProgress}/7
+          You are down · freecam on · shards {G.shardProgress}/7
+          <div className="mt-1 text-xs opacity-70">Teammates must collect shards — you can&apos;t return until revived</div>
         </div>
       )}
       {G.mode === "training" && playing && !G.trainMenu && (

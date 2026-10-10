@@ -378,9 +378,11 @@ export function World() {
     Object.assign(w, { active: true, r: BOSS_S * 3, x, z, hit: false });
   };
   const damagePlayer = (d: number, force = false) => {
+    if (G.campaignDead) return;
     if (!force && G.buff > 0) return;
     if (slam.current.on) { slam.current.on = false; G.slamming = false; vy.current = 0; } // hit mid-air cancels the slam
     if (G.mode === "pvp" && (G.pvpDead || G.frozen)) return;
+    if (NET.kind === "lobby" && G.pvpDead) return;
     G.playerHp = Math.max(0, G.playerHp - d);
     G.hurtFlash = 0.25;
     if (G.playerHp <= 0 && G.mode === "pvp") {
@@ -395,6 +397,8 @@ export function World() {
       G.campaignDead = true;
       G.playerHp = 0;
       G.respawnMsg = 2.5;
+      G.freecam = true; // spectate until revived — cannot return to body until shards
+      G.freecamSpeedIdx = 0;
       const id = myId();
       if (!G.reviveQueue.includes(id)) G.reviveQueue.push(id);
       const name = NET.names[id] ?? "player";
@@ -406,7 +410,7 @@ export function World() {
       // Lobby PvP: 5-second respawn delay
       if (NET.kind === "lobby") {
         G.pvpDead = true;
-        G.freecam = false;
+        G.freecam = true; // freecam while waiting to respawn
         G.freecamSpeedIdx = 0;
         G.lobbyRespawnT = LOBBY_RESPAWN;
         G.respawnMsg = LOBBY_RESPAWN;
@@ -490,14 +494,24 @@ export function World() {
   // closest player (you or a teammate) to an enemy — used by host-run shared enemies
   const _aim = new THREE.Vector3();
   const nearest = (from: THREE.Vector3): { at: THREE.Vector3; id: string | null } => {
-    _aim.copy(camera.position);
+    let best = Infinity;
     let id: string | null = null;
-    if (sharesEnemies()) {
-      let best = from.distanceTo(_aim);
+    // Prefer living local player (not freecam cam, not a dead body)
+    if (!G.campaignDead && !G.pvpDead) {
+      _aim.set(pos.current.x, pos.current.y + EYE, pos.current.z);
+      best = from.distanceTo(_aim);
+      id = null;
+    }
+    if (sharesEnemies() || NET.kind === "lobby") {
       for (const pr of NET.peers.values()) {
+        if (pr.dead) continue;
         const d = Math.hypot(pr.x - from.x, pr.y + EYE - from.y, pr.z - from.z);
         if (d < best) { best = d; id = pr.id; _aim.set(pr.x, pr.y + EYE, pr.z); }
       }
+    }
+    // Fallback so enemies still have a target if everyone is down
+    if (best === Infinity) {
+      _aim.set(pos.current.x, pos.current.y + EYE, pos.current.z);
     }
     return { at: _aim, id };
   };
@@ -568,6 +582,8 @@ export function World() {
   const revivePlayer = (id: string) => {
     if (id === myId()) {
       G.campaignDead = false;
+      G.freecam = false;
+      G.freecamSpeedIdx = 0;
       G.playerHp = MAX_HP;
       pos.current.copy(START);
       hv.current.set(0, 0, 0);
@@ -654,8 +670,8 @@ export function World() {
         G.firing = false;
         G.scoped = false;
         keys.current = {};
-        // Esc while freecam: leave freecam instead of opening pause over a frozen sim
-        if (G.freecam) {
+        // Esc while freecam: leave freecam unless waiting for shard revive / lobby respawn
+        if (G.freecam && !G.campaignDead && !(NET.kind === "lobby" && G.pvpDead && G.lobbyRespawnT > 0)) {
           G.freecam = false;
           G.freecamSpeedIdx = 0;
         }
@@ -676,7 +692,17 @@ export function World() {
       const wasDown = keys.current[e.code];
       keys.current[e.code] = true;
       // Freecam toggle (lobby & training only)
-      if (e.code === "KeyX" && !wasDown && !e.repeat && G.phase === "playing" && (G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.mode === "pvp")) {
+      if (e.code === "KeyX" && !wasDown && !e.repeat && G.phase === "playing" && (G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.mode === "pvp" || G.campaignDead)) {
+        // While waiting for shard revive, freecam stays on — cannot return to body
+        if (G.campaignDead) {
+          G.freecam = true;
+          return;
+        }
+        // Lobby death wait: freecam stays on until respawn timer finishes
+        if (NET.kind === "lobby" && G.pvpDead && G.lobbyRespawnT > 0) {
+          G.freecam = true;
+          return;
+        }
         G.freecam = !G.freecam;
         if (!G.freecam) G.freecamSpeedIdx = 0;
         return;
@@ -828,6 +854,8 @@ export function World() {
     G.reviveQueue = G.reviveQueue.filter((x) => x !== id);
     if (id === myId() && G.campaignDead) {
       G.campaignDead = false;
+      G.freecam = false;
+      G.freecamSpeedIdx = 0;
       G.playerHp = MAX_HP;
       pos.current.copy(START);
       hv.current.set(0, 0, 0);
@@ -959,11 +987,16 @@ export function World() {
     }
 
     // --- freecam movement runs after sim so physics keep going; camera is overridden below ---
-    const freecamOn = G.freecam && G.phase === "playing" && (G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp");
+    // freecam while dead in campaign / lobby respawn wait, or normal training/lobby/pvp freecam
+    const freecamOn = G.freecam && G.phase === "playing" && (
+      G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.campaignDead || (NET.kind === "lobby" && G.pvpDead)
+    );
 
     const engaged = G.locked || NET.online || G.freecam; // freecam keeps sim running
     if (G.phase === "playing" && engaged && !G.frozen && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
-    const active = G.phase === "playing" && engaged && !G.frozen && !G.pvpDead && !G.campaignDead && G.countdown <= 0.6;
+    // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
+    const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;
+    const canControl = active && !G.pvpDead && !G.campaignDead && !freecamOn;
     G.hitFlash = Math.max(0, G.hitFlash - dt);
     G.hurtFlash = Math.max(0, G.hurtFlash - dt);
     G.parryFlash = Math.max(0, G.parryFlash - dt);
@@ -985,6 +1018,8 @@ export function World() {
         G.respawnMsg = G.lobbyRespawnT;
         if (G.lobbyRespawnT <= 0 && G.pvpDead && NET.kind === "lobby") {
           G.pvpDead = false;
+          G.freecam = false;
+          G.freecamSpeedIdx = 0;
           G.playerHp = cfg.maxHp();
           pos.current.copy(START);
           hv.current.set(0, 0, 0);
@@ -1285,10 +1320,11 @@ export function World() {
           }
         } else {
           const chargingStomp = hazards.some((h) => h.active && h.kind === "stomp" && h.t > 0);
-          const toP = tmpV.set(p.x - b.pos.x, 0, p.z - b.pos.z);
+          const chase = nearest(b.pos).at;
+          const toP = tmpV.set(chase.x - b.pos.x, 0, chase.z - b.pos.z);
           if (!chargingStomp && toP.length() > 40) b.pos.addScaledVector(toP.normalize(), 12 * dt);
           clampCircle(b.pos, 25);
-          if (!chargingStomp) b.yaw = Math.atan2(p.x - b.pos.x, p.z - b.pos.z);
+          if (!chargingStomp) b.yaw = Math.atan2(chase.x - b.pos.x, chase.z - b.pos.z);
           b.bulletT -= dt;
           if (b.bulletT <= 0) {
             b.bulletT = 1 * cfg.bossCdK();

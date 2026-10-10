@@ -238,17 +238,29 @@ function HUD() {
           <div className="relative h-8 w-8">
             {(() => {
               const mode = G.crosshair;
+              const active = mode === "enemy" || mode === "grapple";
               const color = mode === "enemy" ? "#3a9eff" : mode === "grapple" ? "#f5d76e" : "var(--crosshair)";
-              const rot = mode === "enemy" ? "rotate-45" : "rotate-0";
-              const anim = mode === "enemy" ? "transition-transform duration-150" : "transition-all duration-150";
               return (
-                <div className={`absolute inset-0 ${anim} ${rot}`} style={{ color }}>
-                  <div className="absolute left-1/2 top-0 h-2.5 w-0.5 -translate-x-1/2" style={{ background: color }} />
-                  <div className="absolute bottom-0 left-1/2 h-2.5 w-0.5 -translate-x-1/2" style={{ background: color }} />
-                  <div className="absolute left-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2" style={{ background: color }} />
-                  <div className="absolute right-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2" style={{ background: color }} />
-                  <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: color }} />
-                </div>
+                <>
+                  {/* crosshair ticks — 45° when enemy or grapple */}
+                  <div
+                    className={`absolute inset-0 transition-transform duration-150 ${active ? "rotate-45" : "rotate-0"}`}
+                    style={{ color }}
+                  >
+                    <div className="absolute left-1/2 top-0 h-2.5 w-0.5 -translate-x-1/2" style={{ background: color }} />
+                    <div className="absolute bottom-0 left-1/2 h-2.5 w-0.5 -translate-x-1/2" style={{ background: color }} />
+                    <div className="absolute left-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2" style={{ background: color }} />
+                    <div className="absolute right-0 top-1/2 h-0.5 w-2.5 -translate-y-1/2" style={{ background: color }} />
+                    <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: color }} />
+                  </div>
+                  {/* diamond ring around crosshair when locked on enemy/grapple */}
+                  {active && (
+                    <div
+                      className="pointer-events-none absolute left-1/2 top-1/2 h-11 w-11 -translate-x-1/2 -translate-y-1/2 rotate-45 border-2 transition-opacity duration-150"
+                      style={{ borderColor: color, boxShadow: `0 0 8px ${color}` }}
+                    />
+                  )}
+                </>
               );
             })()}
             {G.hitFlash > 0 && <div className="absolute -inset-2 rotate-45 border-2 border-crosshair" />}

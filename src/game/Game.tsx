@@ -228,6 +228,7 @@ function HUD() {
           <div className="text-xs uppercase tracking-widest opacity-70">{G.onlineTut ? "Online tutorial" : "Tutorial"} {G.tutStep + 1} / {tutList.length} · Esc for menu</div>
           <div className="mt-1 text-2xl font-black uppercase">{step.title}</div>
           <div className="mt-2 text-sm">{step.text}</div>
+          <div className="mt-3 text-[11px] font-bold uppercase tracking-widest opacity-60">Enter to skip · Backspace to go back</div>
         </div>
       )}
 

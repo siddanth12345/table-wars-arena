@@ -757,6 +757,12 @@ const kd = (e: KeyboardEvent) => {
         document.exitPointerLock?.();
         return;
       }
+      if (e.code === "Backspace" && G.mode === "tutorial") {
+        e.preventDefault();
+        G.tut.enter = false;
+        G.tutStep = Math.max(0, G.tutStep - 1);
+        return;
+      }
       if (G.countdown > 0.6 || G.stun > 0) return;
       if (e.code === SETTINGS.keys.parry && G.parryCd <= 0 && !G.parryLocked) {
         G.parryWin = PARRY_WINDOW;
@@ -1589,10 +1595,11 @@ const kd = (e: KeyboardEvent) => {
         if (s === 9 && aliveCount() === 0) spawnTable(randomFloor(p));
         const alive = blues.some((u) => u.alive);
         const steps = G.onlineTut ? ONLINE_TUT_STEPS : TUT_STEPS;
-        const done = G.onlineTut
-          ? G.tut.enter // online tutorial is ENTER-driven
+        // Enter always skips the current step; objectives still advance when completed
+        const objectiveDone = G.onlineTut
+          ? false
           : [
-              G.tut.enter,
+              false, // intro — Enter only
               tutDist.current > 40,
               G.airJumps === 0,
               G.wallrun,
@@ -1604,11 +1611,12 @@ const kd = (e: KeyboardEvent) => {
               G.tut.bombed,
               G.parries > 0,
               !alive,
-              G.tut.enter, // boss
-              G.tut.enter, // party revives
-              G.tut.enter, // freecam
-              G.tut.enter, // online modes
+              false, // boss
+              false, // party revives
+              false, // freecam
+              false, // online modes
             ][s];
+        const done = G.tut.enter || !!objectiveDone;
         if (done) {
           G.tut.enter = false;
           if (s >= steps.length - 1) finishTutorial();

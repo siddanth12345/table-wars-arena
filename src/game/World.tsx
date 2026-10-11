@@ -3,7 +3,6 @@ import { NET, NET_HOOKS, PVP_DMG, PVP_HITBOX, PVP_CENTER_Y, hitPeer, reportDeath
 import { RemotePlayers } from "./RemotePlayers";
 import { PointerLockControls } from "@react-three/drei";
 import { SETTINGS, useSettings, lampIntensity } from "./settings";
-import { MOB, consumeTaps, isTouchDevice } from "./mobileInput";
 import { useEffect, useMemo, useRef, type ElementRef } from "react";
 import * as THREE from "three";
 import {
@@ -693,17 +692,17 @@ export function World() {
       if (G.wallrun) return;
       // Grounded dash: auto-jump first (does NOT consume air jumps), then dash; arm bunny-hop window
       if (grounded.current && G.dashCd <= 0) {
-        if (SETTINGS.autoBunnyHop || MOB.active) {
+        if (SETTINGS.autoBunnyHop !== false) {
           vy.current = JUMP_V;
           grounded.current = false;
           bunnyHop.current = 0.65; // press dash again within window before landing to hop
         }
         const { f, r } = dirs();
         const d = new THREE.Vector3();
-        if (keys.current[SETTINGS.keys.forward] || MOB.moveY > 0.2) d.add(f);
-        if (keys.current[SETTINGS.keys.back] || MOB.moveY < -0.2) d.sub(f);
-        if (keys.current[SETTINGS.keys.right] || MOB.moveX > 0.2) d.add(r);
-        if (keys.current[SETTINGS.keys.left] || MOB.moveX < -0.2) d.sub(r);
+        if (keys.current[SETTINGS.keys.forward]) d.add(f);
+        if (keys.current[SETTINGS.keys.back]) d.sub(f);
+        if (keys.current[SETTINGS.keys.right]) d.add(r);
+        if (keys.current[SETTINGS.keys.left]) d.sub(r);
         if (d.lengthSq() === 0) d.copy(f);
         hv.current.addScaledVector(d.normalize(), DASH_SPEED);
         G.tut.dashed = true;
@@ -714,10 +713,10 @@ export function World() {
       if (!grounded.current && G.airDashes > 0) {
         const { f, r } = dirs();
         const d = new THREE.Vector3();
-        if (keys.current[SETTINGS.keys.forward] || MOB.moveY > 0.2) d.add(f);
-        if (keys.current[SETTINGS.keys.back] || MOB.moveY < -0.2) d.sub(f);
-        if (keys.current[SETTINGS.keys.right] || MOB.moveX > 0.2) d.add(r);
-        if (keys.current[SETTINGS.keys.left] || MOB.moveX < -0.2) d.sub(r);
+        if (keys.current[SETTINGS.keys.forward]) d.add(f);
+        if (keys.current[SETTINGS.keys.back]) d.sub(f);
+        if (keys.current[SETTINGS.keys.right]) d.add(r);
+        if (keys.current[SETTINGS.keys.left]) d.sub(r);
         if (d.lengthSq() === 0) d.copy(f);
         hv.current.addScaledVector(d.normalize(), DASH_SPEED);
         G.tut.dashed = true;
@@ -1018,8 +1017,7 @@ const kd = (e: KeyboardEvent) => {
       G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.campaignDead || (NET.kind === "lobby" && G.pvpDead)
     );
 
-    if ((MOB.active || G.isMobile) && G.phase === "playing" && !G.mobilePaused) G.locked = true;
-    const engaged = G.locked || NET.online || G.freecam || MOB.active || G.isMobile; // mobile has no pointer lock
+    const engaged = G.locked || NET.online || G.freecam;
     if (G.phase === "playing" && engaged && !G.frozen && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
     const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;
@@ -1032,115 +1030,6 @@ const kd = (e: KeyboardEvent) => {
     if (active) {
       if (G.mode !== "tutorial") G.time += dt;
 
-      // --- mobile touch actions ---
-      if (MOB.active && G.phase === "playing" && !G.freecam) {
-        // look
-        if (ctrl.current && (MOB.lookDX || MOB.lookDY)) {
-          const euler = new THREE.Euler(0, 0, 0, "YXZ");
-          euler.setFromQuaternion(cam.quaternion);
-          euler.y -= MOB.lookDX * 0.045 * SETTINGS.sensitivity;
-          euler.x -= MOB.lookDY * 0.035 * SETTINGS.sensitivity;
-          euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.x));
-          cam.quaternion.setFromEuler(euler);
-        }
-        if (MOB.parryTap && G.parryCd <= 0 && !G.parryLocked) {
-          G.parryWin = PARRY_WINDOW;
-          G.parryCd = PARRY_CD_MISS;
-        }
-        if (MOB.dashTap) {
-          // Inline dash so mobile always works (auto-jump + bunny-hop window)
-          const f = new THREE.Vector3();
-          cam.getWorldDirection(f); f.y = 0; f.normalize();
-          const r = new THREE.Vector3(-f.z, 0, f.x);
-          const d = new THREE.Vector3();
-          if (MOB.moveY > 0.2) d.add(f);
-          if (MOB.moveY < -0.2) d.sub(f);
-          if (MOB.moveX > 0.2) d.add(r);
-          if (MOB.moveX < -0.2) d.sub(r);
-          if (d.lengthSq() === 0) d.copy(f);
-          d.normalize();
-          if (!G.wallrun) {
-            if (grounded.current && G.dashCd <= 0) {
-              // Auto-jump (does not spend air jumps) then dash
-              vy.current = JUMP_V;
-              grounded.current = false;
-              bunnyHop.current = 0.55;
-              hv.current.addScaledVector(d, DASH_SPEED);
-              if (hv.current.length() > MAX_HSPEED) hv.current.setLength(MAX_HSPEED);
-              G.dashCd = cfg.dashCd();
-              G.tut.dashed = true;
-            } else if (!grounded.current) {
-              // Air dash OR pre-land bunny-hop dash
-              if (G.airDashes > 0) {
-                hv.current.addScaledVector(d, DASH_SPEED);
-                if (hv.current.length() > MAX_HSPEED) hv.current.setLength(MAX_HSPEED);
-                G.airDashes--;
-                if (vy.current < 0) vy.current = 0;
-                G.tut.dashed = true;
-              }
-              // Always refresh bunny-hop window when dashing near ground
-              bunnyHop.current = Math.max(bunnyHop.current, 0.55);
-            }
-          }
-        }
-        if (MOB.bombTap && G.bombCd <= 0 && !bomb.current.alive) {
-          const dir = new THREE.Vector3();
-          cam.getWorldDirection(dir);
-          bomb.current.alive = true;
-          bomb.current.pos.copy(cam.position).addScaledVector(dir, 1.5);
-          bomb.current.vel.copy(dir).multiplyScalar(BULLET_SPEED);
-          G.bombCd = cfg.bombCd(G.buff > 0);
-          G.tut.bombed = true;
-        }
-        if (MOB.fireDouble && G.bombCd <= 0 && !bomb.current.alive) {
-          const dir = new THREE.Vector3();
-          cam.getWorldDirection(dir);
-          bomb.current.alive = true;
-          bomb.current.pos.copy(cam.position).addScaledVector(dir, 1.5);
-          bomb.current.vel.copy(dir).multiplyScalar(BULLET_SPEED);
-          G.bombCd = cfg.bombCd(G.buff > 0);
-          G.tut.bombed = true;
-        }
-        if (MOB.reloadTap) {
-          const p0 = pos.current;
-          if (bounce.current.t > 0 && !slam.current.on) {
-            const rise = Math.max(0, bounce.current.y - p0.y);
-            vy.current = Math.sqrt(2 * GRAVITY * rise);
-            grounded.current = false;
-            bounce.current.t = 0;
-            G.bounceWin = 0;
-            G.tut.slammed = true;
-          } else if (!grounded.current && !slam.current.on && G.slamCd <= 0) {
-            let ground = 0;
-            for (const s of SOLIDS) if (s.y1 <= p0.y + 0.01 && overlapXZ(p0, s, PLAYER_R * 0.5)) ground = Math.max(ground, s.y1);
-            Object.assign(slam.current, { on: true, fromY: p0.y, h: p0.y - ground });
-            G.slamming = true;
-            G.grappling = false;
-            G.wallrun = false;
-            G.tut.slammed = true;
-          } else if (grounded.current && G.buff <= 0 && G.ammo < MAG && G.reloading <= 0) G.reloading = 1.5;
-        }
-        if (MOB.jumpDouble && G.canGrapple && staticRef.current) {
-          const dir = new THREE.Vector3();
-          cam.getWorldDirection(dir);
-          const rc = new THREE.Raycaster(cam.position.clone(), dir, 0.5, cfg.grapple(GRAPPLE_MAX));
-          const hit = rc.intersectObject(staticRef.current, true)[0];
-          if (hit) {
-            anchor.current.copy(hit.point);
-            ropeLen.current = hit.distance * 0.9;
-            G.grappling = true;
-          }
-        } else if (MOB.jumpTap) {
-          if (grounded.current) {
-            vy.current = JUMP_V;
-            grounded.current = false;
-          } else if (G.airJumps > 0) {
-            vy.current = JUMP_V;
-            G.airJumps--;
-          }
-        }
-        consumeTaps();
-      }
 
       G.parryWin = Math.max(0, G.parryWin - dt);
       G.parryCd = Math.max(0, G.parryCd - dt);
@@ -1194,10 +1083,10 @@ const kd = (e: KeyboardEvent) => {
       const rgt = new THREE.Vector3(-f.z, 0, f.x);
       const wish = new THREE.Vector3();
       const k = keys.current;
-      if (k[SETTINGS.keys.forward] || (MOB.active && MOB.moveY > 0.2)) wish.add(f);
-      if (k[SETTINGS.keys.back] || (MOB.active && MOB.moveY < -0.2)) wish.sub(f);
-      if (k[SETTINGS.keys.right] || (MOB.active && MOB.moveX > 0.2)) wish.add(rgt);
-      if (k[SETTINGS.keys.left] || (MOB.active && MOB.moveX < -0.2)) wish.sub(rgt);
+      if (k[SETTINGS.keys.forward]) wish.add(f);
+      if (k[SETTINGS.keys.back]) wish.sub(f);
+      if (k[SETTINGS.keys.right]) wish.add(rgt);
+      if (k[SETTINGS.keys.left]) wish.sub(rgt);
       if (stunned || freecamOn) wish.set(0, 0, 0);
       if (wish.lengthSq()) wish.normalize();
       const space = !!k[SETTINGS.keys.jump];
@@ -1310,7 +1199,7 @@ const kd = (e: KeyboardEvent) => {
           G.airJumps = cfg.airJumps();
           G.airDashes = cfg.airDashes();
           // Auto bunny-hop from dash window (does not spend air jumps)
-          if (bunnyHop.current > 0 && (SETTINGS.autoBunnyHop || MOB.active)) {
+          if (bunnyHop.current > 0 && SETTINGS.autoBunnyHop !== false) {
             vy.current = JUMP_V;
             grounded.current = false;
             bunnyHop.current = 0;
@@ -1366,7 +1255,7 @@ const kd = (e: KeyboardEvent) => {
         cam.getWorldDirection(dir);
         // mild aim assist toward nearest enemy in cone
         const aa = SETTINGS.aimAssist ?? 0;
-        if (aa > 0 && (MOB.active || aa > 0)) {
+        if (aa > 0) {
           let best: THREE.Vector3 | null = null;
           let bestAng = 0.18 * aa; // max radians to pull
           const tryT = (px: number, py: number, pz: number) => {
@@ -2029,25 +1918,15 @@ const kd = (e: KeyboardEvent) => {
 
     // freecam camera: world sim already ran; only the view is detached
     if (freecamOn) {
-      if (MOB.active && (MOB.lookDX || MOB.lookDY)) {
-        const euler = new THREE.Euler(0, 0, 0, "YXZ");
-        euler.setFromQuaternion(cam.quaternion);
-        euler.y -= MOB.lookDX * 0.045 * SETTINGS.sensitivity;
-        euler.x -= MOB.lookDY * 0.035 * SETTINGS.sensitivity;
-        euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.x));
-        cam.quaternion.setFromEuler(euler);
-        MOB.lookDX = 0;
-        MOB.lookDY = 0;
-      }
       const spd = FREECAM_SPEEDS[G.freecamSpeedIdx] ?? 44;
       const forward = new THREE.Vector3();
       cam.getWorldDirection(forward);
       const right = new THREE.Vector3().crossVectors(forward, cam.up).normalize();
       const move = new THREE.Vector3();
-      if (keys.current["KeyW"] || keys.current[SETTINGS.keys.forward] || (MOB.active && MOB.moveY > 0.2)) move.add(forward);
-      if (keys.current["KeyS"] || keys.current[SETTINGS.keys.back] || (MOB.active && MOB.moveY < -0.2)) move.sub(forward);
-      if (keys.current["KeyA"] || keys.current[SETTINGS.keys.left] || (MOB.active && MOB.moveX < -0.2)) move.sub(right);
-      if (keys.current["KeyD"] || keys.current[SETTINGS.keys.right] || (MOB.active && MOB.moveX > 0.2)) move.add(right);
+      if (keys.current["KeyW"] || keys.current[SETTINGS.keys.forward]) move.add(forward);
+      if (keys.current["KeyS"] || keys.current[SETTINGS.keys.back]) move.sub(forward);
+      if (keys.current["KeyA"] || keys.current[SETTINGS.keys.left]) move.sub(right);
+      if (keys.current["KeyD"] || keys.current[SETTINGS.keys.right]) move.add(right);
       if (move.lengthSq() > 0) {
         move.normalize().multiplyScalar(spd * dt);
         cam.position.add(move);

@@ -9,8 +9,6 @@ import * as THREE from "three";
 import { World } from "./World";
 import { G, MAG, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial } from "./state";
 import { SkinsPanel } from "./SkinsPanel";
-import { TouchControls } from "./TouchControls";
-import { isTouchDevice } from "./mobileInput";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
 import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
@@ -178,7 +176,7 @@ function HUD() {
   const step = tutList[G.tutStep];
   return (
     <div className="pointer-events-none fixed inset-0 z-10 select-none font-mono text-hud">
-      {playing && (G.locked || G.isMobile) && G.countdown <= 0.6 && !G.scoped && (
+      {playing && G.locked && G.countdown <= 0.6 && !G.scoped && (
         <div className="absolute inset-0 overflow-hidden transition-opacity duration-500" aria-hidden="true" style={{ opacity: Math.max(0, Math.min(1, (G.speed - 28) / 80)) }}>
           {([-1, 1] as const).flatMap((side) => Array.from({ length: Math.min(8, 2 + Math.floor((G.speed - 38) / 24)) }, (_, i) => {
             const intensity = Math.max(0, Math.min(1, (G.speed - 28) / 150));
@@ -196,7 +194,7 @@ function HUD() {
       {G.redFlash > 0 && <div className="absolute inset-0 bg-destructive/40" />}
       {(G.buff > 0 || G.parryFlash > 0) && <div className="absolute inset-0 shadow-[inset_0_0_120px_var(--shield)]" />}
       {G.scoped && playing && <div className="absolute inset-0 bg-[radial-gradient(circle,transparent_32%,var(--scope)_34%)]" />}
-      {playing && (G.locked || G.isMobile) && G.countdown > 0 && (
+      {playing && G.locked && G.countdown > 0 && (
         <div className="absolute inset-0 flex items-center justify-center text-9xl font-black drop-shadow-[0_4px_0_rgba(0,0,0,0.6)]">
           {G.countdown > 0.6 ? Math.ceil(G.countdown - 0.6) : "GO!"}
         </div>
@@ -269,7 +267,6 @@ function HUD() {
       )}
 
       <MiniMap />
-      {G.isMobile && <TouchControls />}
       <div className="absolute left-6 top-6 w-72 space-y-3 rounded bg-hud-panel p-3 text-xs font-bold uppercase tracking-widest">
         <div className="flex h-28 items-stretch gap-5">
           <div className="flex min-w-0 flex-1 flex-col justify-between">
@@ -365,8 +362,7 @@ function startTutorial() {
 function resume() {
   G.mobilePaused = false;
   G.countdown = 3.6;
-  if (!G.isMobile) lockPointer();
-  else G.locked = true;
+  lockPointer();
 }
 
 const BOTS: [string, string, string][] = [
@@ -518,11 +514,8 @@ function Menu() {
       </div>
     );
   }
-  // Mobile has no pointer-lock; treat as engaged unless user opens pause
-  if (G.isMobile && !G.mobilePaused && phase === "playing") return null;
   if (phase !== "playing" || G.locked || G.trainMenu || G.freecam) return null;
-  if (NET.online && !showSettings && !G.isMobile) return <OnlinePause onSettings={() => setShowSettings(true)} />;
-  if (NET.online && !showSettings && G.isMobile && G.mobilePaused) return <OnlinePause onSettings={() => setShowSettings(true)} />;
+  if (NET.online && !showSettings) return <OnlinePause onSettings={() => setShowSettings(true)} />;
   const tut = G.mode === "tutorial";
   const train = G.mode === "training";
   if (showSettings) {
@@ -661,41 +654,6 @@ function WinScreen() {
   );
 }
 
-const MOBILE_TUT = [
-  { title: "Move", text: "Left stick moves your table. Right stick looks around." },
-  { title: "Fire ⦿", text: "Hold fire to shoot. Double-tap fire to throw a bomb." },
-  { title: "Jump ⬆", text: "Tap jump to jump. Double-tap jump when the crosshair is yellow to grapple." },
-  { title: "Dash ⇢", text: "Dash auto-jumps on the ground. Tap again near landing to bunny-hop (no air-jump cost)." },
-  { title: "Reload / Slam ↻⬇", text: "On the ground: reload. In the air: slam. After slam land, tap again to bounce." },
-  { title: "Parry ⛨", text: "Tap parry just before a bullet hits. Success = 4s cooldown, miss = 7s." },
-  { title: "Crosshair", text: "Blue + tilted = enemy under aim. Yellow = can grapple. Good luck!" },
-];
-
-function MobileTutorial() {
-  useTick(200);
-  if (!G.isMobile || !G.mobileTut || G.phase !== "playing") return null;
-  const step = MOBILE_TUT[G.mobileTutStep] ?? MOBILE_TUT[0]!;
-  return (
-    <div className="pointer-events-auto absolute inset-x-0 bottom-36 z-40 mx-auto max-w-sm rounded-xl border-2 border-crosshair/50 bg-hud-panel/95 p-4 text-center text-hud shadow-2xl">
-      <div className="text-xs font-black uppercase tracking-widest text-crosshair">Mobile tips · {G.mobileTutStep + 1}/{MOBILE_TUT.length}</div>
-      <div className="mt-1 text-lg font-black uppercase">{step.title}</div>
-      <p className="mt-2 text-sm opacity-90">{step.text}</p>
-      <button
-        type="button"
-        className="mt-3 rounded bg-crosshair px-6 py-2 text-sm font-black uppercase text-hud-ink"
-        onClick={() => {
-          if (G.mobileTutStep >= MOBILE_TUT.length - 1) {
-            G.mobileTut = false;
-            try { localStorage.setItem("tw-mobile-tut", "1"); } catch { /* ignore */ }
-          } else G.mobileTutStep++;
-        }}
-      >
-        {G.mobileTutStep >= MOBILE_TUT.length - 1 ? "Got it" : "Next"}
-      </button>
-    </div>
-  );
-}
-
 export function Game() {
   const [, force] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -716,20 +674,14 @@ export function Game() {
     try { done = localStorage.getItem("tw-tutorial-done") === "1"; } catch { /* ignore */ }
     void done;
     G.phase = "home";
-    G.isMobile = isTouchDevice();
-    if (G.isMobile) {
-      try {
-        if (localStorage.getItem("tw-mobile-tut") !== "1") {
-          G.mobileTut = true;
-          G.mobileTutStep = 0;
-        }
-      } catch { G.mobileTut = true; }
-    }
+    G.isMobile = false;
+    G.mobileTut = false;
+    G.mobilePaused = false;
     force((n) => n + 1);
   }, []);
   return (
     <div className="gui fixed inset-0 bg-black">
-      <Canvas shadows dpr={G.isMobile ? [1, 1.25] : [1, 1.75]} camera={{ position: [0, 3.2, 12], fov: 72, near: 0.1, far: 3000 }}>
+      <Canvas shadows dpr={[1, 1.75]} camera={{ position: [0, 3.2, 12], fov: 72, near: 0.1, far: 3000 }}>
         <SceneLighting />
         <ShadowToggle />
         <World />
@@ -739,7 +691,6 @@ export function Game() {
       <TrainingMenu />
       <Home />
       <WinScreen />
-      <MobileTutorial />
       <QueueOverlay />
       <MapPick />
       <Scoreboard />

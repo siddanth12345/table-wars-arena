@@ -1,5 +1,5 @@
 import { NET } from "./net";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ACTIONS, DEFAULT_SETTINGS, DEFAULT_MOBILE_LAYOUT, applySettings, keyLabel, useSettings, type Action, type Settings, type TimeOfDay, type MobileLayout } from "./settings";
 import { isTouchDevice } from "./mobileInput";
 import { G } from "./state";
@@ -52,80 +52,131 @@ function Switch({ on, onChange, a, b }: { on: boolean; onChange: (v: boolean) =>
       <button className={`px-4 py-2 ${on ? "bg-crosshair text-hud-ink" : ""}`} onClick={() => onChange(true)}>{a}</button>
       <button className={`px-4 py-2 ${!on ? "bg-crosshair text-hud-ink" : ""}`} onClick={() => onChange(false)}>{b}</button>
     </div>
-  );
-}
-
 function MobileLayoutEditor({ draft, setDraft, setSaved, onClose }: {
   draft: Settings;
   setDraft: (fn: (d: Settings) => Settings) => void;
   setSaved: (v: boolean) => void;
   onClose: () => void;
 }) {
-  const layout = draft.mobileLayout ?? DEFAULT_MOBILE_LAYOUT;
   const labels: Record<string, string> = {
     fire: "Fire", jump: "Jump", dash: "Dash", reload: "Reload", parry: "Parry", bomb: "Bomb",
   };
   const ids = Object.keys(labels) as (keyof MobileLayout)[];
+  const playfield = useRef<HTMLDivElement>(null);
+  // Local positions during edit — only commit on release to avoid lag/glitch
+  const [local, setLocal] = useState<Record<string, { x: number; y: number }>>(() => {
+    const base = draft.mobileLayout ?? DEFAULT_MOBILE_LAYOUT;
+    const out: Record<string, { x: number; y: number }> = {};
+    for (const id of ids) {
+      const p = base[id] ?? DEFAULT_MOBILE_LAYOUT[id];
+      out[id] = {
+        x: Math.min(0.88, Math.max(0.12, p.x)),
+        y: Math.min(0.45, Math.max(0.12, p.y)),
+      };
+    }
+    return out;
+  });
+  const dragging = useRef<string | null>(null);
+  const localRef = useRef(local);
+  localRef.current = local;
+
+  const commit = (next: Record<string, { x: number; y: number }>) => {
+    setSaved(false);
+    setDraft((d) => ({
+      ...d,
+      mobileLayout: {
+        ...DEFAULT_MOBILE_LAYOUT,
+        ...d.mobileLayout,
+        ...next,
+      },
+    }));
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-[#0c0a12] font-mono text-hud">
-      <div className="flex items-center justify-between border-b border-white/15 px-4 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-white/15 px-4 py-3">
         <div>
           <div className="text-xs font-bold uppercase tracking-widest text-crosshair">Mobile layout</div>
-          <div className="text-sm opacity-70">Drag buttons · move stick is dynamic (bottom-left)</div>
+          <div className="text-sm opacity-70">Drag buttons · stick is dynamic (bottom-left)</div>
         </div>
-        <button type="button" className="rounded-lg border-2 border-white/30 px-4 py-2 text-sm font-black uppercase" onClick={onClose}>Done</button>
+        <button type="button" className="rounded-lg border-2 border-white/30 px-4 py-2 text-sm font-black uppercase" onClick={() => { commit(local); onClose(); }}>Done</button>
       </div>
-      <div className="relative min-h-0 flex-1 touch-none">
-        <div className="absolute inset-3 rounded-2xl border-2 border-dashed border-white/20 bg-black/50">
-          {/* move zone hint */}
-          <div className="absolute bottom-0 left-0 h-1/2 w-[48%] rounded-bl-2xl border-r border-t border-crosshair/30 bg-crosshair/5">
+      <div className="relative min-h-0 flex-1 p-3">
+        <div
+          ref={playfield}
+          className="relative h-full w-full overflow-hidden rounded-2xl border-2 border-dashed border-white/25 bg-black/60 touch-none"
+          onPointerMove={(e) => {
+            if (!dragging.current || !playfield.current) return;
+            e.preventDefault();
+            const r = playfield.current.getBoundingClientRect();
+            // Position is CENTER of button, using bottom-left origin (same as in-game)
+            let x = (e.clientX - r.left) / r.width;
+            let y = 1 - (e.clientY - r.top) / r.height;
+            x = Math.min(0.88, Math.max(0.12, x));
+            y = Math.min(0.45, Math.max(0.12, y));
+            const id = dragging.current;
+            const next = { ...localRef.current, [id]: { x, y } };
+            localRef.current = next;
+            setLocal(next);
+          }}
+          onPointerUp={() => {
+            if (dragging.current) {
+              commit(localRef.current);
+              dragging.current = null;
+            }
+          }}
+          onPointerCancel={() => {
+            if (dragging.current) {
+              commit(localRef.current);
+              dragging.current = null;
+            }
+          }}
+        >
+          <div className="pointer-events-none absolute bottom-0 left-0 h-1/2 w-[48%] rounded-bl-2xl border-r border-t border-crosshair/25 bg-crosshair/5">
             <span className="absolute bottom-2 left-2 text-[10px] font-bold uppercase text-crosshair/70">Move zone</span>
           </div>
-          <div className="absolute right-2 top-2 text-[10px] font-bold uppercase text-white/40">Look = rest of screen</div>
+          <div className="pointer-events-none absolute right-2 top-2 text-[10px] font-bold uppercase text-white/40">Look = rest of screen</div>
           {ids.map((id) => {
-            const pos = layout[id] ?? DEFAULT_MOBILE_LAYOUT[id];
+            const pos = local[id] ?? { x: 0.7, y: 0.25 };
             return (
               <div
                 key={id}
-                className="absolute flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 cursor-grab flex-col items-center justify-center rounded-2xl border-2 border-white/40 bg-gradient-to-b from-white/20 to-black/60 text-white active:cursor-grabbing"
+                className="absolute flex h-[min(18vw,5.5rem)] w-[min(18vw,5.5rem)] -translate-x-1/2 -translate-y-1/2 cursor-grab flex-col items-center justify-center rounded-2xl border-[3px] border-white/50 bg-gradient-to-b from-white/25 to-black/70 text-white active:cursor-grabbing"
                 style={{ left: `${pos.x * 100}%`, bottom: `${pos.y * 100}%` }}
                 onPointerDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  const parent = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
-                  const move = (ev: PointerEvent) => {
-                    const x = Math.min(0.94, Math.max(0.06, (ev.clientX - parent.left) / parent.width));
-                    const y = Math.min(0.92, Math.max(0.08, 1 - (ev.clientY - parent.top) / parent.height));
-                    setSaved(false);
-                    setDraft((d) => ({ ...d, mobileLayout: { ...d.mobileLayout, [id]: { x, y } } }));
-                  };
-                  const up = () => {
-                    window.removeEventListener("pointermove", move);
-                    window.removeEventListener("pointerup", up);
-                  };
-                  window.addEventListener("pointermove", move);
-                  window.addEventListener("pointerup", up);
+                  dragging.current = id as string;
+                  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
                 }}
               >
-                <span className="text-sm font-black leading-none">{labels[id]}</span>
+                <span className="text-xs font-black uppercase leading-none">{labels[id]}</span>
               </div>
             );
           })}
         </div>
       </div>
-      <div className="flex gap-2 border-t border-white/15 p-3">
+      <div className="flex shrink-0 gap-2 border-t border-white/15 p-3">
         <button
           type="button"
           className="rounded-lg border-2 border-destructive/60 px-4 py-2 text-sm font-black uppercase text-destructive"
-          onClick={() => { setSaved(false); setDraft((d) => ({ ...d, mobileLayout: { ...DEFAULT_MOBILE_LAYOUT } })); }}
+          onClick={() => {
+            const next: Record<string, { x: number; y: number }> = {};
+            for (const id of ids) next[id] = { ...DEFAULT_MOBILE_LAYOUT[id] };
+            setLocal(next);
+            commit(next);
+          }}
         >
           Reset layout
         </button>
-        <button type="button" className="flex-1 rounded-lg bg-crosshair py-2 text-sm font-black uppercase text-hud-ink" onClick={onClose}>
+        <button type="button" className="flex-1 rounded-lg bg-crosshair py-2 text-sm font-black uppercase text-hud-ink" onClick={() => { commit(local); onClose(); }}>
           Done
         </button>
       </div>
     </div>
+  );
+}
+
   );
 }
 

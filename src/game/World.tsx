@@ -696,7 +696,7 @@ export function World() {
         if (SETTINGS.autoBunnyHop || MOB.active) {
           vy.current = JUMP_V;
           grounded.current = false;
-          bunnyHop.current = 0.55; // press dash again within window before landing to hop
+          bunnyHop.current = 0.65; // press dash again within window before landing to hop
         }
         const { f, r } = dirs();
         const d = new THREE.Vector3();
@@ -1047,11 +1047,42 @@ const kd = (e: KeyboardEvent) => {
           G.parryWin = PARRY_WINDOW;
           G.parryCd = PARRY_CD_MISS;
         }
-        if (MOB.dashTap) doDashRef.current(() => {
+        if (MOB.dashTap) {
+          // Inline dash so mobile always works (auto-jump + bunny-hop window)
           const f = new THREE.Vector3();
           cam.getWorldDirection(f); f.y = 0; f.normalize();
-          return { f, r: new THREE.Vector3(-f.z, 0, f.x) };
-        });
+          const r = new THREE.Vector3(-f.z, 0, f.x);
+          const d = new THREE.Vector3();
+          if (MOB.moveY > 0.2) d.add(f);
+          if (MOB.moveY < -0.2) d.sub(f);
+          if (MOB.moveX > 0.2) d.add(r);
+          if (MOB.moveX < -0.2) d.sub(r);
+          if (d.lengthSq() === 0) d.copy(f);
+          d.normalize();
+          if (!G.wallrun) {
+            if (grounded.current && G.dashCd <= 0) {
+              // Auto-jump (does not spend air jumps) then dash
+              vy.current = JUMP_V;
+              grounded.current = false;
+              bunnyHop.current = 0.55;
+              hv.current.addScaledVector(d, DASH_SPEED);
+              if (hv.current.length() > MAX_HSPEED) hv.current.setLength(MAX_HSPEED);
+              G.dashCd = cfg.dashCd();
+              G.tut.dashed = true;
+            } else if (!grounded.current) {
+              // Air dash OR pre-land bunny-hop dash
+              if (G.airDashes > 0) {
+                hv.current.addScaledVector(d, DASH_SPEED);
+                if (hv.current.length() > MAX_HSPEED) hv.current.setLength(MAX_HSPEED);
+                G.airDashes--;
+                if (vy.current < 0) vy.current = 0;
+                G.tut.dashed = true;
+              }
+              // Always refresh bunny-hop window when dashing near ground
+              bunnyHop.current = Math.max(bunnyHop.current, 0.55);
+            }
+          }
+        }
         if (MOB.bombTap && G.bombCd <= 0 && !bomb.current.alive) {
           const dir = new THREE.Vector3();
           cam.getWorldDirection(dir);

@@ -51,12 +51,12 @@ export type Settings = {
 export const DEFAULT_MOBILE_LAYOUT: MobileLayout = {
   move: { x: 0.18, y: 0.28 },
   look: { x: 0.72, y: 0.40 },
-  fire: { x: 0.86, y: 0.28 },
-  jump: { x: 0.70, y: 0.22 },
-  dash: { x: 0.70, y: 0.38 },
-  reload: { x: 0.54, y: 0.28 },
-  parry: { x: 0.86, y: 0.46 },
-  bomb: { x: 0.54, y: 0.46 },
+  fire: { x: 0.82, y: 0.20 },
+  jump: { x: 0.62, y: 0.18 },
+  dash: { x: 0.62, y: 0.36 },
+  reload: { x: 0.42, y: 0.22 },
+  parry: { x: 0.82, y: 0.40 },
+  bomb: { x: 0.42, y: 0.40 },
 };
 
 export const DEFAULT_SETTINGS: Settings = {

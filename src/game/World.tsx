@@ -840,9 +840,9 @@ const kd = (e: KeyboardEvent) => {
       if (e.code === SETTINGS.keys.jump) G.wallrun = false;
     };
     const onSoftMove = (e: MouseEvent) => {
-      // When soft-locked (no pointer lock element), drive look from movement deltas (iPad mouse/trackpad)
-      if (!G.locked || document.pointerLockElement) return;
-      if (G.phase !== "playing") return;
+      // Drive look ourselves for both hard pointer-lock and soft-lock (iPad).
+      // PointerLockControls pointerSpeed is 0 so we don't double-rotate.
+      if (!G.locked || G.phase !== "playing") return;
       softLookRef.current.x += e.movementX || 0;
       softLookRef.current.y += e.movementY || 0;
     };
@@ -1049,17 +1049,18 @@ const kd = (e: KeyboardEvent) => {
 
     // --- freecam movement runs after sim so physics keep going; camera is overridden below ---
     // freecam while dead in campaign / lobby respawn wait, or normal training/lobby/pvp freecam
-        // Soft-lock look (iPad keyboard+mouse / no pointer lock)
-    if (G.locked && !document.pointerLockElement && G.phase === "playing") {
+    // Unified mouse look (pointer-locked PC + soft-lock iPad)
+    if (G.locked && G.phase === "playing") {
       const dx = softLookRef.current.x;
       const dy = softLookRef.current.y;
       if (dx || dy) {
         softLookRef.current.x = 0;
         softLookRef.current.y = 0;
+        const sens = SETTINGS.sensitivity * (G.scoped ? 0.45 : 1);
         const euler = new THREE.Euler(0, 0, 0, "YXZ");
         euler.setFromQuaternion(cam.quaternion);
-        euler.y -= dx * 0.0022 * SETTINGS.sensitivity;
-        euler.x -= dy * 0.0022 * SETTINGS.sensitivity;
+        euler.y -= dx * 0.0022 * sens;
+        euler.x -= dy * 0.0022 * sens;
         euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.x));
         cam.quaternion.setFromEuler(euler);
       }
@@ -2178,7 +2179,7 @@ const kd = (e: KeyboardEvent) => {
       {Array.from({ length: BOT_LIGHTS }, (_, i) => (
         <pointLight key={`bot${i}`} ref={(l) => { botLights.current[i] = l; }} intensity={0} distance={180} color="#ffd9a8" />
       ))}
-      <PointerLockControls ref={ctrl} selector="#no-auto-lock" pointerSpeed={settings.sensitivity} />
+      <PointerLockControls ref={ctrl} selector="#no-auto-lock" pointerSpeed={0} />
       <group ref={staticRef}>
         <Room />
       </group>

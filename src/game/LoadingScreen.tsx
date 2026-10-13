@@ -126,7 +126,7 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
   return (
     <div className="gui fixed inset-0 z-50 select-none overflow-hidden bg-hud-scrim font-mono text-hud" style={{ background: "radial-gradient(circle at 50% 30%, oklch(0.32 0.06 55), oklch(0.12 0.03 55))" }}>
       <div ref={box} onPointerDown={grab} className="absolute left-0 top-0 cursor-grab active:cursor-grabbing" style={{ width: SIZE, height: SIZE, touchAction: "none" }}>
-        <Canvas camera={{ position: [6, 4, 8], fov: 40 }} gl={{ alpha: true }}>
+        <Canvas camera={{ position: [6, 4, 8], fov: 40 }} dpr={[1, 1.5]} gl={{ alpha: true, antialias: false, powerPreference: "default" }}>
           <ambientLight intensity={1.2} />
           <directionalLight position={[5, 10, 6]} intensity={2.2} />
           <SpinTable spin={spin} />
@@ -140,7 +140,12 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
         </div>
         <div className="text-sm font-bold uppercase tracking-widest">{ready ? "All servers ready" : `${STEPS[step]}…`}</div>
         {ready && (
-          <button className="pointer-events-auto rounded bg-crosshair px-10 py-3 text-lg font-black uppercase text-hud-ink" onClick={onDone}>
+          <button
+            type="button"
+            className="pointer-events-auto min-h-12 min-w-[10rem] touch-manipulation rounded bg-crosshair px-10 py-4 text-lg font-black uppercase text-hud-ink"
+            onClick={onDone}
+            onPointerUp={(e) => { e.preventDefault(); onDone(); }}
+          >
             Enter
           </button>
         )}

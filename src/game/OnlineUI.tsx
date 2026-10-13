@@ -19,52 +19,30 @@ function useTick(ms: number) {
   useEffect(() => { const id = setInterval(() => t((n) => n + 1), ms); return () => clearInterval(id); }, [ms]);
 }
 
-/** Small green table that spins — used while lobby / 1v1 / joins load. */
-function LoaderTable() {
-  const g = useRef<THREE.Group>(null);
-  useFrame((_, dt) => {
-    if (g.current) g.current.rotation.y += dt * 2.4;
-  });
-  return (
-    <group ref={g} position={[0, -0.4, 0]}>
-      <mesh position={[0, 0.85, 0]} castShadow>
-        <boxGeometry args={[2.4, 0.28, 1.6]} />
-        <meshStandardMaterial color="#2fa84f" roughness={0.45} />
-      </mesh>
-      {([[-0.95, 0.2, -0.55], [0.95, 0.2, -0.55], [-0.95, 0.2, 0.55], [0.95, 0.2, 0.55]] as const).map((p, i) => (
-        <mesh key={i} position={p}>
-          <boxGeometry args={[0.22, 1.1, 0.22]} />
-          <meshStandardMaterial color="#197a37" roughness={0.5} />
-        </mesh>
-      ))}
-      {[-0.4, 0.4].map((x) => (
-        <group key={x} position={[x, 0.95, 0.82]}>
-          <mesh><sphereGeometry args={[0.16, 14, 10]} /><meshStandardMaterial color="#f5f2dc" /></mesh>
-          <mesh position={[0, 0, 0.14]}><sphereGeometry args={[0.06, 10, 8]} /><meshStandardMaterial color="#172117" /></mesh>
-        </group>
-      ))}
-    </group>
-  );
-}
-
-/** Full-screen connecting overlay — blocks extra clicks while online actions run. */
+/** Full-screen connecting overlay — CSS table spin (no extra WebGL; safer on mobile). */
 export function ConnectingOverlay({ label, onCancel }: { label: string; onCancel?: () => void }) {
   return (
     <div className="pointer-events-auto fixed inset-0 z-[80] flex flex-col items-center justify-center bg-[#0a0c10]/92 font-mono text-hud backdrop-blur-sm">
-      <div className="h-44 w-44">
-        <Canvas camera={{ position: [0, 1.6, 4.2], fov: 42 }} dpr={[1, 1.5]}>
-          <ambientLight intensity={0.55} />
-          <directionalLight position={[3, 5, 2]} intensity={1.1} />
-          <LoaderTable />
-        </Canvas>
+      <div
+        className="relative h-28 w-36"
+        style={{ animation: "tble-spin 1.4s linear infinite", transformStyle: "preserve-3d" }}
+      >
+        <div className="absolute inset-x-2 top-8 h-5 rounded-sm bg-[#2fa84f] shadow-lg" />
+        <div className="absolute bottom-2 left-3 h-10 w-2.5 rounded-sm bg-[#197a37]" />
+        <div className="absolute bottom-2 right-3 h-10 w-2.5 rounded-sm bg-[#197a37]" />
+        <div className="absolute bottom-2 left-1/3 h-10 w-2.5 -translate-x-1/2 rounded-sm bg-[#197a37]" />
+        <div className="absolute bottom-2 right-1/3 h-10 w-2.5 translate-x-1/2 rounded-sm bg-[#197a37]" />
+        <div className="absolute left-6 top-6 h-3 w-3 rounded-full bg-[#f5f2dc]" />
+        <div className="absolute right-6 top-6 h-3 w-3 rounded-full bg-[#f5f2dc]" />
       </div>
-      <div className="mt-2 text-center">
+      <style>{`@keyframes tble-spin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }`}</style>
+      <div className="mt-4 text-center">
         <div className="text-xs font-bold uppercase tracking-[0.35em] text-crosshair">TBLE</div>
         <div className="mt-2 text-xl font-black uppercase tracking-widest">{label}</div>
         <div className="mt-2 animate-pulse text-[11px] font-bold uppercase tracking-widest opacity-50">Please wait · do not spam click</div>
       </div>
       {onCancel && (
-        <button type="button" className={`${btnAlt} mt-8`} onClick={onCancel}>Cancel</button>
+        <button type="button" className={`${btnAlt} mt-8 min-h-12 touch-manipulation`} onClick={onCancel}>Cancel</button>
       )}
     </div>
   );

@@ -703,23 +703,28 @@ export function Game() {
   }, []);
   return (
     <div className="gui fixed inset-0 bg-black">
-      <Canvas shadows dpr={[1, 1.75]} camera={{ position: [0, 3.2, 12], fov: 72, near: 0.1, far: 3000 }}>
-        <SceneLighting />
-        <ShadowToggle />
-        <World />
-      </Canvas>
-      <HUD />
-      <Menu />
-      <TrainingMenu />
-      <Home />
-      <WinScreen />
-      <QueueOverlay />
-      <MapPick />
-      <Scoreboard />
-      <PvpEnd />
-      <LobbyBar />
-      <Invites />
-      {!loaded && <LoadingScreen onDone={() => setLoaded(true)} />}
+      {!loaded ? (
+        <LoadingScreen onDone={() => setLoaded(true)} />
+      ) : (
+        <>
+          <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, 3.2, 12], fov: 72, near: 0.1, far: 3000 }}>
+            <SceneLighting />
+            <ShadowToggle />
+            <World />
+          </Canvas>
+          <HUD />
+          <Menu />
+          <TrainingMenu />
+          <Home />
+          <WinScreen />
+          <QueueOverlay />
+          <MapPick />
+          <Scoreboard />
+          <PvpEnd />
+          <LobbyBar />
+          <Invites />
+        </>
+      )}
     </div>
   );
 }

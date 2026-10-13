@@ -674,10 +674,9 @@ export function World() {
         G.userPaused = false;
         return;
       }
-      // Pointer lock lost
       const mobile = isMobilePlay();
       if (mobile) {
-        // Mobile: soft-lock stays unless user hit Pause
+        // Soft-lock: only unlock when pause button / pauseGame set userPaused
         if (G.userPaused || G.phase !== "playing") {
           G.locked = false;
           G.firing = false;
@@ -688,7 +687,7 @@ export function World() {
         }
         return;
       }
-      // PC: unlock = immediate pause (one Esc press, not unlock-then-pause)
+      // PC: leaving pointer lock = pause
       if (G.phase === "playing") {
         G.userPaused = true;
         G.locked = false;
@@ -1078,7 +1077,9 @@ const kd = (e: KeyboardEvent) => {
       G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.campaignDead || (NET.kind === "lobby" && G.pvpDead)
     );
 
-    const engaged = G.locked || NET.online || G.freecam; // G.locked includes soft-lock on iPad
+    // Mobile soft-lock: keep locked while playing unless user paused
+    if (isMobilePlay() && G.phase === "playing" && !G.userPaused) G.locked = true;
+    const engaged = G.locked || NET.online || G.freecam;
     if (G.phase === "playing" && engaged && !G.frozen && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
     const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;

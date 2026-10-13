@@ -551,9 +551,9 @@ function Menu() {
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-hud-scrim font-mono text-hud">
       <div className="w-full max-w-sm rounded-lg border-2 border-hud/30 bg-hud-panel p-8 text-center">
         <h1 className="text-5xl font-black tracking-tight">{tut ? "Tutorial" : train ? "Training" : "Paused"}</h1>
-        {!isMobilePlay() && (
-          <p className="mt-2 text-xs font-bold uppercase tracking-widest opacity-60">Click Resume to lock the mouse and play</p>
-        )}
+        <p className="mt-2 text-xs font-bold uppercase tracking-widest opacity-60">
+          {isMobilePlay() ? "Tap Resume to lock controls and play · Pause button unlocks" : "Click Resume to lock the mouse and play"}
+        </p>
         <div className="mt-6 flex flex-col gap-3">
           <button className={btnMain} onClick={resume}>Resume</button>
           <button className={btnAlt} onClick={tut ? startTutorial : train ? startTraining : playGame}>Restart</button>

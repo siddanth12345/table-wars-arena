@@ -117,6 +117,7 @@ export const G = {
   respawnMsg: 0,
   tutStep: 0,
   trainMenu: false,
+  userPaused: false,
   pvpDead: false,
   frozen: false,
   bossMax: BOSS_HITS,
@@ -153,7 +154,7 @@ export function resetGame(mode: Mode = G.mode) {
     shots: 0, hits: 0, parries: 0, time: 0, firing: false, scoped: false, respawnMsg: 0, tutStep: 0,
     tut: { enter: false, dashed: false, zoomed: false, bombed: false, slammed: false },
     crosshair: "normal", canGrapple: false, mobileTut: false, mobileTutStep: 0, mobilePaused: false,
-    trainMenu: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
+    trainMenu: false, userPaused: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
     campaignDead: false, shardProgress: 0, reviveQueue: [], freecam: false, freecamSpeedIdx: 0, lobbyRespawnT: 0, onlineTut: false, diedThisRun: [],
   });
   TRAIN_Q.length = 0;
@@ -179,11 +180,21 @@ export function setLocker(fn: (() => void) | null) {
   lockFn = fn;
 }
 export function lockPointer() {
+  // Always soft-lock so iPad / tablets without pointer-lock don't auto-pause.
+  // Real pointer-lock is still requested when the browser supports it.
+  G.userPaused = false;
+  G.locked = true;
   try {
     lockFn?.();
   } catch {
-    /* browser may refuse right after Esc; user can click again */
+    /* browser may refuse right after Esc; soft-lock keeps the game playable */
   }
+  // If pointer lock never attaches (common on iPad), stay soft-locked.
+  try {
+    if (!document.pointerLockElement) {
+      document.body.requestPointerLock?.();
+    }
+  } catch { /* ignore */ }
 }
 
 // Minimap snapshot, written by World each frame, read by the HUD.

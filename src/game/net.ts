@@ -129,10 +129,20 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
   const ch = supabase.channel(`tble:${name}`, { config: { broadcast: { self: false }, presence: { key: id } } });
   room = ch;
   ch.on("broadcast", { event: "pose" }, ({ payload }) => {
-    const p = payload as Peer;
+    const p = payload as Peer & { skinVer?: number };
     const cur = NET.peers.get(p.id);
-    const skinChanged = JSON.stringify(cur?.skin) !== JSON.stringify(p.skin);
-    NET.peers.set(p.id, { ...p, name: cur?.name ?? NET.names[p.id] ?? "player", t: performance.now(), skin: p.skin ?? cur?.skin });
+    const skin = p.skin ?? cur?.skin;
+    const skinChanged = !!p.skin && (!cur?.skin || (p as { skinVer?: number }).skinVer !== (cur as { skinVer?: number } | undefined)?.skinVer);
+    NET.peers.set(p.id, {
+      id: p.id,
+      name: cur?.name ?? NET.names[p.id] ?? p.name ?? "player",
+      x: p.x, y: p.y, z: p.z, yaw: p.yaw,
+      hp: p.hp, dead: !!p.dead,
+      t: performance.now(),
+      skin,
+      ...(p.skin ? { skinVer: (p as { skinVer?: number }).skinVer } as object : cur ? { skinVer: (cur as { skinVer?: number }).skinVer } as object : {}),
+    } as Peer);
+    // Only force React re-render on join or skin change — pose interp runs from the Map in useFrame
     if (!cur || skinChanged) bump();
   });
   ch.on("broadcast", { event: "hit" }, ({ payload }) => {
@@ -205,6 +215,10 @@ export function leaveRoom(full = true) {
   if (pickTimer) clearTimeout(pickTimer);
   if (room) void supabase.removeChannel(room);
   room = null;
+  lastSkinSent = "";
+  lastSkinVer = 0;
+  lastSkinAt = 0;
+  lastPose = 0;
   leaveQueue();
   picks = {};
   roundLocked = false;
@@ -218,13 +232,37 @@ export function goHomeOnline() {
   goHome();
 }
 
-/** Streams this player's pose (~10 per second). */
+/** Last skin version we broadcast (avoid shipping full skin every tick). */
+let lastSkinSent = "";
+let lastSkinVer = 0;
+let lastSkinAt = 0;
+
+/** Streams this player's pose (~12 per second, compact payload). */
 export function sendPose(x: number, y: number, z: number, yaw: number) {
   if (!room || !NET.online) return;
   const now = performance.now();
-  if (now - lastPose < 100) return;
+  if (now - lastPose < 80) return; // ~12.5 Hz — smooth enough, less flood than before
   lastPose = now;
-  send("pose", { id: myId(), x, y, z, yaw, hp: G.playerHp, dead: G.pvpDead || G.campaignDead, skin: SKIN });
+  const r = (n: number) => Math.round(n * 100) / 100; // 2 decimal places
+  const payload: Record<string, unknown> = {
+    id: myId(),
+    x: r(x), y: r(y), z: r(z), yaw: r(yaw),
+    hp: G.playerHp | 0,
+    dead: !!(G.pvpDead || G.campaignDead),
+  };
+  // Attach skin only when it changes or every 5s (late joiners)
+  const key = [
+    SKIN.eyeColor, SKIN.tablePrimary, SKIN.eyeDesign, SKIN.decoration,
+    SKIN.decorationColor, SKIN.lightColor, SKIN.legDesign,
+  ].join("|");
+  if (key !== lastSkinSent || now - lastSkinAt > 5000) {
+    lastSkinSent = key;
+    lastSkinVer++;
+    lastSkinAt = now;
+    payload.skin = { ...SKIN };
+    payload.skinVer = lastSkinVer;
+  }
+  send("pose", payload);
 }
 
 export function hitPeer(to: string, dmg: number, stun = false) {

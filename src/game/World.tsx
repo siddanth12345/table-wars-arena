@@ -285,6 +285,7 @@ export function World() {
   const ctrl = useRef<ElementRef<typeof PointerLockControls>>(null);
   const staticRef = useRef<THREE.Group>(null);
   const keys = useRef<Record<string, boolean>>({});
+  const softLookRef = useRef({ x: 0, y: 0 });
   const pos = useRef(START.clone());
   const hv = useRef(new THREE.Vector3());
   const vy = useRef(0);
@@ -667,16 +668,27 @@ export function World() {
   useEffect(() => {
     setLocker(() => ctrl.current?.lock());
     const onLock = () => {
-      G.locked = !!document.pointerLockElement;
-      if (!G.locked) {
+      const hard = !!document.pointerLockElement;
+      if (hard) {
+        G.locked = true;
+        G.userPaused = false;
+        return;
+      }
+      // Pointer lock lost. On iPad/tablets it often never sticks — only pause if the
+      // player explicitly paused (Esc). Soft-lock keeps keyboard/mouse playable.
+      if (G.userPaused) {
+        G.locked = false;
         G.firing = false;
         G.scoped = false;
         keys.current = {};
-        // Esc while freecam: leave freecam unless waiting for shard revive / lobby respawn
         if (G.freecam && !G.campaignDead && !(NET.kind === "lobby" && G.pvpDead && G.lobbyRespawnT > 0)) {
           G.freecam = false;
           G.freecamSpeedIdx = 0;
         }
+      } else if (G.phase === "playing") {
+        G.locked = true; // soft lock
+      } else {
+        G.locked = false;
       }
     };
     document.addEventListener("pointerlockchange", onLock);
@@ -733,6 +745,15 @@ const kd = (e: KeyboardEvent) => {
       if (e.code === SETTINGS.keys.jump) e.preventDefault();
       const wasDown = keys.current[e.code];
       keys.current[e.code] = true;
+      // Explicit pause — needed on iPad where pointer-lock never sticks
+      if (e.code === "Escape" && !wasDown && G.phase === "playing" && G.locked) {
+        G.userPaused = true;
+        G.locked = false;
+        G.firing = false;
+        G.scoped = false;
+        document.exitPointerLock?.();
+        return;
+      }
       // Freecam toggle (lobby & training only)
       if (e.code === "KeyX" && !wasDown && !e.repeat && G.phase === "playing" && (G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.mode === "pvp" || G.campaignDead)) {
         // While waiting for shard revive, freecam stays on — cannot return to body
@@ -818,6 +839,13 @@ const kd = (e: KeyboardEvent) => {
       if (e.code === SETTINGS.keys.grapple) G.grappling = false;
       if (e.code === SETTINGS.keys.jump) G.wallrun = false;
     };
+    const onSoftMove = (e: MouseEvent) => {
+      // When soft-locked (no pointer lock element), drive look from movement deltas (iPad mouse/trackpad)
+      if (!G.locked || document.pointerLockElement) return;
+      if (G.phase !== "playing") return;
+      softLookRef.current.x += e.movementX || 0;
+      softLookRef.current.y += e.movementY || 0;
+    };
     const md = (e: MouseEvent) => {
       if (!G.locked) return;
       if (G.freecam) {
@@ -837,6 +865,7 @@ const kd = (e: KeyboardEvent) => {
     window.addEventListener("mousedown", md);
     window.addEventListener("mouseup", mu);
     window.addEventListener("contextmenu", cm);
+    window.addEventListener("mousemove", onSoftMove);
     const wh = (e: WheelEvent) => {
       if (!G.locked) return;
       if (G.freecam) {
@@ -862,6 +891,7 @@ const kd = (e: KeyboardEvent) => {
       window.removeEventListener("mousedown", md);
       window.removeEventListener("mouseup", mu);
       window.removeEventListener("contextmenu", cm);
+      window.removeEventListener("mousemove", onSoftMove);
       window.removeEventListener("wheel", wh);
     };
   }, [camera]);
@@ -1019,11 +1049,27 @@ const kd = (e: KeyboardEvent) => {
 
     // --- freecam movement runs after sim so physics keep going; camera is overridden below ---
     // freecam while dead in campaign / lobby respawn wait, or normal training/lobby/pvp freecam
+        // Soft-lock look (iPad keyboard+mouse / no pointer lock)
+    if (G.locked && !document.pointerLockElement && G.phase === "playing") {
+      const dx = softLookRef.current.x;
+      const dy = softLookRef.current.y;
+      if (dx || dy) {
+        softLookRef.current.x = 0;
+        softLookRef.current.y = 0;
+        const euler = new THREE.Euler(0, 0, 0, "YXZ");
+        euler.setFromQuaternion(cam.quaternion);
+        euler.y -= dx * 0.0022 * SETTINGS.sensitivity;
+        euler.x -= dy * 0.0022 * SETTINGS.sensitivity;
+        euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.x));
+        cam.quaternion.setFromEuler(euler);
+      }
+    }
+
     const freecamOn = G.freecam && G.phase === "playing" && (
       G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.campaignDead || (NET.kind === "lobby" && G.pvpDead)
     );
 
-    const engaged = G.locked || NET.online || G.freecam;
+    const engaged = G.locked || NET.online || G.freecam; // G.locked includes soft-lock on iPad
     if (G.phase === "playing" && engaged && !G.frozen && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
     const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;
@@ -1629,7 +1675,7 @@ const kd = (e: KeyboardEvent) => {
     if (sharesEnemies() && G.phase === "playing") {
       if (NET.isHost) {
         const now = performance.now();
-        if (now - lastSnap.current > 100) {
+        if (now - lastSnap.current > 150) {
           lastSnap.current = now;
           const t: number[] = [], bl: number[] = [];
           tables.forEach((x, i) => { if (x.alive) t.push(i, +x.pos.x.toFixed(1), +x.pos.y.toFixed(1), +x.pos.z.toFixed(1), +x.yaw.toFixed(2), +x.s.toFixed(2)); });

@@ -362,6 +362,7 @@ function startTutorial() {
 }
 function resume() {
   G.mobilePaused = false;
+  G.userPaused = false;
   G.countdown = 3.6;
   lockPointer();
 }

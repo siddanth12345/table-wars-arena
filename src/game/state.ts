@@ -180,17 +180,14 @@ export function setLocker(fn: (() => void) | null) {
   lockFn = fn;
 }
 
-/** Touch-first devices (phones/tablets). Fine pointer + keyboard PCs return false. */
+/** Phones/tablets (incl. iPad + mouse/keyboard). Real pointer-lock is unreliable here. */
 export function isMobilePlay() {
   if (typeof window === "undefined") return false;
   try {
-    if (window.matchMedia("(pointer: fine)").matches && window.matchMedia("(hover: hover)").matches) {
-      // iPad with trackpad often reports fine+hover — still treat multi-touch tablets as mobile if no escape-friendly desktop
-      if (navigator.maxTouchPoints > 1 && /iPad|Android|Mobile/i.test(navigator.userAgent)) return true;
-      return false;
-    }
+    // Multi-touch → soft-lock (iPad often reports fine pointer when a mouse is connected)
+    if (typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 1) return true;
     if (window.matchMedia("(pointer: coarse)").matches) return true;
-    if (navigator.maxTouchPoints > 1) return true;
+    if (/Android|iPhone|iPod|iPad|Mobile/i.test(navigator.userAgent)) return true;
   } catch { /* ignore */ }
   return false;
 }
@@ -203,37 +200,28 @@ export function pauseGame() {
   try { document.exitPointerLock?.(); } catch { /* ignore */ }
 }
 
+/** Lock for play. Mobile = soft-lock always. PC = real pointer lock. Pause unlocks. */
 export function lockPointer() {
   G.userPaused = false;
   const mobile = isMobilePlay();
-  // Mobile: soft-lock immediately (pointer lock often unavailable)
-  // PC: only count as locked once pointer lock attaches (or soft until then briefly so Resume works)
   if (mobile) {
     G.locked = true;
-  } else {
-    // PC: require real pointer lock to play — unlocked shows pause/click-to-play
-    G.locked = !!document.pointerLockElement;
+    try { lockFn?.(); } catch { /* ignore */ }
+    try { document.body.requestPointerLock?.(); } catch { /* ignore */ }
+    G.locked = true; // force — hard lock often fails on iOS/iPadOS
+    return;
   }
-  try {
-    lockFn?.();
-  } catch { /* ignore */ }
+  G.locked = !!document.pointerLockElement;
+  try { lockFn?.(); } catch { /* ignore */ }
   try {
     if (!document.pointerLockElement) {
       const el = document.body as HTMLElement & { requestPointerLock?: (opts?: { unadjustedMovement?: boolean }) => void };
-      el.requestPointerLock?.({ unadjustedMovement: true });
-      // fallback without options
-      if (!document.pointerLockElement) document.body.requestPointerLock?.();
+      try { el.requestPointerLock?.({ unadjustedMovement: true }); } catch { document.body.requestPointerLock?.(); }
     }
   } catch {
     try { document.body.requestPointerLock?.(); } catch { /* ignore */ }
   }
-  // Mobile stays soft-locked even if hard lock fails
-  if (mobile) G.locked = true;
-  // PC: if still not hard-locked after request, keep unlocked so pause menu / click-to-lock shows
-  if (!mobile && !document.pointerLockElement) {
-    // Brief optimistic lock so frame doesn't flash pause for one tick; pointerlockchange will correct
-    G.locked = false;
-  }
+  if (!document.pointerLockElement) G.locked = false;
 }
 
 // Minimap snapshot, written by World each frame, read by the HUD.

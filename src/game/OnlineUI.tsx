@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import * as THREE from "three";
 import {
   NET, PVP_WIN, useNet, queue1v1, leaveQueue, choosePick, sendRematch, answerRematch, requeue, goHomeOnline,
   createLobby, joinLobby, sendInvite, acceptInvite, dismissInvite, partyGo, kickMember, disbandParty, leaveParty,
@@ -15,6 +17,57 @@ const input = "w-full rounded border-2 border-hud/40 bg-hud-track px-3 py-2 font
 function useTick(ms: number) {
   const [, t] = useState(0);
   useEffect(() => { const id = setInterval(() => t((n) => n + 1), ms); return () => clearInterval(id); }, [ms]);
+}
+
+/** Small green table that spins — used while lobby / 1v1 / joins load. */
+function LoaderTable() {
+  const g = useRef<THREE.Group>(null);
+  useFrame((_, dt) => {
+    if (g.current) g.current.rotation.y += dt * 2.4;
+  });
+  return (
+    <group ref={g} position={[0, -0.4, 0]}>
+      <mesh position={[0, 0.85, 0]} castShadow>
+        <boxGeometry args={[2.4, 0.28, 1.6]} />
+        <meshStandardMaterial color="#2fa84f" roughness={0.45} />
+      </mesh>
+      {([[-0.95, 0.2, -0.55], [0.95, 0.2, -0.55], [-0.95, 0.2, 0.55], [0.95, 0.2, 0.55]] as const).map((p, i) => (
+        <mesh key={i} position={p}>
+          <boxGeometry args={[0.22, 1.1, 0.22]} />
+          <meshStandardMaterial color="#197a37" roughness={0.5} />
+        </mesh>
+      ))}
+      {[-0.4, 0.4].map((x) => (
+        <group key={x} position={[x, 0.95, 0.82]}>
+          <mesh><sphereGeometry args={[0.16, 14, 10]} /><meshStandardMaterial color="#f5f2dc" /></mesh>
+          <mesh position={[0, 0, 0.14]}><sphereGeometry args={[0.06, 10, 8]} /><meshStandardMaterial color="#172117" /></mesh>
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/** Full-screen connecting overlay — blocks extra clicks while online actions run. */
+export function ConnectingOverlay({ label, onCancel }: { label: string; onCancel?: () => void }) {
+  return (
+    <div className="pointer-events-auto fixed inset-0 z-[80] flex flex-col items-center justify-center bg-[#0a0c10]/92 font-mono text-hud backdrop-blur-sm">
+      <div className="h-44 w-44">
+        <Canvas camera={{ position: [0, 1.6, 4.2], fov: 42 }} dpr={[1, 1.5]}>
+          <ambientLight intensity={0.55} />
+          <directionalLight position={[3, 5, 2]} intensity={1.1} />
+          <LoaderTable />
+        </Canvas>
+      </div>
+      <div className="mt-2 text-center">
+        <div className="text-xs font-bold uppercase tracking-[0.35em] text-crosshair">TBLE</div>
+        <div className="mt-2 text-xl font-black uppercase tracking-widest">{label}</div>
+        <div className="mt-2 animate-pulse text-[11px] font-bold uppercase tracking-widest opacity-50">Please wait · do not spam click</div>
+      </div>
+      {onCancel && (
+        <button type="button" className={`${btnAlt} mt-8`} onClick={onCancel}>Cancel</button>
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------- account
@@ -104,36 +157,60 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
   const [codeErr, setCodeErr] = useState("");
   const [partyOpen, setPartyOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
   const party = inParty();
   const leader = isPartyLeader();
   const waiting = party && !leader;
-  const go = async (mode: "game" | "training" | "pvp" | "lobby") => {
+  const run = async (label: string, fn: () => void | Promise<void>) => {
+    if (busy) return;
+    setBusy(label);
     setNote("");
-    const e = await partyGo(mode);
-    if (e) setNote(e);
+    setCodeErr("");
+    try {
+      await fn();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setBusy(null); // QueueOverlay covers 1v1 search after this
+    }
+  };
+  const go = async (mode: "game" | "training" | "pvp" | "lobby") => {
+    const labels = { game: "Starting party campaign…", training: "Opening party training…", pvp: "Starting party 1v1…", lobby: "Opening party lobby…" };
+    await run(labels[mode], async () => {
+      const e = await partyGo(mode);
+      if (e) setNote(e);
+    });
   };
   return (
-    <div className="m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">
+    <div className="relative m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">
+      {busy && <ConnectingOverlay label={busy} />}
       <div className="mb-4 flex items-center justify-between border-b border-hud/30 pb-2">
         <h3 className="text-2xl font-black uppercase tracking-widest text-crosshair">Play</h3>
         <button className="text-xs uppercase underline" onClick={onClose}>Close</button>
       </div>
       {waiting && <p className="mb-4 text-sm font-bold text-crosshair">You're in a party — waiting for the leader to start.</p>}
       <div className="flex max-w-md flex-col gap-3">
-        <button className={btnMain} disabled={waiting} onClick={() => (party ? void go("game") : onCampaign())}>
+        <button className={btnMain} disabled={waiting || !!busy} onClick={() => (party ? void go("game") : onCampaign())}>
           {party ? "Campaign with party" : "Offline campaign"}
         </button>
-        {party && <button className={btnAlt} disabled={waiting} onClick={() => void go("training")}>Training with party</button>}
-        <button className={btnAlt} disabled={waiting} onClick={() => (party ? void go("pvp") : void queue1v1())}>
+        {party && <button className={btnAlt} disabled={waiting || !!busy} onClick={() => void go("training")}>Training with party</button>}
+        <button className={btnAlt} disabled={waiting || !!busy} onClick={() => (party ? void go("pvp") : void run("Finding 1v1 match…", () => queue1v1()))}>
           {party ? "1v1 with party" : "1v1"}
         </button>
-        <button className={btnAlt} disabled={waiting} onClick={() => (party ? void go("lobby") : void createLobby())}>
+        <button className={btnAlt} disabled={waiting || !!busy} onClick={() => (party ? void go("lobby") : void run("Creating lobby…", () => createLobby()))}>
           {party ? "Lobby with party" : "Lobby"}
         </button>
         <div>
-          <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); setCodeErr(""); const r = await joinLobby(code); if (r) setCodeErr(r); }}>
-            <input className={`${input} uppercase tracking-[0.3em]`} placeholder="Lobby code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} />
-            <button className={btnAlt}>Join</button>
+          <form className="flex gap-2" onSubmit={async (e) => {
+            e.preventDefault();
+            if (busy) return;
+            await run("Joining lobby…", async () => {
+              const r = await joinLobby(code);
+              if (r) setCodeErr(r);
+            });
+          }}>
+            <input className={`${input} uppercase tracking-[0.3em]`} placeholder="Lobby code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} disabled={!!busy} />
+            <button className={btnAlt} disabled={!!busy}>Join</button>
           </form>
           {codeErr && <p className="mt-1 text-sm font-bold text-destructive">{codeErr}</p>}
         </div>
@@ -178,13 +255,7 @@ export function QueueOverlay() {
   useTick(500);
   if (net.stage !== "queue") return null;
   return (
-    <div className="fixed inset-x-0 top-6 z-40 flex justify-center font-mono text-hud">
-      <div className="flex items-center gap-4 rounded-lg border-2 border-hud/30 bg-hud-panel px-6 py-4">
-        <span className="h-3 w-3 animate-pulse rounded-full bg-crosshair" />
-        <span className="font-black uppercase tracking-widest">Searching for an opponent…</span>
-        <button className={btnAlt} onClick={leaveQueue}>Cancel</button>
-      </div>
-    </div>
+    <ConnectingOverlay label="Searching for an opponent…" onCancel={leaveQueue} />
   );
 }
 
@@ -332,22 +403,43 @@ export function LobbyInvite() {
 export function Invites() {
   const net = useNet();
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
   useTick(1000);
   const list = net.invites.filter((i) => Date.now() - i.t < 60000);
-  if (list.length === 0 && !err) return null;
+  if (list.length === 0 && !err && !busy) return null;
   return (
-    <div className="gui pointer-events-auto fixed inset-x-3 top-16 z-[60] mx-auto flex w-full max-w-md flex-col gap-2 font-mono text-hud sm:inset-x-auto sm:right-6 sm:top-auto sm:bottom-6 sm:w-96">
-      {err && <div className="rounded bg-hud-panel p-3 text-sm font-bold text-destructive">{err}</div>}
-      {list.map((i) => (
-        <div key={i.id} className="rounded-lg border-2 border-crosshair bg-hud-panel p-4 shadow-xl">
-          <p className="text-sm"><b>{i.from}</b> invited you to {i.kind === "party" ? "their party" : `lobby ${i.target}`}.</p>
-          <div className="mt-2 flex gap-2">
-            <button className={btnMain} onClick={async () => { setErr(""); const e = await acceptInvite(i); if (e) setErr(e); else document.exitPointerLock?.(); }}>Yes</button>
-            <button className={btnAlt} onClick={() => dismissInvite(i.id)}>No</button>
+    <>
+      {busy && <ConnectingOverlay label={busy} />}
+      <div className="gui pointer-events-auto fixed inset-x-3 top-16 z-[60] mx-auto flex w-full max-w-md flex-col gap-2 font-mono text-hud sm:inset-x-auto sm:right-6 sm:top-auto sm:bottom-6 sm:w-96">
+        {err && <div className="rounded bg-hud-panel p-3 text-sm font-bold text-destructive">{err}</div>}
+        {list.map((i) => (
+          <div key={i.id} className="rounded-lg border-2 border-crosshair bg-hud-panel p-4 shadow-xl">
+            <p className="text-sm"><b>{i.from}</b> invited you to {i.kind === "party" ? "their party" : `lobby ${i.target}`}.</p>
+            <div className="mt-2 flex gap-2">
+              <button
+                className={btnMain}
+                disabled={!!busy}
+                onClick={async () => {
+                  if (busy) return;
+                  setErr("");
+                  setBusy(i.kind === "lobby" ? "Joining lobby…" : "Joining party…");
+                  try {
+                    const e = await acceptInvite(i);
+                    if (e) setErr(e);
+                    else document.exitPointerLock?.();
+                  } finally {
+                    setBusy(null);
+                  }
+                }}
+              >
+                Yes
+              </button>
+              <button className={btnAlt} disabled={!!busy} onClick={() => dismissInvite(i.id)}>No</button>
+            </div>
           </div>
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </>
   );
 }
 

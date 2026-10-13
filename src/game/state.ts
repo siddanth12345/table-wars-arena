@@ -192,36 +192,53 @@ export function isMobilePlay() {
   return false;
 }
 
+function setCursorLocked(on: boolean) {
+  try {
+    document.body.style.cursor = on ? "none" : "";
+    document.documentElement.style.cursor = on ? "none" : "";
+  } catch { /* ignore */ }
+}
+
 export function pauseGame() {
   G.userPaused = true;
   G.locked = false;
   G.firing = false;
   G.scoped = false;
+  setCursorLocked(false);
   try { document.exitPointerLock?.(); } catch { /* ignore */ }
 }
 
-/** Lock for play. Mobile = soft-lock always. PC = real pointer lock. Pause unlocks. */
+function tryHardLock() {
+  try { lockFn?.(); } catch { /* ignore */ }
+  const targets: HTMLElement[] = [];
+  try {
+    const c = document.querySelector("canvas");
+    if (c) targets.push(c as HTMLElement);
+  } catch { /* ignore */ }
+  targets.push(document.body);
+  for (const el of targets) {
+    try {
+      const req = el.requestPointerLock as undefined | ((opts?: { unadjustedMovement?: boolean }) => void);
+      if (!req) continue;
+      try { req.call(el, { unadjustedMovement: true }); } catch { req.call(el); }
+      if (document.pointerLockElement) return true;
+    } catch { /* ignore */ }
+  }
+  return !!document.pointerLockElement;
+}
+
+/** Lock for play. Mobile = soft-lock (+ hard lock if browser allows). Pause unlocks. */
 export function lockPointer() {
   G.userPaused = false;
   const mobile = isMobilePlay();
+  tryHardLock();
   if (mobile) {
     G.locked = true;
-    try { lockFn?.(); } catch { /* ignore */ }
-    try { document.body.requestPointerLock?.(); } catch { /* ignore */ }
-    G.locked = true; // force — hard lock often fails on iOS/iPadOS
+    setCursorLocked(true);
     return;
   }
   G.locked = !!document.pointerLockElement;
-  try { lockFn?.(); } catch { /* ignore */ }
-  try {
-    if (!document.pointerLockElement) {
-      const el = document.body as HTMLElement & { requestPointerLock?: (opts?: { unadjustedMovement?: boolean }) => void };
-      try { el.requestPointerLock?.({ unadjustedMovement: true }); } catch { document.body.requestPointerLock?.(); }
-    }
-  } catch {
-    try { document.body.requestPointerLock?.(); } catch { /* ignore */ }
-  }
-  if (!document.pointerLockElement) G.locked = false;
+  setCursorLocked(G.locked);
 }
 
 // Minimap snapshot, written by World each frame, read by the HUD.

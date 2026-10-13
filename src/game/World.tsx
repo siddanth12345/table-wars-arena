@@ -666,12 +666,23 @@ export function World() {
   };
 
   useEffect(() => {
-    setLocker(() => ctrl.current?.lock());
+    setLocker(() => {
+      try {
+        const canvas = document.querySelector("canvas") as HTMLElement | null;
+        if (canvas && "requestPointerLock" in canvas) {
+          try { (canvas as HTMLElement & { requestPointerLock: (o?: object) => void }).requestPointerLock({ unadjustedMovement: true }); }
+          catch { canvas.requestPointerLock(); }
+          return;
+        }
+      } catch { /* ignore */ }
+      ctrl.current?.lock();
+    });
     const onLock = () => {
       const hard = !!document.pointerLockElement;
       if (hard) {
         G.locked = true;
         G.userPaused = false;
+        try { document.body.style.cursor = "none"; } catch { /* ignore */ }
         return;
       }
       const mobile = isMobilePlay();
@@ -682,8 +693,10 @@ export function World() {
           G.firing = false;
           G.scoped = false;
           keys.current = {};
+          try { document.body.style.cursor = ""; } catch { /* ignore */ }
         } else {
           G.locked = true;
+          try { document.body.style.cursor = "none"; } catch { /* ignore */ }
         }
         return;
       }
@@ -1078,7 +1091,11 @@ const kd = (e: KeyboardEvent) => {
     );
 
     // Mobile soft-lock: keep locked while playing unless user paused
-    if (isMobilePlay() && G.phase === "playing" && !G.userPaused) G.locked = true;
+    if (isMobilePlay() && G.phase === "playing" && !G.userPaused) {
+      G.locked = true;
+      try { if (document.body.style.cursor !== "none") document.body.style.cursor = "none"; } catch { /* ignore */ }
+    }
+    // Online matches always run sim (mobile may not hard-lock); local control still needs locked
     const engaged = G.locked || NET.online || G.freecam;
     if (G.phase === "playing" && engaged && !G.frozen && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
@@ -1686,7 +1703,7 @@ const kd = (e: KeyboardEvent) => {
     if (sharesEnemies() && G.phase === "playing") {
       if (NET.isHost) {
         const now = performance.now();
-        if (now - lastSnap.current > 150) {
+        if (now - lastSnap.current > 200) {
           lastSnap.current = now;
           const t: number[] = [], bl: number[] = [];
           tables.forEach((x, i) => { if (x.alive) t.push(i, +x.pos.x.toFixed(1), +x.pos.y.toFixed(1), +x.pos.z.toFixed(1), +x.yaw.toFixed(2), +x.s.toFixed(2)); });
@@ -2007,7 +2024,7 @@ const kd = (e: KeyboardEvent) => {
       cam.position.y = THREE.MathUtils.clamp(cam.position.y, 0.5, ROOM.h + 80);
     }
 
-    if (NET.online && G.phase === "playing") sendPose(pos.current.x, pos.current.y, pos.current.z, freecamOn ? localBody.playerYaw : MAP.yaw);
+    if (NET.online && (G.phase === "playing" || G.phase === "won")) sendPose(pos.current.x, pos.current.y, pos.current.z, freecamOn ? localBody.playerYaw : MAP.yaw);
 
     // --- splinter cones ---
     if (splI.current) {

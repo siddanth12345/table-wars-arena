@@ -193,10 +193,21 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
       const m = metas[0];
       if (!m) continue;
       ids.add(key);
-      NET.names[key] = m.name;
+      NET.names[key] = m.name ?? key.slice(0, 6);
       if (m.host) NET.hostId = key;
-      const p = NET.peers.get(key);
-      if (p) p.name = m.name;
+      if (key === id) continue;
+      // Seed a peer as soon as presence sees them (before first pose) so mobile↔PC both show up
+      const existing = NET.peers.get(key);
+      if (existing) {
+        existing.name = NET.names[key];
+      } else {
+        NET.peers.set(key, {
+          id: key,
+          name: NET.names[key],
+          x: 0, y: 0, z: 12 + NET.peers.size * 4,
+          yaw: 0, hp: 100, dead: false, t: performance.now(),
+        });
+      }
     }
     for (const k of [...NET.peers.keys()]) if (!ids.has(k) || k === id) NET.peers.delete(k);
     NET.peers.delete(id);
@@ -204,12 +215,21 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
     bump();
   });
   return new Promise((resolve) => {
-    ch.subscribe(async (status) => {
-      if (status === "SUBSCRIBED") {
+    let done = false;
+    const finish = async () => {
+      if (done) return;
+      done = true;
+      try {
         await ch.track({ name: displayName(), host, id } satisfies Meta);
-        resolve(ch);
-      }
+      } catch { /* ignore */ }
+      bump();
+      resolve(ch);
+    };
+    ch.subscribe((status) => {
+      if (status === "SUBSCRIBED") void finish();
     });
+    // Mobile networks sometimes miss SUBSCRIBED — don't hang forever
+    setTimeout(() => void finish(), 4000);
   });
 }
 
@@ -244,11 +264,12 @@ let lastSkinAt = 0;
 export function sendPose(x: number, y: number, z: number, yaw: number) {
   if (!room || !NET.online) return;
   const now = performance.now();
-  if (now - lastPose < 80) return; // ~12.5 Hz — smooth enough, less flood than before
+  if (now - lastPose < 100) return; // 10 Hz — less lag on mobile links
   lastPose = now;
-  const r = (n: number) => Math.round(n * 100) / 100; // 2 decimal places
+  const r = (n: number) => Math.round(n * 10) / 10; // 1 decimal — smaller packets
   const payload: Record<string, unknown> = {
     id: myId(),
+    name: displayName(),
     x: r(x), y: r(y), z: r(z), yaw: r(yaw),
     hp: G.playerHp | 0,
     dead: !!(G.pvpDead || G.campaignDead),
@@ -340,11 +361,11 @@ export async function queue1v1() {
   });
   ch.subscribe(async (s) => {
     if (s === "SUBSCRIBED") {
-      await ch.track({ t: joinedAt, id });
-      // Re-check a few times in case the first sync was empty
-      for (const d of [500, 1200, 2500]) setTimeout(tryMatch, d);
+      try { await ch.track({ t: joinedAt, id }); } catch { /* ignore */ }
+      for (const d of [300, 800, 1500, 3000, 5000]) setTimeout(tryMatch, d);
     }
   });
+  setTimeout(tryMatch, 6000);
 }
 
 export function leaveQueue() {
@@ -505,8 +526,8 @@ export async function createLobby(code?: string) {
   const c = (code ?? Array.from({ length: 6 }, () => LETTERS[Math.floor(Math.random() * LETTERS.length)]).join("")).toUpperCase();
   await joinRoom(`lobby-${c}`, "lobby", true);
   NET.code = c;
-  // Brief pause so presence is visible to joiners probing the channel
-  await new Promise((r) => setTimeout(r, 300));
+  // Let presence propagate (mobile networks are slower)
+  await new Promise((r) => setTimeout(r, 500));
   resetGame("training");
   bump();
   return c;

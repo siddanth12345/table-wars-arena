@@ -130,6 +130,8 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
   room = ch;
   ch.on("broadcast", { event: "pose" }, ({ payload }) => {
     const p = payload as Peer & { skinVer?: number };
+    // Never treat ourselves as a remote peer (prevents ghost duplicate in lobby)
+    if (!p.id || p.id === id) return;
     const cur = NET.peers.get(p.id);
     const skin = p.skin ?? cur?.skin;
     const skinChanged = !!p.skin && (!cur?.skin || (p as { skinVer?: number }).skinVer !== (cur as { skinVer?: number } | undefined)?.skinVer);
@@ -196,7 +198,8 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
       const p = NET.peers.get(key);
       if (p) p.name = m.name;
     }
-    for (const k of [...NET.peers.keys()]) if (!ids.has(k)) NET.peers.delete(k);
+    for (const k of [...NET.peers.keys()]) if (!ids.has(k) || k === id) NET.peers.delete(k);
+    NET.peers.delete(id);
     onPresence(ids);
     bump();
   });
@@ -266,6 +269,7 @@ export function sendPose(x: number, y: number, z: number, yaw: number) {
 }
 
 export function hitPeer(to: string, dmg: number, stun = false) {
+  if (!to || to === myId()) return; // never damage yourself via a ghost peer
   const ok = NET.kind === "pvp" ? NET.stage === "playing" : NET.kind === "lobby";
   if (!ok) return;
   send("hit", { to, dmg, stun });
@@ -511,33 +515,31 @@ export async function createLobby(code?: string) {
 /** Looks for a live lobby with this code. Returns an error message or null on success. */
 export async function joinLobby(raw: string): Promise<string | null> {
   const code = raw.trim().toUpperCase().replace(/[^A-Z]/g, "");
-  if (code.length !== 6) return "Invalid code — use the 6-letter lobby code";
-  // Join the real room (no separate probe channel — more reliable on slow links)
+  if (code.length !== 6) return "Invalid code — need 6 letters";
   await joinRoom(`lobby-${code}`, "lobby", false);
   NET.code = code;
+  const me = myId();
   const ok = await new Promise<boolean>((resolve) => {
     const start = Date.now();
-    const me = myId();
     const tick = () => {
       if (!room || NET.room !== `lobby-${code}`) { resolve(false); return; }
-      // Presence fills NET.names + NET.hostId (peers only appear after pose packets)
-      const names = Object.keys(NET.names);
-      const hasHost = !!NET.hostId && NET.hostId !== me;
-      const hasOthers = names.some((k) => k !== me);
-      if (hasHost || hasOthers) { resolve(true); return; }
-      if (Date.now() - start > 12000) { resolve(false); return; }
-      setTimeout(tick, 300);
+      if (NET.hostId && NET.hostId !== me) { resolve(true); return; }
+      if (Object.keys(NET.names).some((k) => k !== me)) { resolve(true); return; }
+      if (Date.now() - start > 8000) { resolve(false); return; }
+      setTimeout(tick, 200);
     };
-    setTimeout(tick, 200);
+    setTimeout(tick, 150);
   });
   if (!ok) {
-    leaveRoom(false);
-    return "Invalid code or lobby closed — ask the host for a new code";
+    leaveRoom(true);
+    return "Invalid code or lobby closed";
   }
   if (Object.keys(NET.names).length > LOBBY_MAX) {
-    leaveRoom(false);
+    leaveRoom(true);
     return "Lobby is full";
   }
+  // Drop any accidental self-peer
+  NET.peers.delete(me);
   resetGame("training");
   bump();
   return null;
@@ -552,19 +554,20 @@ async function joinCoop(name: string, mode: Mode, host: boolean) {
 
 // ---------------------------------------------------------------- invites (personal inbox)
 
-const inboxName = (u: string) => `tble:user:${u.trim().toLowerCase()}`;
+const INVITE_BUS = "tble:invite-bus";
+const inboxName = (u: string) => INVITE_BUS; // shared bus; filter by payload.to
 
 export function startInbox() {
   const acc = getAccount();
   stopInbox();
   if (acc.status !== "user" && acc.status !== "guest") return;
   const uname = (acc.username && acc.username !== "guest" ? acc.username : displayName()).trim().toLowerCase();
-  const ch = supabase.channel(inboxName(uname), { config: { broadcast: { self: false } } });
+  const ch = supabase.channel(INVITE_BUS, { config: { broadcast: { self: false } } });
   inbox = ch;
   ch.on("broadcast", { event: "invite" }, ({ payload }) => {
     const inv = payload as Invite & { to?: string };
-    // Ignore invites clearly meant for someone else
-    if (inv.to && inv.to !== uname) return;
+    const to = (inv.to ?? "").trim().toLowerCase();
+    if (!to || to !== uname) return;
     NET.invites = [
       ...NET.invites.filter((i) => i.from !== inv.from || i.kind !== inv.kind),
       { id: crypto.randomUUID(), kind: inv.kind, from: inv.from, target: inv.target, t: Date.now() },
@@ -602,18 +605,13 @@ export async function sendInvite(username: string, kind: "party" | "lobby"): Pro
     target = NET.code;
   }
   NET.inviteSentAt = Date.now();
-  const ch = supabase.channel(inboxName(name), { config: { broadcast: { self: false, ack: false } } });
-  await new Promise<void>((resolve) => {
-    const to = setTimeout(resolve, 4000);
-    ch.subscribe((s) => { if (s === "SUBSCRIBED") { clearTimeout(to); resolve(); } });
-  });
+  if (!inbox) startInbox();
   const payload = { kind, from: displayName(), target, to: name.trim().toLowerCase() };
-  // Realtime broadcast is fire-and-forget — retry so the other client has time to be on the channel
-  for (let i = 0; i < 4; i++) {
-    try { await ch.send({ type: "broadcast", event: "invite", payload }); } catch { /* ignore */ }
-    await new Promise((r) => setTimeout(r, 400));
+  // Shared invite bus — both players must be subscribed (home screen / logged in)
+  for (let i = 0; i < 5; i++) {
+    try { if (inbox) await inbox.send({ type: "broadcast", event: "invite", payload }); } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 250));
   }
-  setTimeout(() => void supabase.removeChannel(ch), 6000);
   return { ok: true, msg: `Invite sent to ${name}.` };
 }
 

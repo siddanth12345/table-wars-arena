@@ -507,7 +507,7 @@ export function World() {
     }
     if (sharesEnemies() || NET.kind === "lobby") {
       for (const pr of NET.peers.values()) {
-        if (pr.dead) continue;
+        if (pr.dead || pr.id === myId()) continue;
         const d = Math.hypot(pr.x - from.x, pr.y + EYE - from.y, pr.z - from.z);
         if (d < best) { best = d; id = pr.id; _aim.set(pr.x, pr.y + EYE, pr.z); }
       }
@@ -577,7 +577,7 @@ export function World() {
   const pvpBlast = (at: THREE.Vector3, r: number, dmg: number, stun = false) => {
     if (G.mode !== "pvp" && NET.kind !== "lobby") return;
     for (const pr of NET.peers.values()) {
-      if (pr.dead) continue;
+      if (pr.dead || pr.id === myId()) continue;
       if (tmpV.set(pr.x, pr.y + PVP_CENTER_Y, pr.z).distanceTo(at) < r + PVP_HITBOX) hitPeer(pr.id, dmg, stun);
     }
   };
@@ -1507,6 +1507,7 @@ const kd = (e: KeyboardEvent) => {
         // chase the closest player
         let cx = p.x, cz = p.z, cid: string | null = null, cd = Math.hypot(p.x - u.pos.x, p.z - u.pos.z);
         if (sharesEnemies()) for (const pr of NET.peers.values()) {
+          if (pr.id === myId() || pr.dead) continue;
           const dd = Math.hypot(pr.x - u.pos.x, pr.z - u.pos.z);
           if (dd < cd) { cd = dd; cx = pr.x; cz = pr.z; cid = pr.id; }
         }
@@ -1780,7 +1781,7 @@ const kd = (e: KeyboardEvent) => {
             }
             let peerT = Infinity;
             if (G.mode === "pvp" || NET.kind === "lobby") for (const pr of NET.peers.values()) {
-              if (pr.dead) continue;
+              if (pr.dead || pr.id === myId()) continue;
               peerT = Math.min(peerT, segSphere(bl.prev, bl.pos, _peerC.set(pr.x, pr.y + PVP_CENTER_Y, pr.z), PVP_HITBOX));
             }
             const tHit = Math.min(bestT, bossT, ringT, tWorld, peerT);
@@ -1958,7 +1959,7 @@ const kd = (e: KeyboardEvent) => {
         }
         if (mode === "normal" && (G.mode === "pvp" || NET.kind === "lobby") && NET.stage === "playing") {
           for (const pr of NET.peers.values()) {
-            if (pr.dead) continue;
+            if (pr.dead || pr.id === myId()) continue;
             if (check(pr.x, pr.y + EYE, pr.z, PVP_HITBOX)) { mode = "enemy"; break; }
           }
         }
@@ -1971,7 +1972,7 @@ const kd = (e: KeyboardEvent) => {
     MAP.tables = tables.flatMap((t) => (t.alive ? [t.pos.x, t.pos.z] : []));
     MAP.blues = blues.flatMap((u) => (u.alive ? [u.pos.x, u.pos.z] : []));
     MAP.health = health.flatMap((h) => (h.active ? [h.pos.x, h.pos.z] : []));
-    MAP.peers = [...NET.peers.values()].flatMap((q) => (q.dead ? [] : [q.x, q.z]));
+    MAP.peers = [...NET.peers.values()].flatMap((q) => (q.dead || q.id === myId() ? [] : [q.x, q.z]));
     localBody.show = freecamOn && !G.pvpDead && !G.campaignDead;
     localBody.x = pos.current.x;
     localBody.y = pos.current.y;

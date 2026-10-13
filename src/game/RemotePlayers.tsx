@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import * as THREE from "three";
-import { NET, PVP_SCALE, useNet, type Peer } from "./net";
+import { NET, PVP_SCALE, useNet, myId, type Peer } from "./net";
 import { G } from "./state";
 import { DEFAULT_SKIN, type Skin } from "./skins";
 import { createTableBot, skinKey } from "./tableBotFactory";
@@ -72,7 +72,7 @@ export function RemotePlayers() {
   if (!net.online) return null;
   return (
     <>
-      {[...net.peers.values()].map((p) => (
+      {[...net.peers.values()].filter((p) => p.id && p.id !== myId()).map((p) => (
         <RemoteTable key={p.id} peer={p} />
       ))}
     </>

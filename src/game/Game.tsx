@@ -7,7 +7,7 @@ import { Environment, Lightformer } from "@react-three/drei";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { World } from "./World";
-import { G, MAG, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial } from "./state";
+import { G, MAG, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial } from "./state";
 import { SkinsPanel } from "./SkinsPanel";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
@@ -222,6 +222,23 @@ function HUD() {
         <div className="absolute left-1/2 top-6 -translate-x-1/2 rounded border-2 border-crosshair/60 bg-hud-panel px-5 py-2 text-center text-sm font-black uppercase tracking-widest">
           Training · press Enter for the training menu
         </div>
+      )}
+
+      {/* Mobile pause — middle-left (no Esc on many tablets) */}
+      {playing && G.locked && isMobilePlay() && (
+        <button
+          type="button"
+          aria-label="Pause"
+          className="pointer-events-auto absolute left-3 top-1/2 z-30 flex h-14 w-14 -translate-y-1/2 flex-col items-center justify-center rounded-2xl border-[3px] border-white/45 bg-black/55 text-white shadow-lg touch-none"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            pauseGame();
+          }}
+        >
+          <span className="text-xl leading-none">❚❚</span>
+          <span className="text-[9px] font-black uppercase">Pause</span>
+        </button>
       )}
       {G.mode === "tutorial" && playing && step && (
         <div className="absolute left-1/2 top-6 w-[min(40rem,60vw)] -translate-x-1/2 rounded border-2 border-shield/60 bg-hud-panel p-4 text-center">
@@ -534,6 +551,9 @@ function Menu() {
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-hud-scrim font-mono text-hud">
       <div className="w-full max-w-sm rounded-lg border-2 border-hud/30 bg-hud-panel p-8 text-center">
         <h1 className="text-5xl font-black tracking-tight">{tut ? "Tutorial" : train ? "Training" : "Paused"}</h1>
+        {!isMobilePlay() && (
+          <p className="mt-2 text-xs font-bold uppercase tracking-widest opacity-60">Click Resume to lock the mouse and play</p>
+        )}
         <div className="mt-6 flex flex-col gap-3">
           <button className={btnMain} onClick={resume}>Resume</button>
           <button className={btnAlt} onClick={tut ? startTutorial : train ? startTraining : playGame}>Restart</button>

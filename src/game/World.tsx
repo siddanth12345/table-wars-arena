@@ -8,7 +8,7 @@ import * as THREE from "three";
 import {
   G, MAG, FIRE_INTERVAL, DMG, PARRY_WINDOW, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, BUFF_TIME, DASH_CD, AIR_JUMPS, AIR_DASHES,
   BOMB_CD, BOMB_CD_BUFF, TABLE_HP, TABLE_CAP, BOSS_HITS, BOSS_WARN, setLocker,
-  MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, type TrainSpawn,
+  MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, isMobilePlay, pauseGame, type TrainSpawn,
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, SHARD_SPAWN_N, LOBBY_RESPAWN, FREECAM_SPEEDS,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
@@ -674,9 +674,23 @@ export function World() {
         G.userPaused = false;
         return;
       }
-      // Pointer lock lost. On iPad/tablets it often never sticks — only pause if the
-      // player explicitly paused (Esc). Soft-lock keeps keyboard/mouse playable.
-      if (G.userPaused) {
+      // Pointer lock lost
+      const mobile = isMobilePlay();
+      if (mobile) {
+        // Mobile: soft-lock stays unless user hit Pause
+        if (G.userPaused || G.phase !== "playing") {
+          G.locked = false;
+          G.firing = false;
+          G.scoped = false;
+          keys.current = {};
+        } else {
+          G.locked = true;
+        }
+        return;
+      }
+      // PC: unlock = immediate pause (one Esc press, not unlock-then-pause)
+      if (G.phase === "playing") {
+        G.userPaused = true;
         G.locked = false;
         G.firing = false;
         G.scoped = false;
@@ -685,8 +699,6 @@ export function World() {
           G.freecam = false;
           G.freecamSpeedIdx = 0;
         }
-      } else if (G.phase === "playing") {
-        G.locked = true; // soft lock
       } else {
         G.locked = false;
       }
@@ -745,13 +757,9 @@ const kd = (e: KeyboardEvent) => {
       if (e.code === SETTINGS.keys.jump) e.preventDefault();
       const wasDown = keys.current[e.code];
       keys.current[e.code] = true;
-      // Explicit pause — needed on iPad where pointer-lock never sticks
-      if (e.code === "Escape" && !wasDown && G.phase === "playing" && G.locked) {
-        G.userPaused = true;
-        G.locked = false;
-        G.firing = false;
-        G.scoped = false;
-        document.exitPointerLock?.();
+      // Esc → pause in one shot (PC pointer-lock exit is handled in onLock the same way)
+      if (e.code === "Escape" && !wasDown && G.phase === "playing") {
+        pauseGame();
         return;
       }
       // Freecam toggle (lobby & training only)

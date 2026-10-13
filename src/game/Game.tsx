@@ -229,6 +229,7 @@ function HUD() {
         <button
           type="button"
           aria-label="Pause"
+          data-no-lock
           className="pointer-events-auto absolute left-3 top-1/2 z-30 flex h-14 w-14 -translate-y-1/2 flex-col items-center justify-center rounded-2xl border-[3px] border-white/45 bg-black/55 text-white shadow-lg touch-none"
           onPointerDown={(e) => {
             e.preventDefault();

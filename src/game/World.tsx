@@ -286,6 +286,7 @@ export function World() {
   const staticRef = useRef<THREE.Group>(null);
   const keys = useRef<Record<string, boolean>>({});
   const softLookRef = useRef({ x: 0, y: 0 });
+  const lastClientRef = useRef<{ x: number; y: number; on: boolean }>({ x: 0, y: 0, on: false });
   const pos = useRef(START.clone());
   const hv = useRef(new THREE.Vector3());
   const vy = useRef(0);
@@ -859,15 +860,61 @@ const kd = (e: KeyboardEvent) => {
       if (e.code === SETTINGS.keys.grapple) G.grappling = false;
       if (e.code === SETTINGS.keys.jump) G.wallrun = false;
     };
+    // Look: hard pointer-lock uses movementX; soft-lock (iPad mouse/trackpad) falls back to client deltas
+    // because many mobile browsers report movementX=0 without real pointer lock.
+    const applyLookDelta = (mx: number, my: number) => {
+      if (!mx && !my) return;
+      softLookRef.current.x += mx;
+      softLookRef.current.y += my;
+    };
     const onSoftMove = (e: MouseEvent) => {
-      // Drive look ourselves for both hard pointer-lock and soft-lock (iPad).
-      // PointerLockControls pointerSpeed is 0 so we don't double-rotate.
+      if (!G.locked || G.phase !== "playing") {
+        lastClientRef.current.on = false;
+        return;
+      }
+      const mx = e.movementX || 0;
+      const my = e.movementY || 0;
+      if (document.pointerLockElement || (mx !== 0 || my !== 0)) {
+        applyLookDelta(mx, my);
+        lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
+        return;
+      }
+      // Soft-lock fallback for trackpad/mouse without pointer lock
+      if (lastClientRef.current.on) {
+        applyLookDelta(e.clientX - lastClientRef.current.x, e.clientY - lastClientRef.current.y);
+      }
+      lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
+    };
+    const onPointerMove = (e: PointerEvent) => {
       if (!G.locked || G.phase !== "playing") return;
-      softLookRef.current.x += e.movementX || 0;
-      softLookRef.current.y += e.movementY || 0;
+      // Prefer mouse/pen; allow touch only when captured for look (external trackpad often reports as mouse)
+      if (e.pointerType === "touch") return;
+      const mx = e.movementX || 0;
+      const my = e.movementY || 0;
+      if (document.pointerLockElement || mx || my) {
+        applyLookDelta(mx, my);
+        lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
+        return;
+      }
+      if (lastClientRef.current.on) {
+        applyLookDelta(e.clientX - lastClientRef.current.x, e.clientY - lastClientRef.current.y);
+      }
+      lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
+    };
+    const reacquireLock = () => {
+      if (!G.locked || G.phase !== "playing" || G.userPaused) return;
+      try {
+        const canvas = document.querySelector("canvas") as HTMLElement | null;
+        const el = canvas || document.body;
+        const req = el.requestPointerLock as undefined | ((o?: object) => void);
+        if (req) {
+          try { req.call(el, { unadjustedMovement: true }); } catch { try { req.call(el); } catch { /* ignore */ } }
+        }
+      } catch { /* ignore */ }
     };
     const md = (e: MouseEvent) => {
       if (!G.locked) return;
+      reacquireLock();
       if (G.freecam) {
         if (e.button === 0) G.freecamSpeedIdx = (G.freecamSpeedIdx + 1) % FREECAM_SPEEDS.length;
         return;
@@ -879,6 +926,21 @@ const kd = (e: KeyboardEvent) => {
       if (e.button === 0 && SETTINGS.fireMode === "hold") G.firing = false;
       if (e.button === 2) G.scoped = false;
     };
+    const onPointerDown = (e: PointerEvent) => {
+      if (!G.locked || G.phase !== "playing") return;
+      // Don't steal events from pause / GUI buttons
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("button, input, a, [data-no-lock]")) return;
+      lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
+      reacquireLock();
+      try {
+        (e.target as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
+      } catch { /* ignore */ }
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      try { (e.target as HTMLElement | null)?.releasePointerCapture?.(e.pointerId); } catch { /* ignore */ }
+      if (!document.pointerLockElement) lastClientRef.current.on = false;
+    };
     const cm = (e: Event) => e.preventDefault();
     window.addEventListener("keydown", kd);
     window.addEventListener("keyup", ku);
@@ -886,6 +948,9 @@ const kd = (e: KeyboardEvent) => {
     window.addEventListener("mouseup", mu);
     window.addEventListener("contextmenu", cm);
     window.addEventListener("mousemove", onSoftMove);
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    window.addEventListener("pointerdown", onPointerDown, { passive: true });
+    window.addEventListener("pointerup", onPointerUp, { passive: true });
     const wh = (e: WheelEvent) => {
       if (!G.locked) return;
       if (G.freecam) {
@@ -912,6 +977,9 @@ const kd = (e: KeyboardEvent) => {
       window.removeEventListener("mouseup", mu);
       window.removeEventListener("contextmenu", cm);
       window.removeEventListener("mousemove", onSoftMove);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("wheel", wh);
     };
   }, [camera]);

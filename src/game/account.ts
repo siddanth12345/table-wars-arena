@@ -24,11 +24,20 @@ export function useAccount() {
 }
 /** Name shown to other players in online modes. */
 let guestTag = "";
+function loadGuestTag() {
+  if (guestTag) return guestTag;
+  try {
+    const s = sessionStorage.getItem("tble-guest-tag");
+    if (s && /^\d{6}$/.test(s)) { guestTag = s; return guestTag; }
+  } catch { /* ignore */ }
+  guestTag = String(Math.floor(100000 + Math.random() * 900000));
+  try { sessionStorage.setItem("tble-guest-tag", guestTag); } catch { /* ignore */ }
+  return guestTag;
+}
 /** Guests get a random 6-digit tag (e.g. guest482913) so they can be invited to parties. */
 export const displayName = () => {
   if (ACC.status === "user") return ACC.username;
-  if (!guestTag) guestTag = String(Math.floor(100000 + Math.random() * 900000));
-  return `guest${guestTag}`;
+  return `guest${loadGuestTag()}`;
 };
 // The auth service needs 6+ character passwords; the game allows 3–20, so a fixed suffix is added.
 const authPw = (p: string) => `${p}#tble`;

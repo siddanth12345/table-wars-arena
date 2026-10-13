@@ -304,22 +304,43 @@ export async function queue1v1() {
   NET.stage = "queue";
   bump();
   const id = myId();
-  const ch = supabase.channel("tble:mm1v1", { config: { presence: { key: id } } });
+  const ch = supabase.channel("tble:mm1v1", { config: { presence: { key: id }, broadcast: { self: true } } });
   mm = ch;
   const joinedAt = Date.now();
-  ch.on("presence", { event: "sync" }, () => {
-    if (mm !== ch) return;
+  let matched = false;
+  const tryMatch = () => {
+    if (matched || mm !== ch || NET.stage !== "queue") return;
     const list = Object.entries(ch.presenceState<{ t: number }>())
-      .map(([k, v]) => ({ id: k, t: v[0]?.t ?? 0 }))
+      .map(([k, v]) => ({ id: k, t: v[0]?.t ?? joinedAt }))
       .sort((a, b) => a.t - b.t || a.id.localeCompare(b.id));
     for (let i = 0; i + 1 < list.length; i += 2) {
       const a = list[i]!, b = list[i + 1]!;
       if (a.id !== id && b.id !== id) continue;
-      void startPvp(`pvp-${a.id}-${b.id}`, a.id === id);
+      matched = true;
+      const room = `pvp-${a.id}-${b.id}`;
+      // Lower id announces so both sides always agree
+      if (id === a.id || id === b.id) {
+        void ch.send({ type: "broadcast", event: "matched", payload: { room, a: a.id, b: b.id } });
+      }
+      void startPvp(room, a.id === id);
       return;
     }
+  };
+  ch.on("presence", { event: "sync" }, tryMatch);
+  ch.on("broadcast", { event: "matched" }, ({ payload }) => {
+    if (matched || mm !== ch || NET.stage !== "queue") return;
+    const a = payload.a as string, b = payload.b as string, room = payload.room as string;
+    if (a !== id && b !== id) return;
+    matched = true;
+    void startPvp(room, a === id);
   });
-  ch.subscribe(async (s) => { if (s === "SUBSCRIBED") await ch.track({ t: joinedAt }); });
+  ch.subscribe(async (s) => {
+    if (s === "SUBSCRIBED") {
+      await ch.track({ t: joinedAt, id });
+      // Re-check a few times in case the first sync was empty
+      for (const d of [500, 1200, 2500]) setTimeout(tryMatch, d);
+    }
+  });
 }
 
 export function leaveQueue() {
@@ -477,9 +498,11 @@ export async function requeue() {
 
 const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
 export async function createLobby(code?: string) {
-  const c = code ?? Array.from({ length: 6 }, () => LETTERS[Math.floor(Math.random() * LETTERS.length)]).join("");
+  const c = (code ?? Array.from({ length: 6 }, () => LETTERS[Math.floor(Math.random() * LETTERS.length)]).join("")).toUpperCase();
   await joinRoom(`lobby-${c}`, "lobby", true);
   NET.code = c;
+  // Brief pause so presence is visible to joiners probing the channel
+  await new Promise((r) => setTimeout(r, 300));
   resetGame("training");
   bump();
   return c;
@@ -487,23 +510,34 @@ export async function createLobby(code?: string) {
 
 /** Looks for a live lobby with this code. Returns an error message or null on success. */
 export async function joinLobby(raw: string): Promise<string | null> {
-  const code = raw.trim().toUpperCase();
-  if (!/^[A-Z]{6}$/.test(code)) return "Invalid code";
-  const probe = supabase.channel(`tble:lobby-${code}`, { config: { presence: { key: `probe-${myId()}` } } });
-  const info = await new Promise<{ host: boolean; n: number }>((resolve) => {
-    const done = setTimeout(() => resolve({ host: false, n: 0 }), 3000);
-    probe.on("presence", { event: "sync" }, () => {
-      const st = probe.presenceState<Meta>();
-      const metas = Object.values(st).map((m) => m[0]).filter(Boolean) as Meta[];
-      if (metas.some((m) => m.host)) { clearTimeout(done); resolve({ host: true, n: metas.length }); }
-    });
-    probe.subscribe();
-  });
-  void supabase.removeChannel(probe);
-  if (!info.host) return "Invalid code";
-  if (info.n >= LOBBY_MAX) return "Lobby is full";
+  const code = raw.trim().toUpperCase().replace(/[^A-Z]/g, "");
+  if (code.length !== 6) return "Invalid code — use the 6-letter lobby code";
+  // Join the real room (no separate probe channel — more reliable on slow links)
   await joinRoom(`lobby-${code}`, "lobby", false);
   NET.code = code;
+  const ok = await new Promise<boolean>((resolve) => {
+    const start = Date.now();
+    const me = myId();
+    const tick = () => {
+      if (!room || NET.room !== `lobby-${code}`) { resolve(false); return; }
+      // Presence fills NET.names + NET.hostId (peers only appear after pose packets)
+      const names = Object.keys(NET.names);
+      const hasHost = !!NET.hostId && NET.hostId !== me;
+      const hasOthers = names.some((k) => k !== me);
+      if (hasHost || hasOthers) { resolve(true); return; }
+      if (Date.now() - start > 12000) { resolve(false); return; }
+      setTimeout(tick, 300);
+    };
+    setTimeout(tick, 200);
+  });
+  if (!ok) {
+    leaveRoom(false);
+    return "Invalid code or lobby closed — ask the host for a new code";
+  }
+  if (Object.keys(NET.names).length > LOBBY_MAX) {
+    leaveRoom(false);
+    return "Lobby is full";
+  }
   resetGame("training");
   bump();
   return null;
@@ -524,15 +558,23 @@ export function startInbox() {
   const acc = getAccount();
   stopInbox();
   if (acc.status !== "user" && acc.status !== "guest") return;
-  const ch = supabase.channel(inboxName(displayName()), { config: { broadcast: { self: false } } });
+  const uname = (acc.username && acc.username !== "guest" ? acc.username : displayName()).trim().toLowerCase();
+  const ch = supabase.channel(inboxName(uname), { config: { broadcast: { self: false } } });
   inbox = ch;
   ch.on("broadcast", { event: "invite" }, ({ payload }) => {
-    const inv = payload as Invite;
-    NET.invites = [...NET.invites.filter((i) => i.from !== inv.from || i.kind !== inv.kind), { ...inv, id: crypto.randomUUID(), t: Date.now() }];
+    const inv = payload as Invite & { to?: string };
+    // Ignore invites clearly meant for someone else
+    if (inv.to && inv.to !== uname) return;
+    NET.invites = [
+      ...NET.invites.filter((i) => i.from !== inv.from || i.kind !== inv.kind),
+      { id: crypto.randomUUID(), kind: inv.kind, from: inv.from, target: inv.target, t: Date.now() },
+    ];
     bump();
   });
   ch.on("broadcast", { event: "party-left" }, () => bump());
-  ch.subscribe();
+  ch.subscribe((status) => {
+    if (status === "SUBSCRIBED") bump();
+  });
 }
 export function stopInbox() {
   if (inbox) void supabase.removeChannel(inbox);
@@ -560,13 +602,18 @@ export async function sendInvite(username: string, kind: "party" | "lobby"): Pro
     target = NET.code;
   }
   NET.inviteSentAt = Date.now();
-  const ch = supabase.channel(inboxName(name), { config: { broadcast: { self: false } } });
+  const ch = supabase.channel(inboxName(name), { config: { broadcast: { self: false, ack: false } } });
   await new Promise<void>((resolve) => {
-    const t = setTimeout(resolve, 2500);
-    ch.subscribe((s) => { if (s === "SUBSCRIBED") { clearTimeout(t); resolve(); } });
+    const to = setTimeout(resolve, 4000);
+    ch.subscribe((s) => { if (s === "SUBSCRIBED") { clearTimeout(to); resolve(); } });
   });
-  await ch.send({ type: "broadcast", event: "invite", payload: { kind, from: displayName(), target } });
-  setTimeout(() => void supabase.removeChannel(ch), 1500);
+  const payload = { kind, from: displayName(), target, to: name.trim().toLowerCase() };
+  // Realtime broadcast is fire-and-forget — retry so the other client has time to be on the channel
+  for (let i = 0; i < 4; i++) {
+    try { await ch.send({ type: "broadcast", event: "invite", payload }); } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  setTimeout(() => void supabase.removeChannel(ch), 6000);
   return { ok: true, msg: `Invite sent to ${name}.` };
 }
 

@@ -333,13 +333,13 @@ export function Invites() {
   const net = useNet();
   const [err, setErr] = useState("");
   useTick(1000);
-  const list = net.invites.filter((i) => Date.now() - i.t < 30000);
+  const list = net.invites.filter((i) => Date.now() - i.t < 60000);
   if (list.length === 0 && !err) return null;
   return (
-    <div className="gui fixed bottom-6 right-6 z-50 flex w-80 flex-col gap-2 font-mono text-hud">
+    <div className="gui pointer-events-auto fixed inset-x-3 top-16 z-[60] mx-auto flex w-full max-w-md flex-col gap-2 font-mono text-hud sm:inset-x-auto sm:right-6 sm:top-auto sm:bottom-6 sm:w-96">
       {err && <div className="rounded bg-hud-panel p-3 text-sm font-bold text-destructive">{err}</div>}
       {list.map((i) => (
-        <div key={i.id} className="rounded-lg border-2 border-crosshair bg-hud-panel p-4">
+        <div key={i.id} className="rounded-lg border-2 border-crosshair bg-hud-panel p-4 shadow-xl">
           <p className="text-sm"><b>{i.from}</b> invited you to {i.kind === "party" ? "their party" : `lobby ${i.target}`}.</p>
           <div className="mt-2 flex gap-2">
             <button className={btnMain} onClick={async () => { setErr(""); const e = await acceptInvite(i); if (e) setErr(e); else document.exitPointerLock?.(); }}>Yes</button>

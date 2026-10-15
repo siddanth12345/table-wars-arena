@@ -139,7 +139,7 @@ export const G = {
   freecamSpeedIdx: 0,
   lobbyRespawnT: 0,
   /** Online tutorial instead of normal tutorial. */
-  onlineTut: false, queueTrainChrome: true,
+  onlineTut: false,
   /** Players who died during the current party campaign run (ids/names for win screen). */
   diedThisRun: [] as string[],
 };
@@ -154,8 +154,8 @@ export function resetGame(mode: Mode = G.mode) {
     shots: 0, hits: 0, parries: 0, time: 0, firing: false, scoped: false, respawnMsg: 0, tutStep: 0,
     tut: { enter: false, dashed: false, zoomed: false, bombed: false, slammed: false },
     crosshair: "normal", canGrapple: false, mobileTut: false, mobileTutStep: 0, mobilePaused: false,
-    trainMenu: false, userPaused: false, queueTrainChrome: true, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
-    campaignDead: false, shardProgress: 0, reviveQueue: [], freecam: false, freecamSpeedIdx: 0, lobbyRespawnT: 0, onlineTut: false, queueTrainChrome: true, diedThisRun: [],
+    trainMenu: false, userPaused: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
+    campaignDead: false, shardProgress: 0, reviveQueue: [], freecam: false, freecamSpeedIdx: 0, lobbyRespawnT: 0, onlineTut: false, diedThisRun: [],
   });
   TRAIN_Q.length = 0;
   if (mode === "training") Object.assign(G, { playerHp: TRAIN.maxHp, airJumps: TRAIN.airJumps, airDashes: TRAIN.airDashes });

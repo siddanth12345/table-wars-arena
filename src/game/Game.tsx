@@ -11,7 +11,7 @@ import { G, MAG, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_
 import { SkinsPanel } from "./SkinsPanel";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
-import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, QueueTrainTab, QueueTrainPause, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
+import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
 import { NET } from "./net";
 import { useAccount } from "./account";
 
@@ -529,8 +529,6 @@ function Menu() {
   useTick(100);
   const [showSettings, setShowSettings] = useState(false);
   const phase = G.phase;
-  // Queue-training uses its own Esc panel
-  if (NET.stage === "queue" && NET.queueTraining && phase === "playing" && !G.locked) return null;
   if (phase === "lost") {
     return (
       <div className="fixed inset-0 z-20 flex items-center justify-center bg-hud-scrim font-mono text-hud">
@@ -758,8 +756,6 @@ export function Game() {
           <Home />
           <WinScreen />
           <QueueOverlay />
-          <QueueTrainTab />
-          <QueueTrainPause />
           <MapPick />
           <Scoreboard />
           <PvpEnd />

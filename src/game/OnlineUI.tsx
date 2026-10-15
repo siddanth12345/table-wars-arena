@@ -1,14 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
-  NET, PVP_WIN, useNet, queue1v1, leaveQueue, enterQueueTraining, exitQueueTraining, dismissQueueTrainingChrome,
-  choosePick, sendRematch, answerRematch, requeue, goHomeOnline,
+  NET, PVP_WIN, useNet, queue1v1, leaveQueue, choosePick, sendRematch, answerRematch, requeue, goHomeOnline,
   createLobby, joinLobby, sendInvite, acceptInvite, dismissInvite, partyGo, kickMember, disbandParty, leaveParty,
   isPartyLeader, inParty, myId, opponentId, startInbox, stopInbox,
 } from "./net";
 import { useAccount, signIn, signUp, playAsGuest, signOut } from "./account";
-import { G, resetGame, lockPointer, pauseGame } from "./state";
+import { G, resetGame, lockPointer } from "./state";
 import type { TimeOfDay } from "./settings";
 
 const btnMain = "pointer-events-auto rounded bg-crosshair px-6 py-3 text-base font-black uppercase text-hud-ink disabled:opacity-40";
@@ -20,43 +19,23 @@ function useTick(ms: number) {
   useEffect(() => { const id = setInterval(() => t((n) => n + 1), ms); return () => clearInterval(id); }, [ms]);
 }
 
-function SpinTableCss({ className = "", blue = false }: { className?: string; blue?: boolean }) {
-  const top = blue ? "bg-[#3a7bd4]" : "bg-[#2fa84f]";
-  const leg = blue ? "bg-[#1e4f9a]" : "bg-[#197a37]";
-  return (
-    <div className={`relative ${className}`} style={{ animation: "tble-spin 1.4s linear infinite", transformStyle: "preserve-3d" }}>
-      <div className={`absolute inset-x-[12%] top-[28%] h-[18%] rounded-sm ${top} shadow-lg`} />
-      <div className={`absolute bottom-[8%] left-[18%] h-[36%] w-[8%] rounded-sm ${leg}`} />
-      <div className={`absolute bottom-[8%] right-[18%] h-[36%] w-[8%] rounded-sm ${leg}`} />
-      <div className={`absolute bottom-[8%] left-[38%] h-[36%] w-[8%] rounded-sm ${leg}`} />
-      <div className={`absolute bottom-[8%] right-[38%] h-[36%] w-[8%] rounded-sm ${leg}`} />
-      <div className="absolute left-[28%] top-[22%] h-2.5 w-2.5 rounded-full bg-[#f5f2dc]" />
-      <div className="absolute right-[28%] top-[22%] h-2.5 w-2.5 rounded-full bg-[#f5f2dc]" />
-      <style>{`@keyframes tble-spin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }`}</style>
-    </div>
-  );
-}
-
-function formatQueueWait(ms: number) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return m > 0 ? `${m}:${r.toString().padStart(2, "0")}` : `${r}s`;
-}
-
 /** Full-screen connecting overlay — CSS table spin (no extra WebGL; safer on mobile). */
-export function ConnectingOverlay({
-  label,
-  onCancel,
-  extra,
-}: {
-  label: string;
-  onCancel?: () => void;
-  extra?: ReactNode;
-}) {
+export function ConnectingOverlay({ label, onCancel }: { label: string; onCancel?: () => void }) {
   return (
     <div className="pointer-events-auto fixed inset-0 z-[80] flex flex-col items-center justify-center bg-[#0a0c10]/92 font-mono text-hud backdrop-blur-sm">
-      <SpinTableCss className="h-28 w-36" />
+      <div
+        className="relative h-28 w-36"
+        style={{ animation: "tble-spin 1.4s linear infinite", transformStyle: "preserve-3d" }}
+      >
+        <div className="absolute inset-x-2 top-8 h-5 rounded-sm bg-[#2fa84f] shadow-lg" />
+        <div className="absolute bottom-2 left-3 h-10 w-2.5 rounded-sm bg-[#197a37]" />
+        <div className="absolute bottom-2 right-3 h-10 w-2.5 rounded-sm bg-[#197a37]" />
+        <div className="absolute bottom-2 left-1/3 h-10 w-2.5 -translate-x-1/2 rounded-sm bg-[#197a37]" />
+        <div className="absolute bottom-2 right-1/3 h-10 w-2.5 translate-x-1/2 rounded-sm bg-[#197a37]" />
+        <div className="absolute left-6 top-6 h-3 w-3 rounded-full bg-[#f5f2dc]" />
+        <div className="absolute right-6 top-6 h-3 w-3 rounded-full bg-[#f5f2dc]" />
+      </div>
+      <style>{`@keyframes tble-spin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }`}</style>
       <div className="mt-4 text-center">
         <div className="text-xs font-bold uppercase tracking-[0.35em] text-crosshair">TBLE</div>
         <div className="mt-2 text-xl font-black uppercase tracking-widest">{label}</div>
@@ -65,7 +44,6 @@ export function ConnectingOverlay({
       {onCancel && (
         <button type="button" className={`${btnAlt} mt-8 min-h-12 touch-manipulation`} onClick={onCancel}>Cancel</button>
       )}
-      {extra}
     </div>
   );
 }
@@ -252,89 +230,10 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
 
 export function QueueOverlay() {
   const net = useNet();
-  useTick(250);
+  useTick(500);
   if (net.stage !== "queue") return null;
-  // While practicing in training, full-screen wait is hidden (tab + pause handle UI)
-  if (net.queueTraining) return null;
   return (
-    <ConnectingOverlay
-      label="Searching for an opponent…"
-      onCancel={leaveQueue}
-      extra={
-        <button
-          type="button"
-          className={`${btnMain} mt-3 min-h-12 touch-manipulation`}
-          onClick={() => {
-            enterQueueTraining();
-            lockPointer();
-          }}
-        >
-          Training
-        </button>
-      }
-    />
-  );
-}
-
-/** Left-middle blue tab while training in 1v1 queue — wait time + spinning table. */
-export function QueueTrainTab() {
-  const net = useNet();
-  useTick(250);
-  if (net.stage !== "queue" || !net.queueTraining || !G.queueTrainChrome) return null;
-  if (G.phase !== "playing") return null;
-  const waited = formatQueueWait(Date.now() - (net.queueStartedAt || Date.now()));
-  return (
-    <div className="pointer-events-none fixed left-3 top-1/2 z-[25] -translate-y-1/2 font-mono text-hud">
-      <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-[#3a7bd4]/70 bg-[#0b1a33]/88 px-3 py-3 shadow-lg backdrop-blur-sm">
-        <SpinTableCss className="h-14 w-16" blue />
-        <div className="text-[9px] font-bold uppercase tracking-widest text-[#7eb6ff]">1v1 queue</div>
-        <div className="text-lg font-black tabular-nums text-white">{waited}</div>
-        <div className="text-[9px] font-bold uppercase tracking-widest opacity-60">searching…</div>
-      </div>
-    </div>
-  );
-}
-
-/** ESC / pause modal while training during 1v1 queue. */
-export function QueueTrainPause() {
-  const net = useNet();
-  useTick(250);
-  if (net.stage !== "queue" || !net.queueTraining) return null;
-  if (G.phase !== "playing" || G.locked) return null;
-  // Only when user paused (Esc)
-  if (!G.userPaused && G.locked) return null;
-  // Menu shows when !locked; we intercept for queue-training
-  const waited = formatQueueWait(Date.now() - (net.queueStartedAt || Date.now()));
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-hud-scrim font-mono text-hud">
-      <div className="w-full max-w-sm rounded-lg border-2 border-[#3a7bd4]/50 bg-hud-panel p-8 text-center">
-        <SpinTableCss className="mx-auto h-24 w-28" blue />
-        <h1 className="mt-4 text-3xl font-black tracking-tight">1v1 Queue</h1>
-        <p className="mt-1 text-sm font-bold text-[#7eb6ff]">Waiting {waited}</p>
-        <p className="mt-2 text-xs opacity-60">Still searching for an opponent while you train.</p>
-        <div className="mt-6 flex flex-col gap-3">
-          <button
-            type="button"
-            className={btnMain}
-            onClick={() => {
-              // Stay in training; drop queue tab chrome — next Esc is normal pause
-              dismissQueueTrainingChrome();
-              G.userPaused = false;
-              lockPointer();
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={btnAlt}
-            onClick={() => exitQueueTraining()}
-          >
-            Exit training
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConnectingOverlay label="Searching for an opponent…" onCancel={leaveQueue} />
   );
 }
 

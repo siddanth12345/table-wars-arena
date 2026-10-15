@@ -41,7 +41,7 @@ export const TUT_STEPS: { title: string; text: string; enter?: boolean }[] = [
   { title: "Scope", text: "HOLD RIGHT CLICK to scope in, then SCROLL the mouse wheel to change zoom." },
   { title: "Brown tables", text: "Brown tables are the normal enemies — they hop around and shoot splinters. LEFT CLICK to shoot this one: your splinters explode on impact and hurt everything nearby. R reloads (on the ground). In the air, R is a GROUND POUND." },
   { title: "Bombs", text: "Press F to throw a bomb. It explodes in a big area. Blow this table up!" },
-  { title: "Combo meter", text: "Damage you deal builds a combo on the right of the screen. It resets after 2.5 seconds without hits. When the combo is over 100, press ENTER (rebindable in Settings) to reset ALL cooldowns and heal 30 HP. You cannot use this while dead." },
+  { title: "Combo meter", text: "Damage you deal builds a combo on the right of the screen. It resets after 2.5 seconds without hits. When the combo is high enough (100 offline / 50 in 1v1), press SHIFT (rebindable in Settings) to reset ALL cooldowns and heal (30 offline / 20 in 1v1). You cannot use this while dead." },
   { title: "Parry", text: "This table shoots back! Press E right before a bullet hits you to PARRY it — the reflected shot deals 10 damage and you get a 2 second power boost (infinite ammo, 2x damage). Successful parry: 4s cooldown. Missed parry: 7s cooldown." },
   { title: "Blue tables", text: "Blue tables are fast chasers. They rush at you and explode on contact. Shoot them before they reach you!" },
   { title: "The Boss", text: "After you clear every table, the huge RED boss drops from the ceiling (stay out of the red circle!). He shoots, drops swords that stun you, stomps out expanding shockwaves you must JUMP over, and summons minions. 5 seconds in, your parry gets COMPROMISED. Press ENTER to continue.", enter: true },
@@ -262,10 +262,17 @@ export function registerDamage(amount: number, targetId: string, screenX = 0.5, 
   };
 }
 
-/** Combo > 100 + key: full CD reset + 30 HP. Returns true if fired. */
+/** Combo burst: offline >100 → heal 30; 1v1 >50 → heal 20. Always resets CDs. */
+export function comboBurstThreshold() {
+  return G.mode === "pvp" ? 50 : 100;
+}
+export function comboBurstHeal() {
+  return G.mode === "pvp" ? 20 : 30;
+}
 export function tryComboBurst() {
-  if (G.phase !== "playing" || G.combo <= 100) return false;
+  if (G.phase !== "playing" || G.combo <= comboBurstThreshold()) return false;
   if (G.playerHp <= 0 || G.pvpDead || G.campaignDead) return false;
+  const heal = comboBurstHeal();
   G.combo = 0;
   G.comboTimer = 0;
   G.slamCd = 0;
@@ -273,7 +280,7 @@ export function tryComboBurst() {
   G.dashCd = 0;
   G.bombCd = 0;
   G.reloading = 0;
-  G.playerHp = Math.min(cfg.maxHp(), G.playerHp + 30);
+  G.playerHp = Math.min(cfg.maxHp(), G.playerHp + heal);
   G.hitFlash = 0.25;
   G.parryFlash = 0.2;
   return true;

@@ -7,7 +7,7 @@ import { Environment, Lightformer } from "@react-three/drei";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { World } from "./World";
-import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial } from "./state";
+import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial, comboBurstThreshold, comboBurstHeal } from "./state";
 import { SkinsPanel } from "./SkinsPanel";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
@@ -316,14 +316,14 @@ function HUD() {
       {/* Combo meter — right middle */}
       {playing && (
         <div className="pointer-events-none absolute right-6 top-1/2 z-20 -translate-y-1/2 text-right font-mono">
-          <div className={`rounded-xl border-2 px-4 py-3 ${G.combo > 100 ? "border-crosshair bg-crosshair/20 shadow-[0_0_20px_rgba(47,168,79,0.45)]" : "border-white/25 bg-black/50"}`}>
+          <div className={`rounded-xl border-2 px-4 py-3 ${G.combo > comboBurstThreshold() ? "border-crosshair bg-crosshair/20 shadow-[0_0_20px_rgba(47,168,79,0.45)]" : "border-white/25 bg-black/50"}`}>
             <div className="text-[10px] font-bold uppercase tracking-[0.25em] opacity-70">Combo</div>
-            <div className={`text-4xl font-black tabular-nums ${G.combo > 100 ? "text-crosshair" : "text-white"}`}>
+            <div className={`text-4xl font-black tabular-nums ${G.combo > comboBurstThreshold() ? "text-crosshair" : "text-white"}`}>
               {Math.floor(G.combo)}
             </div>
-            {G.combo > 100 && (
+            {G.combo > comboBurstThreshold() && (
               <div className="mt-1 text-[10px] font-bold uppercase tracking-widest text-crosshair">
-                [{kl("comboBurst")}] burst · CD reset +30 HP
+                [{kl("comboBurst")}] burst · CD reset +{comboBurstHeal()} HP
               </div>
             )}
             {G.combo > 0 && G.comboTimer > 0 && (

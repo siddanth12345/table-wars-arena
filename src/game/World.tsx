@@ -1520,20 +1520,7 @@ const kd = (e: KeyboardEvent) => {
         }
       } else if (G.stage === "boss") {
         G.bossTime += dt;
-        // Offline / non-party: normal health rings on boss only
-        if (!(sharesEnemies() && G.mode === "game")) {
-          healthT.current -= dt;
-          if (healthT.current <= 0) {
-            healthT.current += cfg.ringInterval(HEALTH_INTERVAL);
-            const h = health.find((item) => !item.active) ?? health[Math.floor(Math.random() * health.length)];
-            if (h) {
-              h.pos.copy(randomFloor(p));
-              h.active = true;
-              h.t = HEALTH_LIFE;
-              h.isShard = false;
-            }
-          }
-        }
+        // Offline campaign: no health rings (removed). Party campaign uses shards instead.
         for (const h of health) if (h.active && !h.isShard && (h.t -= dt) <= 0) h.active = false;
         if (G.bossTime >= PARRY_LOCK_AT && !G.parryLocked) {
           G.parryLocked = true;
@@ -1738,6 +1725,22 @@ const kd = (e: KeyboardEvent) => {
         G.stage = "incoming";
         G.bossWarn = BOSS_WARN;
         G.playerHp = MAX_HP;
+      }
+
+      // --- 1v1 health rings: every 10s, last 4s (offline campaign has none) ---
+      if (active && G.mode === "pvp" && NET.stage === "playing" && !follower) {
+        healthT.current -= dt;
+        if (healthT.current <= 0) {
+          healthT.current += 10;
+          const h = health.find((item) => !item.active) ?? health[Math.floor(Math.random() * health.length)];
+          if (h) {
+            h.pos.copy(randomFloor(p));
+            h.active = true;
+            h.t = 4;
+            h.isShard = false;
+          }
+        }
+        for (const h of health) if (h.active && !h.isShard && (h.t -= dt) <= 0) h.active = false;
       }
 
       // --- training: timed spawns ---

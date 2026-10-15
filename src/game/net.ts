@@ -59,6 +59,10 @@ export const NET = {
   party: null as null | { id: string; leaderId: string; members: PartyMember[] },
   partyNote: "",
   inviteSentAt: 0,
+  /** When the player entered the 1v1 queue (ms). */
+  queueStartedAt: 0,
+  /** Training while still searching for a 1v1. */
+  queueTraining: false,
 };
 
 let version = 0;
@@ -327,6 +331,8 @@ function onPresence(ids: Set<string>) {
 export async function queue1v1() {
   leaveRoom(false);
   NET.stage = "queue";
+  NET.queueStartedAt = Date.now();
+  NET.queueTraining = false;
   bump();
   const id = myId();
   const ch = supabase.channel("tble:mm1v1", { config: { presence: { key: id }, broadcast: { self: true } } });
@@ -371,7 +377,42 @@ export async function queue1v1() {
 export function leaveQueue() {
   if (mm) void supabase.removeChannel(mm);
   mm = null;
+  NET.queueTraining = false;
+  NET.queueStartedAt = 0;
   if (NET.stage === "queue") { NET.stage = "idle"; bump(); }
+  else bump();
+}
+
+/** Practice in training while keeping the 1v1 search alive. */
+export function enterQueueTraining() {
+  if (NET.stage !== "queue") return;
+  NET.queueTraining = true;
+  G.queueTrainChrome = true;
+  if (!NET.queueStartedAt) NET.queueStartedAt = Date.now();
+  resetGame("training");
+  G.queueTrainChrome = true;
+  bump();
+}
+
+/** Leave training and return to the full-screen 1v1 wait UI (still queued). */
+export function exitQueueTraining() {
+  if (!NET.queueTraining) return;
+  NET.queueTraining = false;
+  G.phase = "home";
+  G.locked = false;
+  G.userPaused = false;
+  G.firing = false;
+  G.scoped = false;
+  try { document.exitPointerLock?.(); } catch { /* ignore */ }
+  bump();
+}
+
+/** Close the queue-training overlay chrome; stay in normal training (still queued). */
+export function dismissQueueTrainingChrome() {
+  // Visual-only: mark chrome dismissed via flag on G
+  G.queueTrainChrome = false;
+  G.userPaused = false;
+  bump();
 }
 
 export async function startPvp(name: string, host: boolean, partyMatch = false) {

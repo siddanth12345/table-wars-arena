@@ -319,7 +319,7 @@ export function World() {
     active: false, x: 0, z: 0, yaw: 0, hw: 0.5, hd: 0.5, y0: 0, y1: 1, t: 0,
   })), []);
   const abilityPads = useMemo(() => Array.from({ length: 6 }, () => ({
-    active: false, pos: new THREE.Vector3(), normal: new THREE.Vector3(0, 1, 0), t: 0,
+    active: false, pos: new THREE.Vector3(), normal: new THREE.Vector3(0, 1, 0), t: 0, cd: 0,
   })), []);
   const abilityFires = useMemo(() => Array.from({ length: 4 }, () => ({
     active: false, ax: 0, az: 0, bx: 0, bz: 0, t: 0,
@@ -1251,16 +1251,16 @@ const kd = (e: KeyboardEvent) => {
         if (ab === "wall") {
           const slot = abilityWalls.find((w) => !w.active);
           if (slot) {
-            const thick = TABLE_W * 0.5; // 1 table thick → half-extents
+            const thick = TABLE_W * 0.5;
             const halfW = BOSS_H * 0.5;
-            const place = p.clone().addScaledVector(forward, PLAYER_R + thick + 2);
+            // 5× farther in front; oriented perpendicular to look yaw (any facing angle)
+            const dist = (PLAYER_R + thick + 2) * 5;
+            const place = p.clone().addScaledVector(forward, dist);
             slot.active = true;
-            slot.x = place.x; slot.z = place.z; slot.yaw = yaw;
-            slot.hw = thick; slot.hd = halfW; // thickness along forward, width perpendicular
-            // After rotation, hw is local X (perp if we set yaw so local Z is forward)
-            // Local: X = along wall length, Z = thickness
-            slot.hw = halfW;
-            slot.hd = thick;
+            slot.x = place.x; slot.z = place.z;
+            slot.yaw = yaw; // wall face perpendicular to crosshair facing
+            slot.hw = halfW; // length left-right
+            slot.hd = thick; // thickness toward you
             slot.y0 = 0;
             slot.y1 = BOSS_H;
             slot.t = 2;
@@ -1270,15 +1270,42 @@ const kd = (e: KeyboardEvent) => {
         } else if (ab === "trampoline") {
           const dir = new THREE.Vector3();
           cam.getWorldDirection(dir);
-          const rc = new THREE.Raycaster(cam.position.clone(), dir, 0.5, cfg.grapple(GRAPPLE_MAX));
-          const hit = staticRef.current ? rc.intersectObject(staticRef.current, true)[0] : undefined;
+          const maxR = cfg.grapple(GRAPPLE_MAX);
+          const rc = new THREE.Raycaster(cam.position.clone(), dir.clone().normalize(), 0.2, maxR);
+          let hitPoint: THREE.Vector3 | null = null;
+          let hitNormal = new THREE.Vector3(0, 1, 0);
+          if (staticRef.current) {
+            const hit = rc.intersectObject(staticRef.current, true)[0];
+            if (hit) {
+              hitPoint = hit.point.clone();
+              if (hit.face) {
+                hitNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld).normalize();
+                if (hitNormal.y < 0) hitNormal.negate();
+              }
+            }
+          }
+          // Floor fallback so pads always place when aiming at ground
+          if (!hitPoint && dir.y < -0.05) {
+            const tHit = -cam.position.y / dir.y;
+            if (tHit > 0.3 && tHit <= maxR) {
+              hitPoint = cam.position.clone().addScaledVector(dir, tHit);
+              hitNormal.set(0, 1, 0);
+            }
+          }
+          // Aim-at-feet fallback within range
+          if (!hitPoint) {
+            const ahead = p.clone().addScaledVector(forward, Math.min(20, maxR * 0.5));
+            ahead.y = 0;
+            hitPoint = ahead;
+            hitNormal.set(0, 1, 0);
+          }
           const slot = abilityPads.find((pad) => !pad.active);
-          if (slot && hit) {
+          if (slot && hitPoint) {
             slot.active = true;
-            slot.pos.copy(hit.point);
-            slot.normal.copy(hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize() : new THREE.Vector3(0, 1, 0));
-            if (slot.normal.y < 0) slot.normal.negate();
+            slot.pos.copy(hitPoint);
+            slot.normal.copy(hitNormal);
             slot.t = 3;
+            slot.cd = 0;
             G.abilityCharges--;
             if (G.abilityCharges <= 0) G.abilityCd = 4;
           }
@@ -1315,19 +1342,29 @@ const kd = (e: KeyboardEvent) => {
       if (!pad.active) continue;
       pad.t -= dt;
       if (pad.t <= 0) { pad.active = false; continue; }
-      const d = p.distanceTo(pad.pos);
-      if (d < 4.5) {
-        const vel = hv.current.clone();
-        vel.y = vy.current;
-        const approach = -vel.dot(pad.normal);
-        if (approach > 2) {
-          // reflect / boost along normal
-          const boost = approach * (Math.abs(pad.normal.y) > 0.85 ? 1 : 2 / 3);
-          vel.addScaledVector(pad.normal, approach + Math.max(boost, 40));
-          hv.current.set(vel.x, 0, vel.z);
-          vy.current = Math.max(vel.y, 30);
-          grounded.current = false;
-        }
+      pad.cd = Math.max(0, pad.cd - dt);
+      // Horizontal distance to pad center (ignore Y a bit for floor pads)
+      const dXZ = Math.hypot(p.x - pad.pos.x, p.z - pad.pos.z);
+      const onPad = dXZ < 5.5 && p.y < pad.pos.y + 5 && p.y > pad.pos.y - 2;
+      if (!onPad || pad.cd > 0) continue;
+      const vel = hv.current.clone();
+      vel.y = vy.current;
+      const approach = -vel.dot(pad.normal);
+      const horiz = Math.hypot(hv.current.x, hv.current.z);
+      if (approach > 3) {
+        // Moving into the pad — bounce with approach speed (or 2/3 if not face-on to normal)
+        const factor = Math.abs(pad.normal.y) > 0.85 ? 1 : 2 / 3;
+        const boost = Math.max(approach * factor, 35);
+        vel.addScaledVector(pad.normal, approach + boost);
+        hv.current.set(vel.x, 0, vel.z);
+        vy.current = Math.max(vel.y, 35);
+        grounded.current = false;
+        pad.cd = 0.35;
+      } else if (horiz < 4 && Math.abs(vy.current) < 8 && pad.normal.y > 0.4) {
+        // Idle on pad — bounce up 3× normal jump
+        vy.current = JUMP_V * 3;
+        grounded.current = false;
+        pad.cd = 0.45;
       }
     }
     for (const fire of abilityFires) {
@@ -1342,28 +1379,11 @@ const kd = (e: KeyboardEvent) => {
         const px = fire.ax + dx * t, pz = fire.az + dz * t;
         return Math.hypot(x - px, z - pz);
       };
-      // local player
-      if (nearSeg(p.x, p.z) < 4 && p.y < 6) {
-        const id = "local";
-        if (!fire.stung.has(id)) {
-          fire.stung.add(id);
-          damagePlayer(10);
-          G.stun = Math.max(G.stun, 0.6);
-        }
-        const acc = (fire.tickAcc.get(id) ?? 0) + dt;
-        if (acc >= 0.1) {
-          fire.tickAcc.set(id, acc - 0.1);
-          damagePlayer(2);
-          fire.tickAcc.set(id + "_tick", 1);
-        } else fire.tickAcc.set(id, acc);
-      } else if (fire.tickAcc.get("local_tick")) {
-        fire.tickAcc.delete("local_tick");
-        G.abilitySlow = 2;
-      }
-      // bots (tables + blues) — skip boss
+      // Fire never damages the caster
+      // bots (tables + blues) — skip boss; 2× wider line
       for (let i = 0; i < tables.length; i++) {
         const tb = tables[i]!;
-        if (!tb.alive || nearSeg(tb.pos.x, tb.pos.z) >= 4 + 3 * tb.s) continue;
+        if (!tb.alive || nearSeg(tb.pos.x, tb.pos.z) >= 8 + 3 * tb.s) continue;
         const id = `t${i}`;
         if (!fire.stung.has(id)) {
           fire.stung.add(id);
@@ -1377,7 +1397,7 @@ const kd = (e: KeyboardEvent) => {
       }
       for (let i = 0; i < blues.length; i++) {
         const u = blues[i]!;
-        if (!u.alive || nearSeg(u.pos.x, u.pos.z) >= 5) continue;
+        if (!u.alive || nearSeg(u.pos.x, u.pos.z) >= 10) continue;
         const id = `b${i}`;
         if (!fire.stung.has(id)) {
           fire.stung.add(id);
@@ -1392,7 +1412,7 @@ const kd = (e: KeyboardEvent) => {
       // pvp peers
       for (const pr of NET.peers.values()) {
         if (pr.dead || pr.id === myId()) continue;
-        if (nearSeg(pr.x, pr.z) >= 5) continue;
+        if (nearSeg(pr.x, pr.z) >= 10) continue;
         if (!fire.stung.has(pr.id)) {
           fire.stung.add(pr.id);
           hitPeer(pr.id, 10, true);
@@ -2501,7 +2521,7 @@ const kd = (e: KeyboardEvent) => {
       const len = Math.hypot(f.bx - f.ax, f.bz - f.az) || 1;
       m.position.set(mx, 0.4, mz);
       m.rotation.set(0, Math.atan2(f.bx - f.ax, f.bz - f.az), 0);
-      m.scale.set(3.5, 1, len);
+      m.scale.set(7, 1.2, len); // 2× wider fire line
     });
 
     if (ropeRef.current) {

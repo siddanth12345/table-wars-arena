@@ -677,9 +677,30 @@ function WinScreen() {
   );
 }
 
+
+/** iPad soft-lock capture surface under HUD — cursor hidden; pointer capture target. */
+function MobileLookLayer() {
+  useTick(100);
+  if (!isMobilePlay() || !G.locked || G.phase !== "playing" || G.userPaused) return null;
+  return (
+    <div
+      id="ipad-look-layer"
+      className="fixed inset-0 z-[15]"
+      style={{ cursor: "none", touchAction: "none" }}
+      data-ipad-look
+    />
+  );
+}
+
 export function Game() {
   const [, force] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  // Re-render so canvas wrapper cursor:none tracks lock state on iPad
+  useEffect(() => {
+    if (!loaded) return;
+    const id = setInterval(() => force((n) => n + 1), 200);
+    return () => clearInterval(id);
+  }, [loaded]);
   useEffect(() => {
     // Feed the cursor position to whichever GUI button it is over, for the hover glow.
     const move = (e: PointerEvent) => {
@@ -708,11 +729,19 @@ export function Game() {
         <LoadingScreen onDone={() => setLoaded(true)} />
       ) : (
         <>
-          <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, 3.2, 12], fov: 72, near: 0.1, far: 3000 }}>
-            <SceneLighting />
-            <ShadowToggle />
-            <World />
-          </Canvas>
+          <div
+            className="absolute inset-0"
+            style={{
+              cursor: isMobilePlay() && G.locked && G.phase === "playing" && !G.userPaused ? "none" : undefined,
+            }}
+          >
+            <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, 3.2, 12], fov: 72, near: 0.1, far: 3000 }}>
+              <SceneLighting />
+              <ShadowToggle />
+              <World />
+            </Canvas>
+            <MobileLookLayer />
+          </div>
           <HUD />
           <Menu />
           <TrainingMenu />

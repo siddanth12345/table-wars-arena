@@ -860,61 +860,48 @@ const kd = (e: KeyboardEvent) => {
       if (e.code === SETTINGS.keys.grapple) G.grappling = false;
       if (e.code === SETTINGS.keys.jump) G.wallrun = false;
     };
-    // Look: hard pointer-lock uses movementX; soft-lock (iPad mouse/trackpad) falls back to client deltas
-    // because many mobile browsers report movementX=0 without real pointer lock.
+    // --- Look ---
+    // PC: movementX while pointer-locked (unchanged, perfect).
+    // iPad: no requestPointerLock — cursor:none, clientX deltas, setPointerCapture on canvas.
     const applyLookDelta = (mx: number, my: number) => {
       if (!mx && !my) return;
       softLookRef.current.x += mx;
       softLookRef.current.y += my;
     };
+    const canvasEl = () =>
+      (document.querySelector("canvas") as HTMLElement | null) ||
+      document.getElementById("ipad-look-layer");
+
+    // Desktop hard-lock path only
     const onSoftMove = (e: MouseEvent) => {
-      if (!G.locked || G.phase !== "playing") {
-        lastClientRef.current.on = false;
-        return;
-      }
-      const mx = e.movementX || 0;
-      const my = e.movementY || 0;
-      if (document.pointerLockElement || (mx !== 0 || my !== 0)) {
-        applyLookDelta(mx, my);
-        lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
-        return;
-      }
-      // Soft-lock fallback for trackpad/mouse without pointer lock
-      if (lastClientRef.current.on) {
-        applyLookDelta(e.clientX - lastClientRef.current.x, e.clientY - lastClientRef.current.y);
-      }
-      lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
+      if (!G.locked || G.phase !== "playing") return;
+      if (isMobilePlay() && !document.pointerLockElement) return;
+      applyLookDelta(e.movementX || 0, e.movementY || 0);
     };
+
+    // iPad soft-lock: relative deltas from previous client position only
     const onPointerMove = (e: PointerEvent) => {
       if (!G.locked || G.phase !== "playing") return;
-      // Prefer mouse/pen; allow touch only when captured for look (external trackpad often reports as mouse)
-      if (e.pointerType === "touch") return;
-      const mx = e.movementX || 0;
-      const my = e.movementY || 0;
-      if (document.pointerLockElement || mx || my) {
-        applyLookDelta(mx, my);
-        lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
+      if (document.pointerLockElement) {
+        applyLookDelta(e.movementX || 0, e.movementY || 0);
         return;
       }
-      if (lastClientRef.current.on) {
-        applyLookDelta(e.clientX - lastClientRef.current.x, e.clientY - lastClientRef.current.y);
+      if (!isMobilePlay()) return;
+      if (e.pointerType === "touch") return;
+      const prev = lastClientRef.current;
+      if (prev.on) {
+        const deltaX = e.clientX - prev.x;
+        const deltaY = e.clientY - prev.y;
+        applyLookDelta(deltaX, deltaY);
       }
       lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
     };
-    const reacquireLock = () => {
-      if (!G.locked || G.phase !== "playing" || G.userPaused) return;
-      try {
-        const canvas = document.querySelector("canvas") as HTMLElement | null;
-        const el = canvas || document.body;
-        const req = el.requestPointerLock as undefined | ((o?: object) => void);
-        if (req) {
-          try { req.call(el, { unadjustedMovement: true }); } catch { try { req.call(el); } catch { /* ignore */ } }
-        }
-      } catch { /* ignore */ }
-    };
+
     const md = (e: MouseEvent) => {
       if (!G.locked) return;
-      reacquireLock();
+      if (!isMobilePlay()) {
+        try { ctrl.current?.lock(); } catch { /* ignore */ }
+      }
       if (G.freecam) {
         if (e.button === 0) G.freecamSpeedIdx = (G.freecamSpeedIdx + 1) % FREECAM_SPEEDS.length;
         return;
@@ -926,20 +913,31 @@ const kd = (e: KeyboardEvent) => {
       if (e.button === 0 && SETTINGS.fireMode === "hold") G.firing = false;
       if (e.button === 2) G.scoped = false;
     };
+
     const onPointerDown = (e: PointerEvent) => {
       if (!G.locked || G.phase !== "playing") return;
-      // Don't steal events from pause / GUI buttons
-      const t = e.target as HTMLElement | null;
-      if (t?.closest?.("button, input, a, [data-no-lock]")) return;
-      lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
-      reacquireLock();
-      try {
-        (e.target as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
-      } catch { /* ignore */ }
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.("button, input, a, [data-no-lock]")) return;
+      // iPad only: capture on canvas so deltas keep flowing past screen edges
+      if (isMobilePlay() && !document.pointerLockElement) {
+        lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
+        const c = canvasEl();
+        try {
+          if (c) c.setPointerCapture(e.pointerId);
+          else target?.setPointerCapture?.(e.pointerId);
+        } catch { /* ignore */ }
+        try {
+          document.body.style.cursor = "none";
+          document.documentElement.style.cursor = "none";
+          if (c) c.style.cursor = "none";
+        } catch { /* ignore */ }
+      }
     };
     const onPointerUp = (e: PointerEvent) => {
-      try { (e.target as HTMLElement | null)?.releasePointerCapture?.(e.pointerId); } catch { /* ignore */ }
-      if (!document.pointerLockElement) lastClientRef.current.on = false;
+      if (!isMobilePlay()) return;
+      const c = canvasEl();
+      try { c?.releasePointerCapture?.(e.pointerId); } catch { /* ignore */ }
+      lastClientRef.current.on = false;
     };
     const cm = (e: Event) => e.preventDefault();
     window.addEventListener("keydown", kd);
@@ -951,6 +949,7 @@ const kd = (e: KeyboardEvent) => {
     window.addEventListener("pointermove", onPointerMove, { passive: true });
     window.addEventListener("pointerdown", onPointerDown, { passive: true });
     window.addEventListener("pointerup", onPointerUp, { passive: true });
+
     const wh = (e: WheelEvent) => {
       if (!G.locked) return;
       if (G.freecam) {

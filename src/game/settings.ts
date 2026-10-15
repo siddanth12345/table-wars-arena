@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 export type TimeOfDay = "day" | "evening" | "night";
 export type FireMode = "hold" | "toggle";
-export type Action = "forward" | "back" | "left" | "right" | "jump" | "dash" | "parry" | "bomb" | "grapple" | "reload" | "comboBurst";
+export type Action = "forward" | "back" | "left" | "right" | "jump" | "dash" | "parry" | "bomb" | "grapple" | "reload" | "comboBurst" | "ability";
 
 export const ACTIONS: { id: Action; label: string; desc: string }[] = [
   { id: "forward", label: "Move forward", desc: "Walk forward" },
@@ -16,6 +16,7 @@ export const ACTIONS: { id: Action; label: string; desc: string }[] = [
   { id: "grapple", label: "Grapple", desc: "Hold for grapple rope" },
   { id: "reload", label: "Reload / Slam", desc: "Reload (ground) · Ground pound (air) · again after landing to bounce" },
   { id: "comboBurst", label: "Combo burst", desc: "Combo threshold: reset all CDs + heal (100/30 offline, 50/20 in 1v1)" },
+  { id: "ability", label: "Ability", desc: "Use selected ability (Wall / Trampoline / Fire)" },
 ];
 
 export type MobileBtnId = "fire" | "jump" | "dash" | "reload" | "parry" | "bomb" | "look" | "move";
@@ -67,7 +68,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shadows: true,
   fireMode: "hold",
   timeOfDay: "evening",
-  keys: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", dash: "KeyQ", parry: "KeyE", bomb: "KeyF", grapple: "KeyC", reload: "KeyR", comboBurst: "ShiftLeft" },
+  keys: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", dash: "KeyQ", parry: "KeyE", bomb: "KeyF", grapple: "KeyC", reload: "KeyR", comboBurst: "ShiftLeft", ability: "KeyV" },
   aimAssist: 0.22,
   autoBunnyHop: true,
   mobileSensitivity: 1.15,

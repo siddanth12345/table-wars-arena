@@ -9,6 +9,8 @@ import * as THREE from "three";
 import { World } from "./World";
 import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial, comboBurstThreshold, comboBurstHeal, comboDecayTime } from "./state";
 import { SkinsPanel } from "./SkinsPanel";
+import { AbilitiesPanel } from "./AbilitiesPanel";
+import { getAbility, ABILITY_LIST } from "./abilities";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
 import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
@@ -387,6 +389,7 @@ function HUD() {
           </span>
           <span>[{kl("dash")}] Dash {G.dashCd > 0 ? G.dashCd.toFixed(1) : "ready"}</span>
           <span>[{kl("bomb")}] Bomb {G.bombCd > 0 ? G.bombCd.toFixed(1) : "ready"}</span>
+          <span>[{kl("ability")}] {ABILITY_LIST.find((a) => a.id === getAbility())?.name ?? "Ability"} {G.abilityCd > 0 ? `${G.abilityCd.toFixed(1)}s` : G.abilityCharges > 0 ? `×${G.abilityCharges}` : "ready"}</span>
           <span className={G.grappling ? "text-shield" : ""}>[{kl("grapple")}] Grapple</span>
           <span className={G.slamming || G.bounceWin > 0 ? "text-shield" : ""}>[{kl("reload")} air] Slam {G.bounceWin > 0 ? `${kl("reload")} = BOUNCE` : G.slamCd > 0 ? G.slamCd.toFixed(1) : "ready"}</span>
         </div>
@@ -514,6 +517,7 @@ function Home() {
   const acc = useAccount();
   const [authOpen, setAuthOpen] = useState(false);
   const [skinsOpen, setSkinsOpen] = useState(false);
+  const [abilitiesOpen, setAbilitiesOpen] = useState(false);
   const inParty = !!(NET.party && NET.party.members.length > 0);
   if (G.phase !== "home") return null;
   return (
@@ -527,6 +531,7 @@ function Home() {
           <button className={tab === "tutorial" ? btnMain : btnAlt} onClick={() => setTab(tab === "tutorial" ? "main" : "tutorial")} data-glow="orange">{inParty ? "Online tutorial" : "Tutorial"}</button>
           <button className={btnAlt} onClick={startTraining}>Training</button>
           <button className={btnAlt} onClick={() => setSkinsOpen(true)}>Skins</button>
+          <button className={btnAlt} onClick={() => setAbilitiesOpen(true)}>Abilities</button>
           <button className={tab === "settings" ? btnMain : btnAlt} onClick={() => setTab(tab === "settings" ? "main" : "settings")}>Settings</button>
         </div>
         <AccountBadge onLogin={() => setAuthOpen(true)} />
@@ -534,6 +539,7 @@ function Home() {
       </div>
       {(authOpen || acc.status === "signedOut") && <AuthPanel onClose={() => setAuthOpen(false)} />}
       {skinsOpen && <SkinsPanel onClose={() => setSkinsOpen(false)} />}
+      {abilitiesOpen && <AbilitiesPanel onClose={() => setAbilitiesOpen(false)} />}
       {tab === "play" && <PlayMenu onCampaign={playGame} onClose={() => setTab("main")} />}
       {tab !== "main" && tab !== "play" && (
         <div className="m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">

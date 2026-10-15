@@ -42,6 +42,7 @@ export const TUT_STEPS: { title: string; text: string; enter?: boolean }[] = [
   { title: "Brown tables", text: "Brown tables are the normal enemies — they hop around and shoot splinters. LEFT CLICK to shoot this one: your splinters explode on impact and hurt everything nearby. R reloads (on the ground). In the air, R is a GROUND POUND." },
   { title: "Bombs", text: "Press F to throw a bomb. It explodes in a big area. Blow this table up!" },
   { title: "Combo meter", text: "Damage you deal builds a combo on the right of the screen. It resets after 2.5 seconds without hits. When the combo is high enough (100 offline / 50 in 1v1), press SHIFT (rebindable in Settings) to reset ALL cooldowns and heal (30 offline / 20 in 1v1). You cannot use this while dead." },
+  { title: "Abilities", text: "Press V (default, rebindable) to use your selected ability. Choose Wall, Trampoline, or Fire from the Abilities menu on the home screen. Wall places wooden cover, Trampoline sticks a bounce pad to surfaces, Fire launches a burning line. Charges and cooldowns depend on the ability." },
   { title: "Parry", text: "This table shoots back! Press E right before a bullet hits you to PARRY it — the reflected shot deals 10 damage and you get a 2 second power boost (infinite ammo, 2x damage). Successful parry: 4s cooldown. Missed parry: 7s cooldown." },
   { title: "Blue tables", text: "Blue tables are fast chasers. They rush at you and explode on contact. Shoot them before they reach you!" },
   { title: "The Boss", text: "After you clear every table, the huge RED boss drops from the ceiling (stay out of the red circle!). He shoots, drops swords that stun you, stomps out expanding shockwaves you must JUMP over, and summons minions. 5 seconds in, your parry gets COMPROMISED. Press ENTER to continue.", enter: true },
@@ -145,6 +146,10 @@ export const G = {
   diedThisRun: [] as string[],
   combo: 0,
   comboTimer: 0,
+  abilityCd: 0,
+  abilityCharges: 4,
+  abilitySlow: 0,
+
   dmgFloat: { amount: 0, targetId: "", x: 0.5, y: 0.4, t: 0, pop: 0 },
 };
 
@@ -160,6 +165,8 @@ export function resetGame(mode: Mode = G.mode) {
     crosshair: "normal", canGrapple: false, mobileTut: false, mobileTutStep: 0, mobilePaused: false,
     trainMenu: false, userPaused: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
     campaignDead: false, shardProgress: 0, reviveQueue: [], freecam: false, freecamSpeedIdx: 0, lobbyRespawnT: 0, onlineTut: false, diedThisRun: [],
+    combo: 0, comboTimer: 0, abilityCd: 0, abilityCharges: 4, abilitySlow: 0,
+    dmgFloat: { amount: 0, targetId: "", x: 0.5, y: 0.4, t: 0, pop: 0 },
   });
   TRAIN_Q.length = 0;
   if (mode === "training") Object.assign(G, { playerHp: TRAIN.maxHp, airJumps: TRAIN.airJumps, airDashes: TRAIN.airDashes });

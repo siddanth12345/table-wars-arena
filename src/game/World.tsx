@@ -12,6 +12,7 @@ import {
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, SHARD_SPAWN_N, LOBBY_RESPAWN, FREECAM_SPEEDS,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
+import { getAbility } from "./abilities";
 import { createTableBot, skinKey } from "./tableBotFactory";
 import { Room, ROOM, SOLIDS } from "./Room";
 import { tableWood } from "./textures";
@@ -313,6 +314,20 @@ export function World() {
   const summonT = useRef(10);
   const healthT = useRef(HEALTH_INTERVAL);
   const health = useMemo(() => Array.from({ length: 24 }, () => ({ active: false, pos: new THREE.Vector3(), t: 0, isShard: false })), []);
+  // Ability props: walls (solid), trampolines (bounce pads), fire lines
+  const abilityWalls = useMemo(() => Array.from({ length: 8 }, () => ({
+    active: false, x: 0, z: 0, yaw: 0, hw: 0.5, hd: 0.5, y0: 0, y1: 1, t: 0,
+  })), []);
+  const abilityPads = useMemo(() => Array.from({ length: 6 }, () => ({
+    active: false, pos: new THREE.Vector3(), normal: new THREE.Vector3(0, 1, 0), t: 0,
+  })), []);
+  const abilityFires = useMemo(() => Array.from({ length: 4 }, () => ({
+    active: false, ax: 0, az: 0, bx: 0, bz: 0, t: 0,
+    stung: new Set<string>(), tickAcc: new Map<string, number>(),
+  })), []);
+  const wallMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const padMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const fireMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const slam = useRef({ on: false, fromY: 0, h: 0 });
   const bunnyHop = useRef(0); // time window to auto-jump on land after dash
   const doDashRef = useRef<(dirs: () => { f: THREE.Vector3; r: THREE.Vector3 }) => void>(() => {});
@@ -329,6 +344,7 @@ export function World() {
   const tutDist = useRef(0);
   const tutKills = useRef(0);
   const tutBlueSpawn = useRef(0);
+  const abilityReq = useRef(false);
   const snapRef = useRef<EntSnap | null>(null);
   const lastSnap = useRef(0);
 
@@ -553,6 +569,9 @@ export function World() {
     hazards.forEach((h) => (h.active = false));
     waves.forEach((w) => (w.active = false));
     health.forEach((h) => (h.active = false));
+    abilityWalls.forEach((w) => { w.active = false; });
+    abilityPads.forEach((pad) => { pad.active = false; });
+    abilityFires.forEach((f) => { f.active = false; f.stung.clear(); f.tickAcc.clear(); });
     Object.assign(G, { stage: "tables", bossHits: 0, bossTime: 0, parryLocked: false, compromisedT: 0 });
   }
   const despawnAll = () => {
@@ -843,6 +862,9 @@ const kd = (e: KeyboardEvent) => {
       if (e.code === SETTINGS.keys.dash && !G.wallrun) {
         doDash(camDirs);
       }
+      if (e.code === SETTINGS.keys.ability) {
+        abilityReq.current = true;
+      }
       if (e.code === SETTINGS.keys.bomb && G.bombCd <= 0 && !bomb.current.alive) {
         const dir = new THREE.Vector3();
         camera.getWorldDirection(dir);
@@ -1077,6 +1099,12 @@ const kd = (e: KeyboardEvent) => {
       summonT.current = 10;
       healthT.current = HEALTH_INTERVAL;
       health.forEach((h) => (h.active = false));
+      abilityWalls.forEach((w) => { w.active = false; });
+      abilityPads.forEach((pad) => { pad.active = false; });
+      abilityFires.forEach((f) => { f.active = false; f.stung.clear(); f.tickAcc.clear(); });
+      G.abilityCd = 0;
+      G.abilityCharges = getAbility() === "wall" ? 4 : getAbility() === "trampoline" ? 3 : 1;
+      G.abilitySlow = 0;
       MAP.health = [];
       hazards.forEach((h) => (h.active = false));
       waves.forEach((w) => (w.active = false));
@@ -1199,10 +1227,185 @@ const kd = (e: KeyboardEvent) => {
       G.comboTimer = Math.max(0, G.comboTimer - dt);
       if (G.comboTimer <= 0) G.combo = 0;
     }
+
     if (G.dmgFloat.t > 0) {
       G.dmgFloat.t = Math.max(0, G.dmgFloat.t - dt);
       G.dmgFloat.pop = Math.max(0, G.dmgFloat.pop - dt * 2.2);
     }
+    // --- abilities ---
+    if (G.abilityCd > 0) {
+      G.abilityCd = Math.max(0, G.abilityCd - dt);
+      if (G.abilityCd <= 0) {
+        const ab = getAbility();
+        G.abilityCharges = ab === "wall" ? 4 : ab === "trampoline" ? 3 : 1;
+      }
+    }
+    if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
+    if (abilityReq.current && G.phase === "playing" && G.locked && !G.freecam && G.countdown <= 0.6 && G.stun <= 0 && !G.pvpDead && !G.campaignDead) {
+      abilityReq.current = false;
+      const ab = getAbility();
+      const can = G.abilityCd <= 0 && G.abilityCharges > 0;
+      if (can) {
+        const yaw = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ").y;
+        const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+        if (ab === "wall") {
+          const slot = abilityWalls.find((w) => !w.active);
+          if (slot) {
+            const thick = TABLE_W * 0.5; // 1 table thick → half-extents
+            const halfW = BOSS_H * 0.5;
+            const place = p.clone().addScaledVector(forward, PLAYER_R + thick + 2);
+            slot.active = true;
+            slot.x = place.x; slot.z = place.z; slot.yaw = yaw;
+            slot.hw = thick; slot.hd = halfW; // thickness along forward, width perpendicular
+            // After rotation, hw is local X (perp if we set yaw so local Z is forward)
+            // Local: X = along wall length, Z = thickness
+            slot.hw = halfW;
+            slot.hd = thick;
+            slot.y0 = 0;
+            slot.y1 = BOSS_H;
+            slot.t = 2;
+            G.abilityCharges--;
+            if (G.abilityCharges <= 0) G.abilityCd = 3;
+          }
+        } else if (ab === "trampoline") {
+          const dir = new THREE.Vector3();
+          cam.getWorldDirection(dir);
+          const rc = new THREE.Raycaster(cam.position.clone(), dir, 0.5, cfg.grapple(GRAPPLE_MAX));
+          const hit = staticRef.current ? rc.intersectObject(staticRef.current, true)[0] : undefined;
+          const slot = abilityPads.find((pad) => !pad.active);
+          if (slot && hit) {
+            slot.active = true;
+            slot.pos.copy(hit.point);
+            slot.normal.copy(hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize() : new THREE.Vector3(0, 1, 0));
+            if (slot.normal.y < 0) slot.normal.negate();
+            slot.t = 3;
+            G.abilityCharges--;
+            if (G.abilityCharges <= 0) G.abilityCd = 4;
+          }
+        } else if (ab === "fire") {
+          const slot = abilityFires.find((f) => !f.active);
+          if (slot) {
+            const dist = cfg.grapple(GRAPPLE_MAX) * 2;
+            const start = p.clone().addScaledVector(forward, 2);
+            const end = p.clone().addScaledVector(forward, dist);
+            slot.active = true;
+            slot.ax = start.x; slot.az = start.z; slot.bx = end.x; slot.bz = end.z;
+            slot.t = 3;
+            slot.stung.clear();
+            slot.tickAcc.clear();
+            G.abilityCharges = 0;
+            G.abilityCd = 4;
+          }
+        }
+      }
+    } else {
+      abilityReq.current = false;
+    }
+    // lifetime + wall collision + pad bounce + fire dmg
+    for (const w of abilityWalls) {
+      if (!w.active) continue;
+      w.t -= dt;
+      if (w.t <= 0) { w.active = false; continue; }
+      // solid push (no friction — only horizontal push, keep vertical vel)
+      if (p.y + BODY_H > w.y0 && p.y < w.y1) {
+        pushOut(p, w, PLAYER_R);
+      }
+    }
+    for (const pad of abilityPads) {
+      if (!pad.active) continue;
+      pad.t -= dt;
+      if (pad.t <= 0) { pad.active = false; continue; }
+      const d = p.distanceTo(pad.pos);
+      if (d < 4.5) {
+        const vel = hv.current.clone();
+        vel.y = vy.current;
+        const approach = -vel.dot(pad.normal);
+        if (approach > 2) {
+          // reflect / boost along normal
+          const boost = approach * (Math.abs(pad.normal.y) > 0.85 ? 1 : 2 / 3);
+          vel.addScaledVector(pad.normal, approach + Math.max(boost, 40));
+          hv.current.set(vel.x, 0, vel.z);
+          vy.current = Math.max(vel.y, 30);
+          grounded.current = false;
+        }
+      }
+    }
+    for (const fire of abilityFires) {
+      if (!fire.active) continue;
+      fire.t -= dt;
+      if (fire.t <= 0) { fire.active = false; fire.stung.clear(); fire.tickAcc.clear(); continue; }
+      const segLen = Math.hypot(fire.bx - fire.ax, fire.bz - fire.az) || 1;
+      const nearSeg = (x: number, z: number) => {
+        const dx = fire.bx - fire.ax, dz = fire.bz - fire.az;
+        let t = ((x - fire.ax) * dx + (z - fire.az) * dz) / (segLen * segLen);
+        t = Math.max(0, Math.min(1, t));
+        const px = fire.ax + dx * t, pz = fire.az + dz * t;
+        return Math.hypot(x - px, z - pz);
+      };
+      // local player
+      if (nearSeg(p.x, p.z) < 4 && p.y < 6) {
+        const id = "local";
+        if (!fire.stung.has(id)) {
+          fire.stung.add(id);
+          damagePlayer(10);
+          G.stun = Math.max(G.stun, 0.6);
+        }
+        const acc = (fire.tickAcc.get(id) ?? 0) + dt;
+        if (acc >= 0.1) {
+          fire.tickAcc.set(id, acc - 0.1);
+          damagePlayer(2);
+          fire.tickAcc.set(id + "_tick", 1);
+        } else fire.tickAcc.set(id, acc);
+      } else if (fire.tickAcc.get("local_tick")) {
+        fire.tickAcc.delete("local_tick");
+        G.abilitySlow = 2;
+      }
+      // bots (tables + blues) — skip boss
+      for (let i = 0; i < tables.length; i++) {
+        const tb = tables[i]!;
+        if (!tb.alive || nearSeg(tb.pos.x, tb.pos.z) >= 4 + 3 * tb.s) continue;
+        const id = `t${i}`;
+        if (!fire.stung.has(id)) {
+          fire.stung.add(id);
+          hitTable(tb, 10);
+        }
+        const acc = (fire.tickAcc.get(id) ?? 0) + dt;
+        if (acc >= 0.1) {
+          fire.tickAcc.set(id, acc - 0.1);
+          hitTable(tb, 2);
+        } else fire.tickAcc.set(id, acc);
+      }
+      for (let i = 0; i < blues.length; i++) {
+        const u = blues[i]!;
+        if (!u.alive || nearSeg(u.pos.x, u.pos.z) >= 5) continue;
+        const id = `b${i}`;
+        if (!fire.stung.has(id)) {
+          fire.stung.add(id);
+          hitBlue(u, 10);
+        }
+        const acc = (fire.tickAcc.get(id) ?? 0) + dt;
+        if (acc >= 0.1) {
+          fire.tickAcc.set(id, acc - 0.1);
+          hitBlue(u, 2);
+        } else fire.tickAcc.set(id, acc);
+      }
+      // pvp peers
+      for (const pr of NET.peers.values()) {
+        if (pr.dead || pr.id === myId()) continue;
+        if (nearSeg(pr.x, pr.z) >= 5) continue;
+        if (!fire.stung.has(pr.id)) {
+          fire.stung.add(pr.id);
+          hitPeer(pr.id, 10, true);
+          noteDmg(10, pr.id, pr.x, pr.y + 2, pr.z);
+        }
+        const acc = (fire.tickAcc.get(pr.id) ?? 0) + dt;
+        if (acc >= 0.1) {
+          fire.tickAcc.set(pr.id, acc - 0.1);
+          hitPeer(pr.id, 2, false);
+        } else fire.tickAcc.set(pr.id, acc);
+      }
+    }
+
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
     const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;
     const canControl = active && !G.pvpDead && !G.campaignDead && !freecamOn;
@@ -1296,7 +1499,7 @@ const kd = (e: KeyboardEvent) => {
             vy.current = JUMP_V;
             grounded.current = false;
           } else {
-            const spd = G.scoped ? SPEED * 0.55 : SPEED;
+            const spd = (G.scoped ? SPEED * 0.55 : SPEED) * (G.abilitySlow > 0 ? 0.5 : 1);
             v.lerp(wish.clone().multiplyScalar(spd), 1 - Math.exp(-10 * dt));
           }
         } else {
@@ -1779,9 +1982,9 @@ const kd = (e: KeyboardEvent) => {
             if (t) t.passive = true;
           }
           if (s === 9) spawnTable(ahead);
-          // 10 = Combo meter: blues stream in while on this step (handled below)
-          if (s === 11) spawnTable(ahead); // Parry — table that shoots
-          if (s === 12) for (let i = 0; i < 3; i++) spawnBlue(randomFloor(p));
+          // 10 combo: blues stream (below). 11 abilities: enter only
+          if (s === 12) spawnTable(ahead); // Parry — table that shoots
+          if (s === 13) for (let i = 0; i < 3; i++) spawnBlue(randomFloor(p));
         }
         if (s === 1 && grounded.current) tutDist.current += v.length() * dt;
         if (s === 9 && aliveCount() === 0) spawnTable(randomFloor(p));
@@ -1804,7 +2007,7 @@ const kd = (e: KeyboardEvent) => {
         const objectiveDone = G.onlineTut
           ? false
           : [
-              false, // 0 intro — Enter only
+              false, // 0 intro
               tutDist.current > 40, // 1 move
               G.airJumps === 0, // 2 jump
               G.wallrun, // 3 wallrun
@@ -1814,13 +2017,14 @@ const kd = (e: KeyboardEvent) => {
               G.tut.zoomed, // 7 scope
               G.kills > tutKills.current, // 8 brown
               G.tut.bombed, // 9 bombs
-              false, // 10 combo — Enter only (blues are practice fodder)
-              G.parries > 0, // 11 parry
-              !alive, // 12 blue tables
-              false, // 13 boss
-              false, // 14 party revives
-              false, // 15 freecam
-              false, // 16 online modes
+              false, // 10 combo
+              false, // 11 abilities — Enter only
+              G.parries > 0, // 12 parry
+              !alive, // 13 blue tables
+              false, // 14 boss
+              false, // 15 party revives
+              false, // 16 freecam
+              false, // 17 online modes
             ][s];
         const done = G.tut.enter || !!objectiveDone;
         if (done) {
@@ -2270,6 +2474,36 @@ const kd = (e: KeyboardEvent) => {
         }
       });
     });
+
+    abilityWalls.forEach((w, i) => {
+      const m = wallMeshRefs.current[i];
+      if (!m) return;
+      m.visible = w.active;
+      if (!w.active) return;
+      m.position.set(w.x, (w.y0 + w.y1) / 2, w.z);
+      m.rotation.set(0, w.yaw, 0);
+      m.scale.set(w.hw * 2, w.y1 - w.y0, w.hd * 2);
+    });
+    abilityPads.forEach((pad, i) => {
+      const m = padMeshRefs.current[i];
+      if (!m) return;
+      m.visible = pad.active;
+      if (!pad.active) return;
+      m.position.copy(pad.pos).addScaledVector(pad.normal, 0.2);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), pad.normal);
+    });
+    abilityFires.forEach((f, i) => {
+      const m = fireMeshRefs.current[i];
+      if (!m) return;
+      m.visible = f.active;
+      if (!f.active) return;
+      const mx = (f.ax + f.bx) / 2, mz = (f.az + f.bz) / 2;
+      const len = Math.hypot(f.bx - f.ax, f.bz - f.az) || 1;
+      m.position.set(mx, 0.4, mz);
+      m.rotation.set(0, Math.atan2(f.bx - f.ax, f.bz - f.az), 0);
+      m.scale.set(3.5, 1, len);
+    });
+
     if (ropeRef.current) {
       ropeRef.current.visible = G.grappling;
       if (G.grappling) {
@@ -2342,6 +2576,26 @@ const kd = (e: KeyboardEvent) => {
       <group ref={staticRef}>
         <Room />
       </group>
+
+      {abilityWalls.map((_, i) => (
+        <mesh key={`aw${i}`} ref={(m) => { wallMeshRefs.current[i] = m; }} visible={false} castShadow>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="#96653f" roughness={0.85} />
+        </mesh>
+      ))}
+      {abilityPads.map((_, i) => (
+        <mesh key={`ap${i}`} ref={(m) => { padMeshRefs.current[i] = m; }} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[3.2, 3.2, 0.35, 24]} />
+          <meshStandardMaterial color="#3cff70" emissive="#1a8a40" emissiveIntensity={0.8} />
+        </mesh>
+      ))}
+      {abilityFires.map((_, i) => (
+        <mesh key={`af${i}`} ref={(m) => { fireMeshRefs.current[i] = m; }} visible={false}>
+          <boxGeometry args={[1, 0.6, 1]} />
+          <meshStandardMaterial color="#ff6a1a" emissive="#ff3a00" emissiveIntensity={2} transparent opacity={0.85} />
+        </mesh>
+      ))}
+
       <HomeShowcase />
       <RemotePlayers />
       {/* Own table body — visible in freecam so you can see your model + light */}

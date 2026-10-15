@@ -7,7 +7,7 @@ import { Environment, Lightformer } from "@react-three/drei";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { World } from "./World";
-import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial, comboBurstThreshold, comboBurstHeal } from "./state";
+import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial, comboBurstThreshold, comboBurstHeal, comboDecayTime } from "./state";
 import { SkinsPanel } from "./SkinsPanel";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
@@ -328,7 +328,7 @@ function HUD() {
             )}
             {G.combo > 0 && G.comboTimer > 0 && (
               <div className="mt-2 h-1 w-full overflow-hidden rounded bg-white/15">
-                <div className="h-full bg-crosshair transition-[width] duration-100" style={{ width: `${(G.comboTimer / 2.5) * 100}%` }} />
+                <div className="h-full bg-crosshair transition-[width] duration-100" style={{ width: `${(G.comboTimer / comboDecayTime()) * 100}%` }} />
               </div>
             )}
           </div>

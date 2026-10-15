@@ -1602,12 +1602,19 @@ const kd = (e: KeyboardEvent) => {
         }
       }
 
-      // Collect health rings only while fighting the boss; never exceed full health.
-      if (G.stage === "boss") {
+      // Collect health rings in boss fight or 1v1; never exceed full health.
+      if (G.stage === "boss" || (G.mode === "pvp" && NET.stage === "playing")) {
         for (const h of health) {
-          if (!h.active || p.y >= 8) continue;
-          const hr = h.isShard ? SHARD_R : HEALTH_R;
+          if (!h.active || h.isShard || p.y >= 8) continue;
+          const hr = HEALTH_R;
           if (Math.hypot(p.x - h.pos.x, p.z - h.pos.z) < hr) collectRing(h);
+        }
+      }
+      // Party shards still collected via collectRing path when isShard
+      if (sharesEnemies() && G.mode === "game") {
+        for (const h of health) {
+          if (!h.active || !h.isShard || p.y >= 8) continue;
+          if (Math.hypot(p.x - h.pos.x, p.z - h.pos.z) < SHARD_R) collectRing(h);
         }
       }
 
@@ -1915,7 +1922,7 @@ const kd = (e: KeyboardEvent) => {
             let ringHit: (typeof health)[number] | null = null;
             for (const h of health) {
               if (!h.active) continue;
-              if (!h.isShard && G.stage !== "boss") continue;
+              if (!h.isShard && G.stage !== "boss" && !(G.mode === "pvp" && NET.stage === "playing")) continue;
               const hr = h.isShard ? SHARD_R : HEALTH_R;
               _mn.set(h.pos.x - hr, 0, h.pos.z - hr);
               _mx.set(h.pos.x + hr, 2.5, h.pos.z + hr);
@@ -2239,7 +2246,7 @@ const kd = (e: KeyboardEvent) => {
     health.forEach((h, i) => {
       const ring = healthRefs.current[i];
       if (!ring) return;
-      const show = h.active && G.phase === "playing" && (h.isShard || G.stage === "boss");
+      const show = h.active && G.phase === "playing" && (h.isShard || G.stage === "boss" || (G.mode === "pvp" && !h.isShard));
       ring.visible = show;
       ring.position.set(h.pos.x, 0.45, h.pos.z);
       const scale = h.isShard ? 3 : 1;

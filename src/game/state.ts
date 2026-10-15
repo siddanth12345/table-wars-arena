@@ -251,7 +251,7 @@ export function registerDamage(amount: number, targetId: string, screenX = 0.5, 
   if (!(amount > 0) || G.phase !== "playing") return;
   const a = Math.round(amount * 10) / 10;
   G.combo += a;
-  G.comboTimer = 2.5;
+  G.comboTimer = G.mode === "pvp" ? 5 : 2.5;
   G.dmgFloat = {
     amount: a,
     targetId,
@@ -263,6 +263,9 @@ export function registerDamage(amount: number, targetId: string, screenX = 0.5, 
 }
 
 /** Combo burst: offline >100 → heal 30; 1v1 >50 → heal 20. Always resets CDs. */
+export function comboDecayTime() {
+  return G.mode === "pvp" ? 5 : 2.5;
+}
 export function comboBurstThreshold() {
   return G.mode === "pvp" ? 50 : 100;
 }

@@ -226,20 +226,28 @@ function HUD() {
 
       {/* Mobile pause — middle-left (no Esc on many tablets) */}
       {playing && G.locked && isMobilePlay() && (
-        <button
-          type="button"
-          aria-label="Pause"
-          data-no-lock
-          className="pointer-events-auto absolute left-3 top-1/2 z-30 flex h-14 w-14 -translate-y-1/2 flex-col items-center justify-center rounded-2xl border-[3px] border-white/45 bg-black/55 text-white shadow-lg touch-none"
-          onPointerDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            pauseGame();
-          }}
-        >
-          <span className="text-xl leading-none">❚❚</span>
-          <span className="text-[9px] font-black uppercase">Pause</span>
-        </button>
+        <>
+          <button
+            type="button"
+            aria-label="Pause"
+            data-no-lock
+            className="pointer-events-auto absolute left-3 top-1/2 z-30 flex h-14 w-14 -translate-y-1/2 flex-col items-center justify-center rounded-2xl border-[3px] border-white/45 bg-black/55 text-white shadow-lg touch-none"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              pauseGame();
+            }}
+          >
+            <span className="text-xl leading-none">❚❚</span>
+            <span className="text-[9px] font-black uppercase">Pause</span>
+          </button>
+          <div
+            data-no-lock
+            className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-lg border border-white/25 bg-black/55 px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-widest text-white/90"
+          >
+            iPad: click &amp; drag to look · Safari cannot true-lock the mouse
+          </div>
+        </>
       )}
       {G.mode === "tutorial" && playing && step && (
         <div className="absolute left-1/2 top-6 w-[min(40rem,60vw)] -translate-x-1/2 rounded border-2 border-shield/60 bg-hud-panel p-4 text-center">
@@ -678,7 +686,7 @@ function WinScreen() {
 }
 
 
-/** iPad soft-lock capture surface under HUD — cursor hidden; pointer capture target. */
+/** iPad soft-lock capture surface — cursor:none; receives pointer capture for look. */
 function MobileLookLayer() {
   useTick(100);
   if (!isMobilePlay() || !G.locked || G.phase !== "playing" || G.userPaused) return null;

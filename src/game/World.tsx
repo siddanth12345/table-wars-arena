@@ -861,25 +861,25 @@ const kd = (e: KeyboardEvent) => {
       if (e.code === SETTINGS.keys.jump) G.wallrun = false;
     };
     // --- Look ---
-    // PC: movementX while pointer-locked (unchanged, perfect).
-    // iPad: no requestPointerLock — cursor:none, clientX deltas, setPointerCapture on canvas.
+    // PC: real pointer lock + movementX (unchanged).
+    // iPadOS Safari: Pointer Lock API is NOT supported (Apple WebKit limitation).
+    // Best-effort: prefer movementX, else client deltas, setPointerCapture while dragging.
     const applyLookDelta = (mx: number, my: number) => {
       if (!mx && !my) return;
       softLookRef.current.x += mx;
       softLookRef.current.y += my;
     };
-    const canvasEl = () =>
-      (document.querySelector("canvas") as HTMLElement | null) ||
-      document.getElementById("ipad-look-layer");
+    const captureTarget = () =>
+      document.getElementById("ipad-look-layer") ||
+      (document.querySelector("canvas") as HTMLElement | null);
 
-    // Desktop hard-lock path only
+    // Desktop only when hard-locked or non-mobile
     const onSoftMove = (e: MouseEvent) => {
       if (!G.locked || G.phase !== "playing") return;
       if (isMobilePlay() && !document.pointerLockElement) return;
       applyLookDelta(e.movementX || 0, e.movementY || 0);
     };
 
-    // iPad soft-lock: relative deltas from previous client position only
     const onPointerMove = (e: PointerEvent) => {
       if (!G.locked || G.phase !== "playing") return;
       if (document.pointerLockElement) {
@@ -887,12 +887,16 @@ const kd = (e: KeyboardEvent) => {
         return;
       }
       if (!isMobilePlay()) return;
+      // Finger-only: skip (mouse / trackpad / pen)
       if (e.pointerType === "touch") return;
-      const prev = lastClientRef.current;
-      if (prev.on) {
-        const deltaX = e.clientX - prev.x;
-        const deltaY = e.clientY - prev.y;
-        applyLookDelta(deltaX, deltaY);
+
+      // Prefer movementX/Y when the browser provides them (often works without lock)
+      const mx = e.movementX || 0;
+      const my = e.movementY || 0;
+      if (mx !== 0 || my !== 0) {
+        applyLookDelta(mx, my);
+      } else if (lastClientRef.current.on) {
+        applyLookDelta(e.clientX - lastClientRef.current.x, e.clientY - lastClientRef.current.y);
       }
       lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
     };
@@ -918,26 +922,24 @@ const kd = (e: KeyboardEvent) => {
       if (!G.locked || G.phase !== "playing") return;
       const target = e.target as HTMLElement | null;
       if (target?.closest?.("button, input, a, [data-no-lock]")) return;
-      // iPad only: capture on canvas so deltas keep flowing past screen edges
-      if (isMobilePlay() && !document.pointerLockElement) {
-        lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
-        const c = canvasEl();
-        try {
-          if (c) c.setPointerCapture(e.pointerId);
-          else target?.setPointerCapture?.(e.pointerId);
-        } catch { /* ignore */ }
-        try {
-          document.body.style.cursor = "none";
-          document.documentElement.style.cursor = "none";
-          if (c) c.style.cursor = "none";
-        } catch { /* ignore */ }
-      }
+      if (!isMobilePlay() || document.pointerLockElement) return;
+      if (e.pointerType === "touch") return;
+
+      lastClientRef.current = { x: e.clientX, y: e.clientY, on: true };
+      const el = captureTarget() || target;
+      try { el?.setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
+      try {
+        document.body.style.cursor = "none";
+        document.documentElement.style.cursor = "none";
+        if (el) (el as HTMLElement).style.cursor = "none";
+      } catch { /* ignore */ }
     };
     const onPointerUp = (e: PointerEvent) => {
       if (!isMobilePlay()) return;
-      const c = canvasEl();
-      try { c?.releasePointerCapture?.(e.pointerId); } catch { /* ignore */ }
-      lastClientRef.current.on = false;
+      const el = captureTarget();
+      try { el?.releasePointerCapture?.(e.pointerId); } catch { /* ignore */ }
+      // Keep last xy so free trackpad moves still have an anchor after a click
+      lastClientRef.current.on = true;
     };
     const cm = (e: Event) => e.preventDefault();
     window.addEventListener("keydown", kd);
@@ -949,6 +951,7 @@ const kd = (e: KeyboardEvent) => {
     window.addEventListener("pointermove", onPointerMove, { passive: true });
     window.addEventListener("pointerdown", onPointerDown, { passive: true });
     window.addEventListener("pointerup", onPointerUp, { passive: true });
+    window.addEventListener("pointercancel", onPointerUp, { passive: true });
 
     const wh = (e: WheelEvent) => {
       if (!G.locked) return;
@@ -979,6 +982,7 @@ const kd = (e: KeyboardEvent) => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
       window.removeEventListener("wheel", wh);
     };
   }, [camera]);

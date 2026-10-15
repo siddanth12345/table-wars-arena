@@ -41,6 +41,7 @@ export const TUT_STEPS: { title: string; text: string; enter?: boolean }[] = [
   { title: "Scope", text: "HOLD RIGHT CLICK to scope in, then SCROLL the mouse wheel to change zoom." },
   { title: "Brown tables", text: "Brown tables are the normal enemies — they hop around and shoot splinters. LEFT CLICK to shoot this one: your splinters explode on impact and hurt everything nearby. R reloads (on the ground). In the air, R is a GROUND POUND." },
   { title: "Bombs", text: "Press F to throw a bomb. It explodes in a big area. Blow this table up!" },
+  { title: "Combo meter", text: "Damage you deal builds a combo on the right of the screen. It resets after 2.5 seconds without hits. When the combo is over 100, press ENTER (rebindable in Settings) to reset ALL cooldowns and heal 30 HP. You cannot use this while dead." },
   { title: "Parry", text: "This table shoots back! Press E right before a bullet hits you to PARRY it — the reflected shot deals 10 damage and you get a 2 second power boost (infinite ammo, 2x damage). Successful parry: 4s cooldown. Missed parry: 7s cooldown." },
   { title: "Blue tables", text: "Blue tables are fast chasers. They rush at you and explode on contact. Shoot them before they reach you!" },
   { title: "The Boss", text: "After you clear every table, the huge RED boss drops from the ceiling (stay out of the red circle!). He shoots, drops swords that stun you, stomps out expanding shockwaves you must JUMP over, and summons minions. 5 seconds in, your parry gets COMPROMISED. Press ENTER to continue.", enter: true },
@@ -142,6 +143,9 @@ export const G = {
   onlineTut: false,
   /** Players who died during the current party campaign run (ids/names for win screen). */
   diedThisRun: [] as string[],
+  combo: 0,
+  comboTimer: 0,
+  dmgFloat: { amount: 0, targetId: "", x: 0.5, y: 0.4, t: 0, pop: 0 },
 };
 
 export function resetGame(mode: Mode = G.mode) {
@@ -239,6 +243,40 @@ export function lockPointer() {
   }
   G.locked = !!document.pointerLockElement;
   setCursorLocked(G.locked);
+}
+
+
+/** Record damage you dealt: floating number + combo meter. amount = actual HP/hit points applied. */
+export function registerDamage(amount: number, targetId: string, screenX = 0.5, screenY = 0.42) {
+  if (!(amount > 0) || G.phase !== "playing") return;
+  const a = Math.round(amount * 10) / 10;
+  G.combo += a;
+  G.comboTimer = 2.5;
+  G.dmgFloat = {
+    amount: a,
+    targetId,
+    x: Math.min(0.92, Math.max(0.08, screenX)),
+    y: Math.min(0.85, Math.max(0.12, screenY)),
+    t: 0.95,
+    pop: 1,
+  };
+}
+
+/** Combo > 100 + key: full CD reset + 30 HP. Returns true if fired. */
+export function tryComboBurst() {
+  if (G.phase !== "playing" || G.combo <= 100) return false;
+  if (G.playerHp <= 0 || G.pvpDead || G.campaignDead) return false;
+  G.combo = 0;
+  G.comboTimer = 0;
+  G.slamCd = 0;
+  G.parryCd = 0;
+  G.dashCd = 0;
+  G.bombCd = 0;
+  G.reloading = 0;
+  G.playerHp = Math.min(cfg.maxHp(), G.playerHp + 30);
+  G.hitFlash = 0.25;
+  G.parryFlash = 0.2;
+  return true;
 }
 
 // Minimap snapshot, written by World each frame, read by the HUD.

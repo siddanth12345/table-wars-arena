@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 export type TimeOfDay = "day" | "evening" | "night";
 export type FireMode = "hold" | "toggle";
-export type Action = "forward" | "back" | "left" | "right" | "jump" | "dash" | "parry" | "bomb" | "grapple" | "reload";
+export type Action = "forward" | "back" | "left" | "right" | "jump" | "dash" | "parry" | "bomb" | "grapple" | "reload" | "comboBurst";
 
 export const ACTIONS: { id: Action; label: string; desc: string }[] = [
   { id: "forward", label: "Move forward", desc: "Walk forward" },
@@ -15,6 +15,7 @@ export const ACTIONS: { id: Action; label: string; desc: string }[] = [
   { id: "bomb", label: "Bomb", desc: "Throw a bomb" },
   { id: "grapple", label: "Grapple", desc: "Hold for grapple rope" },
   { id: "reload", label: "Reload / Slam", desc: "Reload (ground) · Ground pound (air) · again after landing to bounce" },
+  { id: "comboBurst", label: "Combo burst", desc: "When combo > 100: reset all cooldowns and heal 30 HP" },
 ];
 
 export type MobileBtnId = "fire" | "jump" | "dash" | "reload" | "parry" | "bomb" | "look" | "move";
@@ -66,7 +67,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shadows: true,
   fireMode: "hold",
   timeOfDay: "evening",
-  keys: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", dash: "KeyQ", parry: "KeyE", bomb: "KeyF", grapple: "KeyC", reload: "KeyR" },
+  keys: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", dash: "KeyQ", parry: "KeyE", bomb: "KeyF", grapple: "KeyC", reload: "KeyR", comboBurst: "Enter" },
   aimAssist: 0.22,
   autoBunnyHop: true,
   mobileSensitivity: 1.15,

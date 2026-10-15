@@ -8,7 +8,7 @@ import * as THREE from "three";
 import {
   G, MAG, FIRE_INTERVAL, DMG, PARRY_WINDOW, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, BUFF_TIME, DASH_CD, AIR_JUMPS, AIR_DASHES,
   BOMB_CD, BOMB_CD_BUFF, TABLE_HP, TABLE_CAP, BOSS_HITS, BOSS_WARN, setLocker,
-  MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, isMobilePlay, pauseGame, type TrainSpawn,
+  MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, isMobilePlay, pauseGame, registerDamage, tryComboBurst, type TrainSpawn,
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, SHARD_SPAWN_N, LOBBY_RESPAWN, FREECAM_SPEEDS,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
@@ -459,8 +459,21 @@ export function World() {
       });
     }
   };
+  const _proj = new THREE.Vector3();
+  const toScreen = (wx: number, wy: number, wz: number) => {
+    _proj.set(wx, wy, wz).project(camera);
+    return { x: (_proj.x + 1) / 2, y: (1 - _proj.y) / 2 };
+  };
+  const noteDmg = (amount: number, targetId: string, wx: number, wy: number, wz: number) => {
+    if (!(amount > 0)) return;
+    const s = toScreen(wx, wy, wz);
+    registerDamage(amount, targetId, s.x, s.y);
+  };
+
   const hitTable = (t: Table, dmg: number) => {
     if (!t.alive) return;
+    const applied = Math.min(dmg, Math.max(0, t.hp));
+    noteDmg(applied, `t${tables.indexOf(t)}`, t.pos.x, t.pos.y + 2.5 * t.s, t.pos.z);
     if (isFollower()) { G.hitFlash = 0.15; sendNet("ehit", { k: "t", i: tables.indexOf(t), dmg }); return; }
     t.hp -= dmg;
     G.hitFlash = 0.15;
@@ -478,6 +491,8 @@ export function World() {
   };
   const hitBoss = (n: number) => {
     if (G.stage !== "boss" || !boss.current.landed) return;
+    const hits = Math.max(0, Math.min(n, G.bossMax - G.bossHits));
+    noteDmg(hits * DMG, "boss", boss.current.pos.x, boss.current.pos.y + 4, boss.current.pos.z);
     if (isFollower()) { G.hitFlash = 0.15; sendNet("ehit", { k: "boss", i: 0, dmg: n }); return; }
     G.bossHits = Math.min(G.bossMax, G.bossHits + n);
     G.hitFlash = 0.15;
@@ -491,6 +506,8 @@ export function World() {
   };
   const hitBlue = (u: (typeof blues)[number], dmg: number) => {
     if (!u.alive) return;
+    const applied = Math.min(dmg, Math.max(0, u.hp));
+    noteDmg(applied, `b${blues.indexOf(u)}`, u.pos.x, u.pos.y + 2, u.pos.z);
     if (isFollower()) { G.hitFlash = 0.15; sendNet("ehit", { k: "b", i: blues.indexOf(u), dmg }); return; }
     u.hp -= dmg;
     if (u.hp <= 0) { u.alive = false; burst(tmpV.copy(u.pos).setY(4), TABLE_S, 5); }
@@ -579,7 +596,10 @@ export function World() {
     if (G.mode !== "pvp" && NET.kind !== "lobby") return;
     for (const pr of NET.peers.values()) {
       if (pr.dead || pr.id === myId()) continue;
-      if (tmpV.set(pr.x, pr.y + PVP_CENTER_Y, pr.z).distanceTo(at) < r + PVP_HITBOX) hitPeer(pr.id, dmg, stun);
+      if (tmpV.set(pr.x, pr.y + PVP_CENTER_Y, pr.z).distanceTo(at) < r + PVP_HITBOX) {
+        noteDmg(dmg, pr.id, pr.x, pr.y + 2.2, pr.z);
+        hitPeer(pr.id, dmg, stun);
+      }
     }
   };
   // healing ring / party shard: heal, or (when full) reset the bomb cooldown. Returns true if consumed.
@@ -794,6 +814,11 @@ const kd = (e: KeyboardEvent) => {
       if (G.phase !== "playing" || !G.locked || wasDown || e.repeat) return;
       if (G.freecam) return; // movement handled in useFrame
       if (e.code === "Enter") G.tut.enter = true;
+      // Combo burst (default Enter, rebindable) — before training menu
+      if (e.code === SETTINGS.keys.comboBurst && tryComboBurst()) {
+        e.preventDefault();
+        return;
+      }
       if (e.code === "Enter" && G.mode === "training") {
         G.trainMenu = true;
         document.exitPointerLock?.();
@@ -1169,6 +1194,14 @@ const kd = (e: KeyboardEvent) => {
     // Online matches always run sim (mobile may not hard-lock); local control still needs locked
     const engaged = G.locked || NET.online || G.freecam;
     if (G.phase === "playing" && engaged && !G.frozen && G.countdown > 0) G.countdown = Math.max(0, G.countdown - dt);
+    if (G.comboTimer > 0) {
+      G.comboTimer = Math.max(0, G.comboTimer - dt);
+      if (G.comboTimer <= 0) G.combo = 0;
+    }
+    if (G.dmgFloat.t > 0) {
+      G.dmgFloat.t = Math.max(0, G.dmgFloat.t - dt);
+      G.dmgFloat.pop = Math.max(0, G.dmgFloat.pop - dt * 2.2);
+    }
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
     const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;
     const canControl = active && !G.pvpDead && !G.campaignDead && !freecamOn;

@@ -7,12 +7,12 @@ import { Environment, Lightformer } from "@react-three/drei";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { World } from "./World";
-import { G, MAG, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial } from "./state";
+import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial } from "./state";
 import { SkinsPanel } from "./SkinsPanel";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
 import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
-import { NET } from "./net";
+import { NET, opponentId } from "./net";
 import { useAccount } from "./account";
 
 const LIGHT = {
@@ -294,6 +294,47 @@ function HUD() {
       )}
 
       <MiniMap />
+
+      {/* Floating damage number (screen-space, ~2/3 title size) */}
+      {G.dmgFloat.t > 0 && G.dmgFloat.amount > 0 && (
+        <div
+          className="pointer-events-none absolute z-20 font-black tabular-nums text-crosshair"
+          style={{
+            left: `${G.dmgFloat.x * 100}%`,
+            top: `${G.dmgFloat.y * 100}%`,
+            transform: `translate(-50%, -50%) scale(${1 + G.dmgFloat.pop * 0.45})`,
+            fontSize: "2rem", // ~2/3 of title text-5xl
+            textShadow: "0 0 10px rgba(0,0,0,0.85), 0 2px 0 #000",
+            opacity: Math.min(1, G.dmgFloat.t * 1.4),
+            transition: "transform 40ms linear",
+          }}
+        >
+          {G.dmgFloat.amount >= 10 ? Math.round(G.dmgFloat.amount) : G.dmgFloat.amount}
+        </div>
+      )}
+
+      {/* Combo meter — right middle */}
+      {playing && (
+        <div className="pointer-events-none absolute right-6 top-1/2 z-20 -translate-y-1/2 text-right font-mono">
+          <div className={`rounded-xl border-2 px-4 py-3 ${G.combo > 100 ? "border-crosshair bg-crosshair/20 shadow-[0_0_20px_rgba(47,168,79,0.45)]" : "border-white/25 bg-black/50"}`}>
+            <div className="text-[10px] font-bold uppercase tracking-[0.25em] opacity-70">Combo</div>
+            <div className={`text-4xl font-black tabular-nums ${G.combo > 100 ? "text-crosshair" : "text-white"}`}>
+              {Math.floor(G.combo)}
+            </div>
+            {G.combo > 100 && (
+              <div className="mt-1 text-[10px] font-bold uppercase tracking-widest text-crosshair">
+                [{kl("comboBurst")}] burst · CD reset +30 HP
+              </div>
+            )}
+            {G.combo > 0 && G.comboTimer > 0 && (
+              <div className="mt-2 h-1 w-full overflow-hidden rounded bg-white/15">
+                <div className="h-full bg-crosshair transition-[width] duration-100" style={{ width: `${(G.comboTimer / 2.5) * 100}%` }} />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="absolute left-6 top-6 w-72 space-y-3 rounded bg-hud-panel p-3 text-xs font-bold uppercase tracking-widest">
         <div className="flex h-28 items-stretch gap-5">
           <div className="flex min-w-0 flex-1 flex-col justify-between">
@@ -320,6 +361,14 @@ function HUD() {
         )}
         {G.stage === "incoming" && <div className="text-destructive">Boss incoming — {Math.ceil(G.bossWarn)}s</div>}
         {G.stage === "boss" && <Bar label="Boss Table" value={G.bossMax - G.bossHits} max={G.bossMax} tone="enemy" right={`${G.bossMax - G.bossHits} hits`} />}
+        {G.mode === "pvp" && NET.stage === "playing" && (() => {
+          const oid = opponentId();
+          const pr = oid ? NET.peers.get(oid) : null;
+          if (!pr) return null;
+          const hp = pr.dead ? 0 : (pr.hp ?? 0);
+          return <Bar label={pr.name || "Opponent"} value={hp} max={MAX_HP} tone="enemy" right={`${Math.round(hp)} HP`} />;
+        })()}
+
       </div>
       {G.stage === "incoming" && (
         <div className="absolute left-1/2 top-24 -translate-x-1/2 rounded bg-destructive/80 px-6 py-3 text-center text-destructive-foreground">

@@ -328,6 +328,7 @@ export function World() {
   const tutSetup = useRef(-1);
   const tutDist = useRef(0);
   const tutKills = useRef(0);
+  const tutBlueSpawn = useRef(0);
   const snapRef = useRef<EntSnap | null>(null);
   const lastSnap = useRef(0);
 
@@ -1759,6 +1760,7 @@ const kd = (e: KeyboardEvent) => {
           tutSetup.current = s;
           tutDist.current = 0;
           tutKills.current = G.kills;
+          tutBlueSpawn.current = 0;
           tables.forEach((t) => (t.alive = false));
           blues.forEach((u) => (u.alive = false));
           botPool.forEach((x) => (x.alive = false));
@@ -1770,32 +1772,48 @@ const kd = (e: KeyboardEvent) => {
             if (t) t.passive = true;
           }
           if (s === 9) spawnTable(ahead);
-          if (s === 10) for (let i = 0; i < 3; i++) spawnBlue(randomFloor(p));
+          // 10 = Combo meter: blues stream in while on this step (handled below)
+          if (s === 11) spawnTable(ahead); // Parry — table that shoots
+          if (s === 12) for (let i = 0; i < 3; i++) spawnBlue(randomFloor(p));
         }
         if (s === 1 && grounded.current) tutDist.current += v.length() * dt;
         if (s === 9 && aliveCount() === 0) spawnTable(randomFloor(p));
+        // Combo step: spawn a blue every 0.5s while alive blues < 20
+        if (s === 10) {
+          tutBlueSpawn.current -= dt;
+          if (tutBlueSpawn.current <= 0) {
+            const blueAlive = blues.reduce((n, u) => n + (u.alive ? 1 : 0), 0);
+            if (blueAlive < 20) {
+              spawnBlue(randomFloor(p));
+              tutBlueSpawn.current = 0.5;
+            } else {
+              tutBlueSpawn.current = 0.15; // re-check soon when one dies
+            }
+          }
+        }
         const alive = blues.some((u) => u.alive);
         const steps = G.onlineTut ? ONLINE_TUT_STEPS : TUT_STEPS;
         // Enter always skips the current step; objectives still advance when completed
         const objectiveDone = G.onlineTut
           ? false
           : [
-              false, // intro — Enter only
-              tutDist.current > 40,
-              G.airJumps === 0,
-              G.wallrun,
-              G.tut.dashed,
-              G.tut.slammed || G.slamming || bounce.current.t > 0,
-              G.grappling,
-              G.tut.zoomed,
-              G.kills > tutKills.current,
-              G.tut.bombed,
-              G.parries > 0,
-              !alive,
-              false, // boss
-              false, // party revives
-              false, // freecam
-              false, // online modes
+              false, // 0 intro — Enter only
+              tutDist.current > 40, // 1 move
+              G.airJumps === 0, // 2 jump
+              G.wallrun, // 3 wallrun
+              G.tut.dashed, // 4 dash
+              G.tut.slammed || G.slamming || bounce.current.t > 0, // 5 slam
+              G.grappling, // 6 grapple
+              G.tut.zoomed, // 7 scope
+              G.kills > tutKills.current, // 8 brown
+              G.tut.bombed, // 9 bombs
+              false, // 10 combo — Enter only (blues are practice fodder)
+              G.parries > 0, // 11 parry
+              !alive, // 12 blue tables
+              false, // 13 boss
+              false, // 14 party revives
+              false, // 15 freecam
+              false, // 16 online modes
             ][s];
         const done = G.tut.enter || !!objectiveDone;
         if (done) {

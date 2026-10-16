@@ -13,7 +13,7 @@ import { onRemoteChat, clearChat } from "./chat";
  * (map pick, colours, scoring, rounds) and everyone follows the host's calls.
  */
 
-export type Peer = { id: string; name: string; x: number; y: number; z: number; yaw: number; hp: number; dead: boolean; t: number; skin?: Skin };
+export type Peer = { id: string; name: string; x: number; y: number; z: number; yaw: number; hp: number; dead: boolean; t: number; skin?: Skin; grappling?: boolean; gx?: number; gy?: number; gz?: number };
 export type Kind = "pvp" | "lobby" | "coop";
 export type Invite = { id: string; kind: "party" | "lobby"; from: string; target: string; t: number };
 export type PartyMember = { id: string; name: string; leader: boolean };
@@ -80,17 +80,14 @@ export function myId() {
 
 /** Set by World so network events can reach the simulation. */
 export const NET_HOOKS = {
-  onHit: (_dmg: number, _stun: boolean) => {},
-  /** shared enemies: host snapshot arrives at followers */
+  onHit: (_dmg: number, _stun: boolean, _stunT?: number) => {},
   onEnts: (_s: EntSnap) => {},
-  /** shared enemies: a follower hit something (host applies it) */
   onEhit: (_h: EHit) => {},
-  /** shared enemies: host fired an enemy bullet (followers spawn a copy) */
   onEshot: (_b: number[]) => {},
-  /** lobby: a follower asked the host to spawn training enemies */
   onEspawn: (_q: { kind: string; n: number }) => {},
   onWon: () => {},
   onRevive: (_id: string) => {},
+  onVfx: (_p: Record<string, unknown>) => {},
 };
 export type EntSnap = { t: number[]; b: number[]; boss: number[] | null; stage: string; bh: number; bm: number; s: number[] };
 export type EHit = { k: "t" | "b" | "boss"; i: number; dmg: number };
@@ -143,6 +140,8 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
       hp: p.hp, dead: !!p.dead,
       t: performance.now(),
       skin,
+      grappling: !!p.grappling,
+      gx: p.gx, gy: p.gy, gz: p.gz,
       ...(p.skin ? { skinVer: (p as { skinVer?: number }).skinVer } as object : cur ? { skinVer: (cur as { skinVer?: number }).skinVer } as object : {}),
     } as Peer);
     // Only force React re-render on join or skin change — pose interp runs from the Map in useFrame
@@ -150,7 +149,10 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
   });
   ch.on("broadcast", { event: "hit" }, ({ payload }) => {
     if (payload.to !== id) return;
-    if (NET.kind === "pvp" ? NET.stage === "playing" : true) NET_HOOKS.onHit(payload.dmg as number, !!payload.stun);
+    if (NET.kind === "pvp" ? NET.stage === "playing" : true) NET_HOOKS.onHit(payload.dmg as number, !!payload.stun, payload.stunT as number | undefined);
+  });
+  ch.on("broadcast", { event: "vfx" }, ({ payload }) => {
+    NET_HOOKS.onVfx(payload as Record<string, unknown>);
   });
   ch.on("broadcast", { event: "ents" }, ({ payload }) => { if (!NET.isHost) NET_HOOKS.onEnts(payload as EntSnap); });
   ch.on("broadcast", { event: "ehit" }, ({ payload }) => { if (NET.isHost) NET_HOOKS.onEhit(payload as EHit); });
@@ -264,7 +266,7 @@ let lastSkinVer = 0;
 let lastSkinAt = 0;
 
 /** Streams this player's pose (~12 per second, compact payload). */
-export function sendPose(x: number, y: number, z: number, yaw: number) {
+export function sendPose(x: number, y: number, z: number, yaw: number, extra?: { grappling?: boolean; gx?: number; gy?: number; gz?: number }) {
   if (!room || !NET.online) return;
   const now = performance.now();
   if (now - lastPose < 100) return; // 10 Hz — less lag on mobile links
@@ -276,6 +278,10 @@ export function sendPose(x: number, y: number, z: number, yaw: number) {
     x: r(x), y: r(y), z: r(z), yaw: r(yaw),
     hp: G.playerHp | 0,
     dead: !!(G.pvpDead || G.campaignDead),
+    grappling: !!(extra?.grappling ?? G.grappling),
+    gx: r(extra?.gx ?? 0),
+    gy: r(extra?.gy ?? 0),
+    gz: r(extra?.gz ?? 0),
   };
   // Attach skin only when it changes or every 5s (late joiners)
   const key = [
@@ -292,11 +298,11 @@ export function sendPose(x: number, y: number, z: number, yaw: number) {
   send("pose", payload);
 }
 
-export function hitPeer(to: string, dmg: number, stun = false) {
+export function hitPeer(to: string, dmg: number, stun = false, stunT?: number) {
   if (!to || to === myId()) return; // never damage yourself via a ghost peer
-  const ok = NET.kind === "pvp" ? NET.stage === "playing" : NET.kind === "lobby";
+  const ok = NET.kind === "pvp" ? NET.stage === "playing" : NET.kind === "lobby" || NET.kind === "coop";
   if (!ok) return;
-  send("hit", { to, dmg, stun });
+  send("hit", { to, dmg, stun, ...(stunT != null ? { stunT } : {}) });
 }
 /** Host enemies hurting another player in a shared-enemy room. */
 export function enemyHitPeer(to: string, dmg: number) {

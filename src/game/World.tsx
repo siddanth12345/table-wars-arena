@@ -359,21 +359,26 @@ export function World() {
   const healthT = useRef(HEALTH_INTERVAL);
   const health = useMemo(() => Array.from({ length: 24 }, () => ({ active: false, pos: new THREE.Vector3(), t: 0, isShard: false })), []);
   // Ability props: walls (solid), trampolines (bounce pads), fire lines
-  const abilityWalls = useMemo(() => Array.from({ length: 8 }, () => ({
-    active: false, cx: 0, cy: 0, cz: 0, yaw: 0, pitch: 0, hw: 0.5, hh: 0.5, hd: 0.5, t: 0,
+  const abilityWalls = useMemo(() => Array.from({ length: 16 }, () => ({
+    active: false, cx: 0, cy: 0, cz: 0, yaw: 0, pitch: 0, hw: 0.5, hh: 0.5, hd: 0.5, t: 0, netId: "" as string,
   })), []);
-  const abilityPads = useMemo(() => Array.from({ length: 6 }, () => ({
+  const abilityPads = useMemo(() => Array.from({ length: 12 }, () => ({
     active: false, cx: 0, cy: 0, cz: 0, yaw: 0, pitch: 0, hw: 0.5, hh: 0.5, hd: 0.5,
-    nx: 0, ny: 1, nz: 0, t: 0, cd: 0,
+    nx: 0, ny: 1, nz: 0, t: 0, cd: 0, netId: "" as string,
   })), []);
-  const abilityFires = useMemo(() => Array.from({ length: 4 }, () => ({
+  const abilityFires = useMemo(() => Array.from({ length: 8 }, () => ({
     active: false, ax: 0, ay: 0, az: 0, bx: 0, by: 0, bz: 0, t: 0,
-    stung: new Set<string>(), tickAcc: new Map<string, number>(),
+    stung: new Set<string>(), tickAcc: new Map<string, number>(), netId: "" as string,
   })), []);
-  // Air fireballs (fire ability while airborne)
-  const fireballs = useMemo(() => Array.from({ length: 6 }, () => ({
-    active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0,
+  // Air fireballs (fire ability while airborne) + remote visual bullets
+  const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
+    active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string,
   })), []);
+  const remoteBullets = useMemo(() => Array.from({ length: 64 }, () => ({
+    active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0,
+  })), []);
+  const remoteBulletMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const lastTpVfx = useRef(0);
   // Burn DoT on peers/bots from fireball
   const burns = useRef(new Map<string, { t: number; lx: number; ly: number; lz: number; acc: number }>());
   const wallMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
@@ -682,11 +687,12 @@ export function World() {
     boomFx(at, br);
     G.shake = 0.6;
   };
-  const boomFx = (at: THREE.Vector3, r: number, t = 0.5) => {
+  const boomFx = (at: THREE.Vector3, r: number, dur = 0.5, sync = true) => {
     const bm = booms.find((x) => x.t <= 0) ?? booms[0]!;
-    bm.t = t;
+    bm.t = dur;
     bm.pos.copy(at);
     bm.r = r;
+    if (sync && NET.online) sendNet("vfx", { k: "boom", x: at.x, y: at.y, z: at.z, r, t: dur });
   };
   // 1v1: damage every opponent whose (enlarged) hitbox is inside the blast
   const pvpBlast = (at: THREE.Vector3, r: number, dmg: number, stun = false) => {
@@ -1214,9 +1220,102 @@ const kd = (e: KeyboardEvent) => {
     else trainSpawn({ kind: q.kind as TrainSpawn["kind"], n: q.n, t: 0 });
   };
   NET_HOOKS.onWon = () => { G.phase = "won"; document.exitPointerLock?.(); };
-  NET_HOOKS.onHit = (d, stun) => {
-    damagePlayer(d);
-    if (stun && !G.pvpDead) G.stun = STUN_TIME;
+  NET_HOOKS.onHit = (d, stun, stunT) => {
+    if (d > 0) damagePlayer(d);
+    if (stun && !G.pvpDead) G.stun = Math.max(G.stun, stunT ?? STUN_TIME);
+  };
+  NET_HOOKS.onVfx = (payload) => {
+    const k = String(payload.k ?? "");
+    const nid = String(payload.id ?? "");
+    if (k === "boom") {
+      boomFx(tmpV.set(Number(payload.x), Number(payload.y), Number(payload.z)), Number(payload.r) || 8, Number(payload.t) || 0.4, false);
+      return;
+    }
+    if (k === "wall") {
+      const slot = abilityWalls.find((w) => w.netId === nid) ?? abilityWalls.find((w) => !w.active);
+      if (!slot) return;
+      slot.active = true;
+      slot.netId = nid;
+      slot.cx = Number(payload.cx); slot.cy = Number(payload.cy); slot.cz = Number(payload.cz);
+      slot.yaw = Number(payload.yaw); slot.pitch = Number(payload.pitch);
+      slot.hw = Number(payload.hw); slot.hh = Number(payload.hh); slot.hd = Number(payload.hd);
+      slot.t = Number(payload.life) || 2;
+      return;
+    }
+    if (k === "pad") {
+      const slot = abilityPads.find((w) => w.netId === nid) ?? abilityPads.find((w) => !w.active);
+      if (!slot) return;
+      slot.active = true;
+      slot.netId = nid;
+      slot.cx = Number(payload.cx); slot.cy = Number(payload.cy); slot.cz = Number(payload.cz);
+      slot.yaw = Number(payload.yaw); slot.pitch = Number(payload.pitch);
+      slot.hw = Number(payload.hw); slot.hh = Number(payload.hh); slot.hd = Number(payload.hd);
+      slot.nx = Number(payload.nx); slot.ny = Number(payload.ny); slot.nz = Number(payload.nz);
+      slot.t = Number(payload.life) || 9999;
+      slot.cd = 0;
+      return;
+    }
+    if (k === "padclear") {
+      for (const pad of abilityPads) {
+        if (!payload.owner || pad.netId.startsWith(String(payload.owner))) pad.active = false;
+      }
+      return;
+    }
+    if (k === "fire") {
+      const slot = abilityFires.find((w) => w.netId === nid) ?? abilityFires.find((w) => !w.active);
+      if (!slot) return;
+      slot.active = true;
+      slot.netId = nid;
+      slot.ax = Number(payload.ax); slot.ay = Number(payload.ay); slot.az = Number(payload.az);
+      slot.bx = Number(payload.bx); slot.by = Number(payload.by); slot.bz = Number(payload.bz);
+      slot.t = Number(payload.life) || 3;
+      slot.stung.clear(); slot.tickAcc.clear();
+      return;
+    }
+    if (k === "fball") {
+      const slot = fireballs.find((w) => w.netId === nid) ?? fireballs.find((w) => !w.active);
+      if (!slot) return;
+      slot.active = true;
+      slot.netId = nid;
+      slot.pos.set(Number(payload.x), Number(payload.y), Number(payload.z));
+      slot.vel.set(Number(payload.vx), Number(payload.vy), Number(payload.vz));
+      slot.t = Number(payload.life) || 5;
+      slot.traveled = 0;
+      return;
+    }
+    if (k === "tp") {
+      const tp = teleportRef.current;
+      // visual only for remote: use teleport mesh if local not using
+      if (!tp.active) {
+        tp.active = true;
+        tp.phase = payload.phase === "expand" ? "expand" : "fly";
+        tp.pos.set(Number(payload.x), Number(payload.y), Number(payload.z));
+        tp.target.copy(tp.pos);
+        tp.chargeT = Number(payload.ct) || 0;
+        tp.chargeMax = Number(payload.cm) || 0.7;
+        // mark as remote visual so we don't teleport local player
+        (tp as { remote?: boolean }).remote = true;
+      } else if ((tp as { remote?: boolean }).remote) {
+        tp.phase = payload.phase === "expand" ? "expand" : "fly";
+        tp.pos.set(Number(payload.x), Number(payload.y), Number(payload.z));
+        tp.target.copy(tp.pos);
+        tp.chargeT = Number(payload.ct) || 0;
+        if (payload.phase === "done") {
+          tp.active = false;
+          (tp as { remote?: boolean }).remote = false;
+        }
+      }
+      return;
+    }
+    if (k === "bullet") {
+      const slot = remoteBullets.find((b) => !b.active);
+      if (!slot) return;
+      slot.active = true;
+      slot.pos.set(Number(payload.x), Number(payload.y), Number(payload.z));
+      slot.vel.set(Number(payload.vx), Number(payload.vy), Number(payload.vz));
+      slot.t = Number(payload.life) || 1.2;
+      return;
+    }
   };
   NET_HOOKS.onRevive = (id) => {
     G.reviveQueue = G.reviveQueue.filter((x) => x !== id);
@@ -1465,6 +1564,7 @@ const kd = (e: KeyboardEvent) => {
         for (const pad of abilityPads) pad.active = false;
         G.abilityCd = 5;
         G.abilityCharges = 0;
+        if (NET.online) sendNet("vfx", { k: "padclear", owner: myId() });
       } else {
       const can = G.abilityCd <= 0 && G.abilityCharges > 0 && !G.abilityLocked && !G.parryLocked;
       if (can) {
@@ -1485,12 +1585,14 @@ const kd = (e: KeyboardEvent) => {
             const slot = abilityWalls.find((w) => !w.active);
             if (slot) {
               slot.active = true;
+              slot.netId = `${myId()}-w-${Date.now()}`;
               slot.cx = place.x; slot.cy = place.y; slot.cz = place.z;
               slot.yaw = yaw; slot.pitch = pitch;
               slot.hw = halfW; slot.hh = halfH; slot.hd = thick;
               slot.t = 2;
               G.abilityCharges--;
               if (G.abilityCharges <= 0) G.abilityCd = 3;
+              if (NET.online) sendNet("vfx", { k: "wall", id: slot.netId, cx: slot.cx, cy: slot.cy, cz: slot.cz, yaw: slot.yaw, pitch: slot.pitch, hw: slot.hw, hh: slot.hh, hd: slot.hd, life: 2 });
             }
           } else {
             const slot = abilityPads.find((pad) => !pad.active);
@@ -1510,7 +1612,9 @@ const kd = (e: KeyboardEvent) => {
               slot.nx = look.x; slot.ny = look.y; slot.nz = look.z;
               slot.t = 9999;
               slot.cd = 0;
+              slot.netId = `${myId()}-p-${Date.now()}`;
               G.abilityCharges--;
+              if (NET.online) sendNet("vfx", { k: "pad", id: slot.netId, cx: slot.cx, cy: slot.cy, cz: slot.cz, yaw: slot.yaw, pitch: slot.pitch, hw: slot.hw, hh: slot.hh, hd: slot.hd, nx: slot.nx, ny: slot.ny, nz: slot.nz, life: 9999 });
               // After all 3 placed: wait for player to Reset Trampolines (ability key again)
             }
           }
@@ -1526,8 +1630,10 @@ const kd = (e: KeyboardEvent) => {
               slot.vel.copy(look).multiplyScalar(BULLET_SPEED);
               slot.t = 5;
               slot.traveled = 0;
+              slot.netId = `${myId()}-fb-${Date.now()}`;
               G.abilityCharges = 0;
               G.abilityCd = 3; // air fireball CD
+              if (NET.online) sendNet("vfx", { k: "fball", id: slot.netId, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z, vx: slot.vel.x, vy: slot.vel.y, vz: slot.vel.z, life: 5 });
             }
           } else {
             const slot = abilityFires.find((f) => !f.active);
@@ -1541,8 +1647,10 @@ const kd = (e: KeyboardEvent) => {
               slot.t = 3;
               slot.stung.clear();
               slot.tickAcc.clear();
+              slot.netId = `${myId()}-f-${Date.now()}`;
               G.abilityCharges = 0;
               G.abilityCd = 4;
+              if (NET.online) sendNet("vfx", { k: "fire", id: slot.netId, ax: slot.ax, ay: slot.ay, az: slot.az, bx: slot.bx, by: slot.by, bz: slot.bz, life: 3 });
             }
           }
         }
@@ -1699,13 +1807,25 @@ const kd = (e: KeyboardEvent) => {
     // Teleport: bullet flight → expand (2× table→4×) → blink (keep velocity) + 2s bot stun
     {
       const tp = teleportRef.current;
+      const tpRemote = !!(tp as { remote?: boolean }).remote;
       // tick ability stun timers
       for (const [id, left] of [...abilityStun.current.entries()]) {
         const n = left - dt;
         if (n <= 0) abilityStun.current.delete(id);
         else abilityStun.current.set(id, n);
       }
-      const markStun = (id: string) => { tp.pendingStun.add(id); };
+      const markStun = (id: string) => {
+        tp.pendingStun.add(id);
+        // Stun immediately on contact (refresh while ball lives)
+        if (id.startsWith("t") || (id.startsWith("b") && id !== "boss")) {
+          abilityStun.current.set(id, Math.max(abilityStun.current.get(id) ?? 0, 0.35));
+        } else if (id === "boss") {
+          b.lockT = Math.max(b.lockT, 0.35);
+        } else {
+          // peer — stun on contact, will extend to 2s after successful teleport
+          hitPeer(id, 0, true, 0.4);
+        }
+      };
       const ballHitCheck = (center: THREE.Vector3, radius: number) => {
         for (let i = 0; i < tables.length; i++) {
           const tb = tables[i]!;
@@ -1720,7 +1840,7 @@ const kd = (e: KeyboardEvent) => {
           if (!pr.dead && pr.id !== myId() && center.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) < radius + 4) markStun(pr.id);
         }
       };
-      if (tp.active && tp.phase === "fly") {
+      if (tp.active && !tpRemote && tp.phase === "fly") {
         const maxR = cfg.grapple(GRAPPLE_MAX) * 3.5;
         const travel = tp.vel.length() * dt;
         const steps = Math.max(1, Math.ceil(travel / 1.5));
@@ -1747,30 +1867,41 @@ const kd = (e: KeyboardEvent) => {
           // snap target to current pos for expand center
           tp.target.copy(tp.pos);
         }
-      } else if (tp.active && tp.phase === "expand") {
+      } else if (tp.active && !tpRemote && tp.phase === "expand") {
         tp.chargeT += dt;
         // 2× bigger than before: start 2× table, end 4× table
         const scale = TABLE_W * 2 * (1 + Math.min(1, tp.chargeT / tp.chargeMax));
         ballHitCheck(tp.target, scale * 0.55);
         if (tp.chargeT >= tp.chargeMax) {
-          // Teleport — KEEP velocity
-          p.copy(tp.target);
-          // do not clear hv / vy
-          tp.active = false;
-          G.abilityCd = TELEPORT_CD; // 2.5s
-          G.abilityCharges = 0;
-          tp.canRewind = true;
-          tp.rewindUsed = false;
-          // 2s stun after arrival for everyone marked
-          for (const id of tp.pendingStun) {
-            abilityStun.current.set(id, 2);
-            if (id === "boss") b.lockT = Math.max(b.lockT, 2);
+          if (tpRemote) {
+            tp.active = false;
+            (tp as { remote?: boolean }).remote = false;
+          } else {
+            // Teleport — KEEP velocity
+            p.copy(tp.target);
+            tp.active = false;
+            G.abilityCd = TELEPORT_CD; // 2.5s
+            G.abilityCharges = 0;
+            tp.canRewind = true;
+            tp.rewindUsed = false;
+            // 2s stun after successful teleport for everyone marked
+            for (const id of tp.pendingStun) {
+              abilityStun.current.set(id, 2);
+              if (id === "boss") b.lockT = Math.max(b.lockT, 2);
+              else if (!id.startsWith("t") && !id.startsWith("b")) hitPeer(id, 0, true, 2);
+            }
+            tp.stunIds = new Set(tp.pendingStun);
+            tp.stunUntil = 2;
+            tp.pendingStun.clear();
+            G.shake = Math.max(G.shake, 0.3);
+            if (NET.online) sendNet("vfx", { k: "tp", phase: "done", x: p.x, y: p.y, z: p.z, ct: 0, cm: 0.7 });
           }
-          tp.stunIds = new Set(tp.pendingStun);
-          tp.stunUntil = 2;
-          tp.pendingStun.clear();
-          G.shake = Math.max(G.shake, 0.3);
         }
+      }
+      if (tp.active && !tpRemote && NET.online && performance.now() - lastTpVfx.current > 80) {
+        lastTpVfx.current = performance.now();
+        const src = tp.phase === "fly" ? tp.pos : tp.target;
+        sendNet("vfx", { k: "tp", phase: tp.phase, x: src.x, y: src.y, z: src.z, ct: tp.chargeT, cm: tp.chargeMax });
       }
     }
 
@@ -2132,7 +2263,9 @@ const kd = (e: KeyboardEvent) => {
         dir.z += (Math.random() - 0.5) * spread;
         dir.normalize();
         const start = cam.position.clone().addScaledVector(dir, 1).add(new THREE.Vector3(0, -0.3, 0));
-        spawnBullet(playerPool, start, dir.multiplyScalar(BULLET_SPEED), buffed ? DMG * 2 : DMG, 0.4);
+        const bvel = dir.multiplyScalar(BULLET_SPEED);
+        spawnBullet(playerPool, start, bvel, buffed ? DMG * 2 : DMG, 0.4);
+        if (NET.online) sendNet("vfx", { k: "bullet", x: start.x, y: start.y, z: start.z, vx: bvel.x, vy: bvel.y, vz: bvel.z, life: 0.4 });
         if (!buffed && G.ammo === 0) G.reloading = 1.5;
       }
 
@@ -2842,7 +2975,12 @@ const kd = (e: KeyboardEvent) => {
       cam.position.y = THREE.MathUtils.clamp(cam.position.y, 0.5, ROOM.h + 80);
     }
 
-    if (NET.online && (G.phase === "playing" || G.phase === "won")) sendPose(pos.current.x, pos.current.y, pos.current.z, freecamOn ? localBody.playerYaw : MAP.yaw);
+    if (NET.online && (G.phase === "playing" || G.phase === "won")) {
+      sendPose(pos.current.x, pos.current.y, pos.current.z, freecamOn ? localBody.playerYaw : MAP.yaw, {
+        grappling: G.grappling,
+        gx: anchor.current.x, gy: anchor.current.y, gz: anchor.current.z,
+      });
+    }
 
     // --- splinter cones ---
     if (splI.current) {
@@ -3008,6 +3146,19 @@ const kd = (e: KeyboardEvent) => {
       m.visible = fb.active;
       if (fb.active) m.position.copy(fb.pos);
     });
+    // Remote bullets visual only
+    for (const rb of remoteBullets) {
+      if (!rb.active) continue;
+      rb.t -= dt;
+      if (rb.t <= 0) { rb.active = false; continue; }
+      rb.pos.addScaledVector(rb.vel, dt);
+    }
+    remoteBulletMeshRefs.current.forEach((m, i) => {
+      if (!m) return;
+      const rb = remoteBullets[i];
+      m.visible = !!rb?.active;
+      if (rb?.active) m.position.copy(rb.pos);
+    });
     if (teleportMeshRef.current) {
       const tp = teleportRef.current;
       teleportMeshRef.current.visible = !!tp.active;
@@ -3156,6 +3307,12 @@ const kd = (e: KeyboardEvent) => {
         <mesh key={`fb${i}`} ref={(m) => { fireballMeshRefs.current[i] = m; }} visible={false}>
           <sphereGeometry args={[0.8, 12, 10]} />
           <meshStandardMaterial color="#ff1a00" emissive="#cc0000" emissiveIntensity={4} />
+        </mesh>
+      ))}
+      {remoteBullets.map((_, i) => (
+        <mesh key={`rb${i}`} ref={(m) => { remoteBulletMeshRefs.current[i] = m; }} visible={false}>
+          <sphereGeometry args={[0.25, 6, 6]} />
+          <meshBasicMaterial color="#ffe9a8" />
         </mesh>
       ))}
       <mesh ref={(m) => { teleportMeshRef.current = m; }} visible={false}>

@@ -10,6 +10,7 @@ import { createTableBot, skinKey } from "./tableBotFactory";
 function RemoteTable({ peer }: { peer: Peer }) {
   const root = useRef<THREE.Group>(null);
   const botHost = useRef<THREE.Group>(null);
+  const ropeRef = useRef<THREE.Mesh>(null);
   const big = NET.kind === "pvp" || NET.kind === "lobby" ? PVP_SCALE : 1;
   const skin: Skin = {
     ...DEFAULT_SKIN,
@@ -52,11 +53,32 @@ function RemoteTable({ peer }: { peer: Peer }) {
     let d = p.yaw + Math.PI - m.rotation.y;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     m.rotation.y += d * k;
+
+    // Grapple rope toward remote anchor
+    const rope = ropeRef.current;
+    if (rope) {
+      if (p.grappling && p.gx != null && p.gy != null && p.gz != null) {
+        rope.visible = true;
+        const from = new THREE.Vector3(p.x, p.y + 2.2 * big, p.z);
+        const to = new THREE.Vector3(p.gx, p.gy, p.gz);
+        const mid = from.clone().add(to).multiplyScalar(0.5);
+        const len = from.distanceTo(to);
+        rope.position.copy(mid);
+        rope.scale.set(0.12, len, 0.12);
+        rope.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize());
+      } else {
+        rope.visible = false;
+      }
+    }
   });
 
   return (
     <group ref={root} position={[peer.x, peer.y, peer.z]}>
       <group ref={botHost} />
+      <mesh ref={ropeRef} visible={false}>
+        <cylinderGeometry args={[1, 1, 1, 6]} />
+        <meshStandardMaterial color="#c8d0d8" metalness={0.4} roughness={0.45} />
+      </mesh>
       <Html position={[0, 4.2 * big, 0]} center distanceFactor={60} zIndexRange={[5, 0]}>
         <div className="pointer-events-none whitespace-nowrap rounded bg-hud-panel px-2 py-0.5 font-mono text-xs font-black text-hud">
           {NET.names[peer.id] ?? peer.name}

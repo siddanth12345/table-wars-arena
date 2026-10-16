@@ -397,6 +397,8 @@ export function World() {
   const tutKills = useRef(0);
   const tutBlueSpawn = useRef(0);
   const abilityReq = useRef(false);
+  const grappleOnPad = useRef(-1); // pad index if grappling a trampoline, else -1
+  const grappleOnWall = useRef(-1);
   const snapRef = useRef<EntSnap | null>(null);
   const lastSnap = useRef(0);
 
@@ -541,6 +543,7 @@ export function World() {
 
   const hitTable = (t: Table, dmg: number) => {
     if (!t.alive) return;
+    if (G.burnBuff > 0) dmg += 2;
     const applied = Math.min(dmg, Math.max(0, t.hp));
     noteDmg(applied, `t${tables.indexOf(t)}`, t.pos.x, t.pos.y + 2.5 * t.s, t.pos.z);
     if (isFollower()) { G.hitFlash = 0.15; sendNet("ehit", { k: "t", i: tables.indexOf(t), dmg }); return; }
@@ -559,6 +562,7 @@ export function World() {
     }
   };
   const hitBoss = (n: number) => {
+    if (G.burnBuff > 0) n += Math.max(1, Math.round(2 / DMG));
     if (G.stage !== "boss" || !boss.current.landed) return;
     const hits = Math.max(0, Math.min(n, G.bossMax - G.bossHits));
     noteDmg(hits * DMG, "boss", boss.current.pos.x, boss.current.pos.y + 4, boss.current.pos.z);
@@ -575,6 +579,7 @@ export function World() {
   };
   const hitBlue = (u: (typeof blues)[number], dmg: number) => {
     if (!u.alive) return;
+    if (G.burnBuff > 0) dmg += 2;
     const applied = Math.min(dmg, Math.max(0, u.hp));
     noteDmg(applied, `b${blues.indexOf(u)}`, u.pos.x, u.pos.y + 2, u.pos.z);
     if (isFollower()) { G.hitFlash = 0.15; sendNet("ehit", { k: "b", i: blues.indexOf(u), dmg }); return; }
@@ -624,7 +629,7 @@ export function World() {
     abilityWalls.forEach((w) => { w.active = false; });
     abilityPads.forEach((pad) => { pad.active = false; });
     abilityFires.forEach((f) => { f.active = false; f.stung.clear(); f.tickAcc.clear(); });
-    Object.assign(G, { stage: "tables", bossHits: 0, bossTime: 0, parryLocked: false, compromisedT: 0 });
+    Object.assign(G, { stage: "tables", bossHits: 0, bossTime: 0, parryLocked: false, compromisedT: 0, abilityLocked: false });
   }
   const despawnAll = () => {
     tables.forEach((t) => (t.alive = false));
@@ -933,15 +938,65 @@ const kd = (e: KeyboardEvent) => {
         bomb.current.vel.copy(dir).multiplyScalar(BULLET_SPEED);
         G.bombCd = cfg.bombCd(G.buff > 0);
       }
-      if (e.code === SETTINGS.keys.grapple && staticRef.current) {
+      if (e.code === SETTINGS.keys.grapple) {
         const dir = new THREE.Vector3();
         camera.getWorldDirection(dir);
-        const rc = new THREE.Raycaster(camera.position.clone(), dir, 0.5, cfg.grapple(GRAPPLE_MAX));
-        const hit = rc.intersectObject(staticRef.current, true)[0];
-        if (hit) {
-          anchor.current.copy(hit.point);
-          ropeLen.current = hit.distance * 0.9;
+        const maxG = cfg.grapple(GRAPPLE_MAX);
+        let bestDist = maxG;
+        let bestPt: THREE.Vector3 | null = null;
+        let bestPad = -1;
+        let bestWall = -1;
+        if (staticRef.current) {
+          const rc = new THREE.Raycaster(camera.position.clone(), dir, 0.5, maxG);
+          const hit = rc.intersectObject(staticRef.current, true)[0];
+          if (hit && hit.distance < bestDist) {
+            bestDist = hit.distance;
+            bestPt = hit.point.clone();
+          }
+        }
+        // Ray vs ability walls / trampolines (oriented boxes)
+        const origin = camera.position;
+        for (let i = 0; i < abilityWalls.length; i++) {
+          const w = abilityWalls[i]!;
+          if (!w.active) continue;
+          // Sample along ray for OBB hit
+          for (let s = 0.5; s <= maxG; s += 1.5) {
+            const pt = origin.clone().addScaledVector(dir, s);
+            orientLocal(_la, pt.x - w.cx, pt.y - w.cy, pt.z - w.cz, w.yaw, w.pitch);
+            if (Math.abs(_la.x) <= w.hw && Math.abs(_la.y) <= w.hh && Math.abs(_la.z) <= w.hd) {
+              if (s < bestDist) {
+                bestDist = s;
+                bestPt = pt;
+                bestPad = -1;
+                bestWall = i;
+              }
+              break;
+            }
+          }
+        }
+        for (let i = 0; i < abilityPads.length; i++) {
+          const pad = abilityPads[i]!;
+          if (!pad.active) continue;
+          for (let s = 0.5; s <= maxG; s += 1.2) {
+            const pt = origin.clone().addScaledVector(dir, s);
+            orientLocal(_la, pt.x - pad.cx, pt.y - pad.cy, pt.z - pad.cz, pad.yaw, pad.pitch);
+            if (Math.abs(_la.x) <= pad.hw + 1 && Math.abs(_la.y) <= pad.hh + 1 && Math.abs(_la.z) <= pad.hd + 1) {
+              if (s < bestDist) {
+                bestDist = s;
+                bestPt = pt;
+                bestPad = i;
+                bestWall = -1;
+              }
+              break;
+            }
+          }
+        }
+        if (bestPt) {
+          anchor.current.copy(bestPt);
+          ropeLen.current = bestDist * 0.9;
           G.grappling = true;
+          grappleOnPad.current = bestPad;
+          grappleOnWall.current = bestWall;
         }
       }
       if (e.code === SETTINGS.keys.reload) {
@@ -965,7 +1020,7 @@ const kd = (e: KeyboardEvent) => {
     };
     const ku = (e: KeyboardEvent) => {
       keys.current[e.code] = false;
-      if (e.code === SETTINGS.keys.grapple) G.grappling = false;
+      if (e.code === SETTINGS.keys.grapple) { G.grappling = false; grappleOnPad.current = -1; grappleOnWall.current = -1; }
       if (e.code === SETTINGS.keys.jump) G.wallrun = false;
     };
     // --- Look ---
@@ -1305,7 +1360,7 @@ const kd = (e: KeyboardEvent) => {
     if (abilityReq.current && G.phase === "playing" && G.locked && !G.freecam && G.countdown <= 0.6 && G.stun <= 0 && !G.pvpDead && !G.campaignDead) {
       abilityReq.current = false;
       const ab = getAbility();
-      const can = G.abilityCd <= 0 && G.abilityCharges > 0;
+      const can = G.abilityCd <= 0 && G.abilityCharges > 0 && !G.abilityLocked && !G.parryLocked;
       if (can) {
         const yaw = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ").y;
         const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
@@ -1317,7 +1372,7 @@ const kd = (e: KeyboardEvent) => {
           cam.getWorldDirection(look);
           const thick = TABLE_W * 0.5;
           const halfW = BOSS_H * 0.5;
-          const halfH = BOSS_H * 0.5;
+          const halfH = BOSS_H * 0.5 * 1.6; // 1.6× taller walls
           const dist = (PLAYER_R + thick + 2) * 5;
           const place = cam.position.clone().addScaledVector(look, dist);
           if (ab === "wall") {
@@ -1476,42 +1531,89 @@ const kd = (e: KeyboardEvent) => {
       if (fb.t <= 0 || fb.traveled > BOMB_R * 1.2 || fb.pos.y < -5) { fb.active = false; continue; }
       // hit tables
       let boom = false;
-      for (const tb of tables) {
+      const hitR = BOMB_R * 0.5; // same bomb hitbox, half size
+      for (let i = 0; i < tables.length; i++) {
+        const tb = tables[i]!;
         if (!tb.alive) continue;
-        if (fb.pos.distanceTo(tmpV.copy(tb.pos).setY(tb.pos.y + 2 * tb.s)) < 4 * tb.s) {
+        if (fb.pos.distanceTo(tmpV.copy(tb.pos).setY(tb.pos.y + 2 * tb.s)) < hitR * 0.15 + 3 * tb.s) {
           hitTable(tb, BOMB_DMG);
+          burns.current.set(`t${i}`, { t: 4, lx: tb.pos.x, ly: tb.pos.y, lz: tb.pos.z, acc: 0 });
+          G.burnBuff = 4; // +2 dmg on your next hits until burn ends
           boom = true;
         }
       }
-      for (const u of blues) {
+      for (let i = 0; i < blues.length; i++) {
+        const u = blues[i]!;
         if (!u.alive) continue;
-        if (fb.pos.distanceTo(tmpV.copy(u.pos).setY(2)) < 5) {
+        if (fb.pos.distanceTo(tmpV.copy(u.pos).setY(2)) < hitR * 0.12 + 4) {
           hitBlue(u, BOMB_DMG);
+          burns.current.set(`b${i}`, { t: 4, lx: u.pos.x, ly: 0, lz: u.pos.z, acc: 0 });
+          G.burnBuff = 4;
           boom = true;
         }
       }
-      if (bossLive() && b.landed && distToBossBox(fb.pos) < 8) {
+      if (bossLive() && b.landed && distToBossBox(fb.pos) < hitR * 0.2) {
         hitBoss(Math.round(BOMB_DMG / DMG));
+        burns.current.set("boss", { t: 4, lx: b.pos.x, ly: b.y, lz: b.pos.z, acc: 0 });
+        G.burnBuff = 4;
         boom = true;
       }
       for (const pr of NET.peers.values()) {
         if (pr.dead || pr.id === myId()) continue;
-        if (fb.pos.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) < 6) {
+        if (fb.pos.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) < hitR * 0.12) {
           hitPeer(pr.id, 10, true);
           noteDmg(10, pr.id, pr.x, pr.y + 2, pr.z);
           burns.current.set(pr.id, { t: 4, lx: pr.x, ly: pr.y, lz: pr.z, acc: 0 });
+          G.burnBuff = 4;
           boom = true;
         }
       }
       if (boom) {
-        boomFx(fb.pos.clone(), BOMB_R * 0.25, 0.35);
+        boomFx(fb.pos.clone(), hitR * 0.35, 0.35);
         fb.active = false;
       }
     }
-    // Burn DoT: 3 dmg / 0.1s when target moves, 0.7× speed for 4s
+    // Burn DoT: 3 dmg / 0.1s when target moves; bots burn too; +2 hit buff while any burn active
+    if (G.burnBuff > 0) {
+      G.burnBuff = Math.max(0, G.burnBuff - dt);
+    }
     for (const [id, br] of [...burns.current.entries()]) {
       br.t -= dt;
       if (br.t <= 0) { burns.current.delete(id); continue; }
+      if (id.startsWith("t")) {
+        const ti = +id.slice(1);
+        const tb = tables[ti];
+        if (!tb?.alive) { burns.current.delete(id); continue; }
+        const moved = Math.hypot(tb.pos.x - br.lx, tb.pos.y - br.ly, tb.pos.z - br.lz) > 0.2;
+        br.lx = tb.pos.x; br.ly = tb.pos.y; br.lz = tb.pos.z;
+        if (moved) {
+          br.acc += dt;
+          if (br.acc >= 0.1) { br.acc -= 0.1; hitTable(tb, 3); }
+        }
+        continue;
+      }
+      if (id.startsWith("b") && id !== "boss") {
+        const bi = +id.slice(1);
+        const u = blues[bi];
+        if (!u?.alive) { burns.current.delete(id); continue; }
+        const moved = Math.hypot(u.pos.x - br.lx, u.pos.z - br.lz) > 0.2;
+        br.lx = u.pos.x; br.lz = u.pos.z;
+        if (moved) {
+          br.acc += dt;
+          if (br.acc >= 0.1) { br.acc -= 0.1; hitBlue(u, 3); }
+        }
+        continue;
+      }
+      if (id === "boss") {
+        if (!bossLive()) { burns.current.delete(id); continue; }
+        const moved = Math.hypot(b.pos.x - br.lx, b.pos.z - br.lz) > 0.3;
+        br.lx = b.pos.x; br.lz = b.pos.z;
+        if (moved) {
+          br.acc += dt;
+          if (br.acc >= 0.1) { br.acc -= 0.1; hitBoss(1); }
+        }
+        continue;
+      }
       const pr = NET.peers.get(id);
       if (!pr || pr.dead) { burns.current.delete(id); continue; }
       const moved = Math.hypot(pr.x - br.lx, pr.y - br.ly, pr.z - br.lz) > 0.15;
@@ -1638,20 +1740,55 @@ const kd = (e: KeyboardEvent) => {
 
       // --- grapple spring swing ---
       if (G.grappling) {
-        const c = p.clone().setY(p.y + EYE * 0.6);
-        const d = anchor.current.clone().sub(c);
-        const dist = d.length();
-        ropeLen.current = Math.max(6, ropeLen.current - 8 * dt);
-        if (dist > ropeLen.current && dist > 1e-3) {
-          const n = d.divideScalar(dist);
-          const v3 = new THREE.Vector3(v.x, vy.current, v.z);
-          const vr = v3.dot(n);
-          if (vr < 0) v3.addScaledVector(n, -vr * (1 - Math.exp(-12 * dt))); // kill outward motion, keep tangential -> arc
-          v3.addScaledVector(n, GRAPPLE_K * (dist - ropeLen.current) * dt);
-          v3.multiplyScalar(Math.exp(-0.15 * dt));
-          v.set(v3.x, 0, v3.z);
-          vy.current = v3.y;
-          if (vy.current > 0) grounded.current = false;
+        // If anchored wall/pad despawned, release like letting go
+        if (grappleOnWall.current >= 0 && !abilityWalls[grappleOnWall.current]?.active) {
+          G.grappling = false; grappleOnWall.current = -1; grappleOnPad.current = -1;
+        } else if (grappleOnPad.current >= 0 && !abilityPads[grappleOnPad.current]?.active) {
+          G.grappling = false; grappleOnWall.current = -1; grappleOnPad.current = -1;
+        } else if (grappleOnPad.current >= 0) {
+          // Pull straight to trampoline, ignore other velocity; launch on touch
+          const pad = abilityPads[grappleOnPad.current]!;
+          const target = tmpV.set(pad.cx, pad.cy, pad.cz);
+          const c = p.clone().setY(p.y + EYE * 0.6);
+          const to = target.clone().sub(c);
+          const dist = to.length();
+          if (dist < 5.5) {
+            // Touch → rope gone, trampoline launches
+            G.grappling = false;
+            grappleOnPad.current = -1;
+            grappleOnWall.current = -1;
+            const n = tmpV.set(pad.nx, pad.ny, pad.nz).normalize();
+            const speed3 = Math.hypot(hv.current.x, vy.current, hv.current.z);
+            const launch = Math.max(200, speed3);
+            hv.current.set(n.x * launch, 0, n.z * launch);
+            vy.current = n.y * launch;
+            if (Math.abs(n.y) < 0.2) vy.current = Math.max(vy.current, 40);
+            grounded.current = false;
+            pad.cd = 0.4;
+          } else {
+            const n = to.normalize();
+            const pull = Math.min(280, 80 + dist * 4);
+            hv.current.set(n.x * pull, 0, n.z * pull);
+            vy.current = n.y * pull;
+            grounded.current = false;
+            anchor.current.copy(target);
+          }
+        } else {
+          const c = p.clone().setY(p.y + EYE * 0.6);
+          const d = anchor.current.clone().sub(c);
+          const dist = d.length();
+          ropeLen.current = Math.max(6, ropeLen.current - 8 * dt);
+          if (dist > ropeLen.current && dist > 1e-3) {
+            const n = d.divideScalar(dist);
+            const v3 = new THREE.Vector3(v.x, vy.current, v.z);
+            const vr = v3.dot(n);
+            if (vr < 0) v3.addScaledVector(n, -vr * (1 - Math.exp(-12 * dt)));
+            v3.addScaledVector(n, GRAPPLE_K * (dist - ropeLen.current) * dt);
+            v3.multiplyScalar(Math.exp(-0.15 * dt));
+            v.set(v3.x, 0, v3.z);
+            vy.current = v3.y;
+            if (vy.current > 0) grounded.current = false;
+          }
         }
       }
       if (v.length() > MAX_HSPEED) v.setLength(MAX_HSPEED);
@@ -1665,7 +1802,7 @@ const kd = (e: KeyboardEvent) => {
 
       // --- integrate + collide (substep when fast so we don't clip walls/solids) ---
       const speed3 = Math.hypot(v.x, vy.current, v.z);
-      const subN = speed3 > 120 ? Math.min(12, Math.max(2, Math.ceil(speed3 * dt / 6))) : 1;
+      const subN = speed3 > 80 ? Math.min(24, Math.max(3, Math.ceil(speed3 * dt / 3))) : 1;
       const sdt = dt / subN;
       for (let si = 0; si < subN; si++) {
         const prevY = p.y;
@@ -1680,7 +1817,22 @@ const kd = (e: KeyboardEvent) => {
         for (const s of SOLIDS) if (p.y < s.y1 - STEP && p.y + BODY_H > s.y0) pushOut(p, s, PLAYER_R);
         for (const w of abilityWalls) {
           if (!w.active) continue;
-          pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R);
+          const before = p.clone();
+          if (pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R * 1.15)) {
+            // Kill velocity into the wall so high-speed substeps can't tunnel
+            const push = tmpV.subVectors(p, before);
+            if (push.lengthSq() > 1e-8) {
+              push.normalize();
+              const into = hv.current.dot(push);
+              if (into < 0) hv.current.addScaledVector(push, -into);
+              const intoY = vy.current * push.y;
+              if (intoY < 0) vy.current -= intoY;
+            }
+          }
+        }
+        for (const pad of abilityPads) {
+          if (!pad.active) continue;
+          pushOutOriented(p, pad.cx, pad.cy, pad.cz, pad.yaw, pad.pitch, pad.hw, pad.hh, pad.hd, PLAYER_R * 0.5);
         }
       }
       // support surfaces after substeps
@@ -1863,6 +2015,11 @@ const kd = (e: KeyboardEvent) => {
           G.parryLocked = true;
           G.parryWin = 0;
           G.compromisedT = 3;
+          // Campaign only (not training/lobby): strip abilities too
+          if (G.mode === "game") {
+            G.abilityLocked = true;
+            abilityReq.current = false;
+          }
         }
         if (!b.landed) {
           b.y += b.vy * dt;
@@ -2059,7 +2216,8 @@ const kd = (e: KeyboardEvent) => {
         const d = Math.hypot(p.x - w.x, p.z - w.z);
         if (!w.hit && d >= r0 - PLAYER_R - 1 && d <= w.r + PLAYER_R + 1 && p.y < WAVE_H) {
           w.hit = true;
-          damagePlayer(WAVE_DMG);
+          // Campaign boss stomps hit harder; training/lobby keep base WAVE_DMG
+          damagePlayer(G.mode === "game" ? 40 : WAVE_DMG);
         }
       }
 
@@ -2623,8 +2781,10 @@ const kd = (e: KeyboardEvent) => {
       m.visible = pad.active;
       if (!pad.active) return;
       m.position.set(pad.cx, pad.cy, pad.cz);
-      m.rotation.set(pad.pitch, pad.yaw, 0, "YXZ");
-      m.scale.set(pad.hw * 2, pad.hh * 2, pad.hd * 2);
+      // Face along spring normal; visual is a disk (hitbox stays oriented box)
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tmpV.set(pad.nx, pad.ny, pad.nz).normalize());
+      const rad = Math.max(pad.hw, pad.hd);
+      m.scale.set(rad * 2, 1, rad * 2);
     });
     abilityFires.forEach((f, i) => {
       const m = fireMeshRefs.current[i];
@@ -2725,8 +2885,8 @@ const kd = (e: KeyboardEvent) => {
       ))}
       {abilityPads.map((_, i) => (
         <mesh key={`ap${i}`} ref={(m) => { padMeshRefs.current[i] = m; }} visible={false}>
-          <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial color="#3cff70" emissive="#1a8a40" emissiveIntensity={0.9} />
+          <cylinderGeometry args={[0.5, 0.5, 0.12, 28]} />
+          <meshStandardMaterial color="#3cff70" emissive="#1a8a40" emissiveIntensity={1.1} />
         </mesh>
       ))}
       {abilityFires.map((_, i) => (
@@ -2737,8 +2897,8 @@ const kd = (e: KeyboardEvent) => {
       ))}
       {fireballs.map((_, i) => (
         <mesh key={`fb${i}`} ref={(m) => { fireballMeshRefs.current[i] = m; }} visible={false}>
-          <sphereGeometry args={[1.8, 12, 10]} />
-          <meshStandardMaterial color="#ff4a00" emissive="#ff2200" emissiveIntensity={3} />
+          <sphereGeometry args={[0.9, 12, 10]} />
+          <meshStandardMaterial color="#ff1a00" emissive="#cc0000" emissiveIntensity={4} />
         </mesh>
       ))}
 

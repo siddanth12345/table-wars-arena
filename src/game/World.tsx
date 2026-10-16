@@ -198,66 +198,22 @@ function pushOutOriented(
   p: THREE.Vector3,
   cx: number, cy: number, cz: number, yaw: number, pitch: number,
   hw: number, hh: number, hd: number, r: number,
-  /** When true (ability walls): prefer horizontal separation so slight tilts don't launch you */
-  noLaunch = false,
 ) {
   orientLocal(_la, p.x - cx, p.y - cy, p.z - cz, yaw, pitch);
   const dx = _la.x, dy = _la.y, dz = _la.z;
   const ox = hw + r - Math.abs(dx), oy = hh + r - Math.abs(dy), oz = hd + r - Math.abs(dz);
   if (ox > 0 && oy > 0 && oz > 0) {
+    // push along smallest penetration axis
     _lb.set(0, 0, 0);
-    // Near-upright walls (small pitch): never resolve on Y — only slide on faces
-    const upright = noLaunch && Math.abs(pitch) < 0.55; // ~31°
-    if (upright) {
-      // Prefer thickness (local Z) then length (local X); ignore Y penetration for launch
-      if (oz <= ox) _lb.z = (Math.sign(dz) || 1) * oz;
-      else _lb.x = (Math.sign(dx) || 1) * ox;
-    } else if (ox <= oy && ox <= oz) {
-      _lb.x = (Math.sign(dx) || 1) * ox;
-    } else if (oy <= ox && oy <= oz) {
-      // Floor/ceiling/ramp: allow Y resolve but we'll soft-cap velocity separately
-      _lb.y = (Math.sign(dy) || 1) * oy;
-    } else {
-      _lb.z = (Math.sign(dz) || 1) * oz;
-    }
+    if (ox <= oy && ox <= oz) _lb.x = (Math.sign(dx) || 1) * ox;
+    else if (oy <= ox && oy <= oz) _lb.y = (Math.sign(dy) || 1) * oy;
+    else _lb.z = (Math.sign(dz) || 1) * oz;
     orientWorld(_la, _lb.x, _lb.y, _lb.z, yaw, pitch);
     p.add(_la);
     return true;
   }
   return false;
 }
-
-/** Slippery wall response: remove only velocity into the surface, never bounce/reflect. */
-function slideOffWall(
-  hv: THREE.Vector3,
-  vy: { current: number },
-  pushWorld: THREE.Vector3,
-  upright: boolean,
-) {
-  if (pushWorld.lengthSq() < 1e-10) return;
-  const n = pushWorld.clone().normalize();
-  // Horizontal velocity into wall
-  const intoH = hv.x * n.x + hv.z * n.z;
-  if (intoH < 0) {
-    hv.x -= n.x * intoH;
-    hv.z -= n.z * intoH;
-  }
-  // Vertical: only kill downward into a floor-like normal; never boost upward
-  if (upright) {
-    // Mostly vertical panel — do not change vy from collision (no bounce off the face)
-  } else if (n.y > 0.35) {
-    // Standing on a ramp/top: cancel downward only so you rest/slide, no spring
-    if (vy.current < 0) vy.current = 0;
-  } else if (n.y < -0.35) {
-    // Hit underside: cancel upward into ceiling
-    if (vy.current > 0) vy.current = 0;
-  } else {
-    // Mild tilt: remove only the into component of vy, never add
-    const intoY = vy.current * n.y;
-    if (intoY < 0) vy.current -= intoY;
-  }
-}
-
 
 function pushOut(p: THREE.Vector3, s: (typeof SOLIDS)[number], r: number) {
   _la.set(p.x - s.x, 0, p.z - s.z);
@@ -1570,11 +1526,7 @@ const kd = (e: KeyboardEvent) => {
       if (!w.active) continue;
       w.t -= dt;
       if (w.t <= 0) { w.active = false; continue; }
-      const before = p.clone();
-      if (pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R, true)) {
-        const push = tmpV.subVectors(p, before);
-        slideOffWall(hv.current, vy, push, Math.abs(w.pitch) < 0.55);
-      }
+      pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R);
     }
     for (const pad of abilityPads) {
       if (!pad.active) continue;
@@ -2037,15 +1989,15 @@ const kd = (e: KeyboardEvent) => {
         for (const w of abilityWalls) {
           if (!w.active) continue;
           const before = p.clone();
-          // noLaunch=true: upright walls only slide sideways, no room-wide bounce
-          if (pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R, true)) {
+          if (pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R * 1.15)) {
+            // Kill velocity into the wall so high-speed substeps can't tunnel
             const push = tmpV.subVectors(p, before);
-            slideOffWall(hv.current, vy, push, Math.abs(w.pitch) < 0.55);
-            // Also strip into-component from this frame's integration velocity `v`
-            if (push.lengthSq() > 1e-10) {
-              const n = push.normalize();
-              const into = v.x * n.x + v.z * n.z;
-              if (into < 0) { v.x -= n.x * into; v.z -= n.z * into; }
+            if (push.lengthSq() > 1e-8) {
+              push.normalize();
+              const into = hv.current.dot(push);
+              if (into < 0) hv.current.addScaledVector(push, -into);
+              const intoY = vy.current * push.y;
+              if (intoY < 0) vy.current -= intoY;
             }
           }
         }

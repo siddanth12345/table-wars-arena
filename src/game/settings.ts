@@ -41,13 +41,15 @@ export type Settings = {
   fireMode: FireMode;
   timeOfDay: TimeOfDay;
   keys: Record<Action, string>;
-  /** Mild aim assist strength 0–1 (mobile / optional). */
-  aimAssist: number;
   /** Dash near-ground auto bunny hop (mobile). */
   autoBunnyHop: boolean;
   /** Mobile look sensitivity multiplier. */
   mobileSensitivity: number;
   mobileLayout: MobileLayout;
+  /** Show online chat bar (default on). */
+  chatEnabled: boolean;
+  /** Camera drift 0–100: 0 = sharp, 50 = default, 100 = very slow. */
+  cameraDrift: number;
 };
 
 export const DEFAULT_MOBILE_LAYOUT: MobileLayout = {
@@ -69,10 +71,11 @@ export const DEFAULT_SETTINGS: Settings = {
   fireMode: "hold",
   timeOfDay: "evening",
   keys: { forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD", jump: "Space", dash: "KeyQ", parry: "KeyE", bomb: "KeyF", grapple: "KeyC", reload: "KeyR", comboBurst: "ShiftLeft", ability: "KeyV" },
-  aimAssist: 0.22,
   autoBunnyHop: true,
   mobileSensitivity: 1.15,
   mobileLayout: { ...DEFAULT_MOBILE_LAYOUT },
+  chatEnabled: true,
+  cameraDrift: 50,
 };
 
 const STORE_KEY = "tw-settings";

@@ -1357,7 +1357,10 @@ const kd = (e: KeyboardEvent) => {
       if (dx || dy) {
         softLookRef.current.x = 0;
         softLookRef.current.y = 0;
-        const sens = SETTINGS.sensitivity * (G.scoped ? 0.45 : 1);
+        const drift = SETTINGS.cameraDrift ?? 50;
+        // 0 = sharp (2×), 50 = default (1×), 100 = very slow (0.25×)
+        const driftMul = drift <= 50 ? 2 - drift / 50 : 1 - ((drift - 50) / 50) * 0.75;
+        const sens = SETTINGS.sensitivity * driftMul * (G.scoped ? 0.45 : 1);
         const euler = new THREE.Euler(0, 0, 0, "YXZ");
         euler.setFromQuaternion(cam.quaternion);
         euler.y -= dx * 0.0022 * sens;
@@ -1475,22 +1478,19 @@ const kd = (e: KeyboardEvent) => {
           } else {
             const slot = abilityPads.find((pad) => !pad.active);
             if (slot) {
-              // Omnidirectional, but place/orient along velocity when moving (else look)
+              // Placement follows velocity; pad face / launch follows camera look
               const spd = Math.hypot(hv.current.x, vy.current, hv.current.z);
-              let dir = look.clone();
-              if (spd > 12) {
-                dir.set(hv.current.x, vy.current, hv.current.z).normalize();
-              }
-              const placePad = cam.position.clone().addScaledVector(dir, dist);
-              // Orient pad: yaw/pitch from velocity (or look) so surface is omnidirectional
-              const pYaw = Math.atan2(-dir.x, -dir.z);
-              const pPitch = Math.asin(Math.max(-1, Math.min(1, dir.y)));
+              let placeDir = look.clone();
+              if (spd > 12) placeDir.set(hv.current.x, vy.current, hv.current.z).normalize();
+              const placePad = cam.position.clone().addScaledVector(placeDir, dist);
+              // Orientation from camera so a quick turn changes launch direction
+              const pYaw = Math.atan2(-look.x, -look.z);
+              const pPitch = Math.asin(Math.max(-1, Math.min(1, look.y)));
               slot.active = true;
               slot.cx = placePad.x; slot.cy = placePad.y; slot.cz = placePad.z;
               slot.yaw = pYaw; slot.pitch = pPitch;
               slot.hw = halfW * 0.5; slot.hh = halfH * 0.5; slot.hd = thick * 0.5;
-              // Launch along velocity/look (pad faces where you're going)
-              slot.nx = dir.x; slot.ny = dir.y; slot.nz = dir.z;
+              slot.nx = look.x; slot.ny = look.y; slot.nz = look.z;
               slot.t = 3;
               slot.cd = 0;
               G.abilityCharges--;
@@ -2110,20 +2110,6 @@ const kd = (e: KeyboardEvent) => {
         G.shots++;
         const dir = new THREE.Vector3();
         cam.getWorldDirection(dir);
-        // mild aim assist toward nearest enemy in cone
-        const aa = SETTINGS.aimAssist ?? 0;
-        if (aa > 0) {
-          let best: THREE.Vector3 | null = null;
-          let bestAng = 0.18 * aa; // max radians to pull
-          const tryT = (px: number, py: number, pz: number) => {
-            const to = new THREE.Vector3(px, py, pz).sub(cam.position).normalize();
-            const ang = Math.acos(Math.min(1, Math.max(-1, dir.dot(to))));
-            if (ang < bestAng) { bestAng = ang; best = to; }
-          };
-          for (const tb of tables) if (tb.alive) tryT(tb.pos.x, tb.pos.y + 2 * tb.s, tb.pos.z);
-          for (const u of blues) if (u.alive) tryT(u.pos.x, u.pos.y + 2, u.pos.z);
-          if (best) dir.lerp(best, 0.35 * aa).normalize();
-        }
         const spread = G.scoped ? 0.004 : 0.025;
         dir.x += (Math.random() - 0.5) * spread;
         dir.y += (Math.random() - 0.5) * spread;

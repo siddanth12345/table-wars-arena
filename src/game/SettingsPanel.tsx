@@ -120,10 +120,12 @@ export function SettingsPanel() {
         <Row label="Shadows"><Switch on={draft.shadows} onChange={(v) => set("shadows", v)} a="On" b="Off" /></Row>
         <Row label="Screen shake"><Switch on={draft.screenShake} onChange={(v) => set("screenShake", v)} a="On" b="Off" /></Row>
         <Row label="Shooting"><Switch on={draft.fireMode === "hold"} onChange={(v) => set("fireMode", v ? "hold" : "toggle")} a="Hold" b="Toggle" /></Row>
-        <Row label={`Aim assist · ${Math.round((draft.aimAssist ?? 0) * 100)}%`}>
-          <input type="range" min={0} max={0.45} step={0.01} value={draft.aimAssist ?? 0} onChange={(e) => set("aimAssist", Number(e.target.value))} className="w-56 accent-[var(--crosshair)]" />
-        </Row>
         <Row label="Auto bunny-hop"><Switch on={draft.autoBunnyHop !== false} onChange={(v) => set("autoBunnyHop", v)} a="On" b="Off" /></Row>
+        <Row label="Chat"><Switch on={draft.chatEnabled !== false} onChange={(v) => set("chatEnabled", v)} a="On" b="Off" /></Row>
+        <Row label={`Camera drift · ${Math.round(draft.cameraDrift ?? 50)}`}>
+          <input type="range" min={0} max={100} step={1} value={draft.cameraDrift ?? 50} onChange={(e) => set("cameraDrift", Number(e.target.value))} className="w-56 accent-[var(--crosshair)]" />
+        </Row>
+        <div className="mb-2 text-[10px] opacity-50">0 = sharp turn · 50 = default · 100 = very slow</div>
       </div>
 
       <div className="mb-2 mt-5 text-xs font-bold uppercase tracking-widest opacity-70">Key bindings · click, then press a key (Esc cancels)</div>

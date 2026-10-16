@@ -166,11 +166,9 @@ export function resetGame(mode: Mode = G.mode) {
     shots: 0, hits: 0, parries: 0, time: 0, firing: false, scoped: false, respawnMsg: 0, tutStep: 0,
     tut: { enter: false, dashed: false, zoomed: false, bombed: false, slammed: false },
     crosshair: "normal", canGrapple: false, mobileTut: false, mobileTutStep: 0, mobilePaused: false,
-    trainMenu: false, userPaused: false, chatOpen: false,
-  chatOpen: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
+    trainMenu: false, userPaused: false, chatOpen: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
     campaignDead: false, shardProgress: 0, reviveQueue: [], freecam: false, freecamSpeedIdx: 0, lobbyRespawnT: 0, onlineTut: false, diedThisRun: [],
     combo: 0, comboTimer: 0, abilityCd: 0, abilityCharges: 4, abilitySlow: 0, abilityLocked: false, burnBuff: 0,
-  burnBuff: 0,
     dmgFloat: { amount: 0, targetId: "", x: 0.5, y: 0.4, t: 0, pop: 0 },
   });
   TRAIN_Q.length = 0;
@@ -225,6 +223,7 @@ export function setCursorLocked(on: boolean) {
 }
 
 export function pauseGame() {
+  if (G.chatOpen) return; // chat mouse-free mode is not a pause
   G.userPaused = true;
   G.locked = false;
   G.firing = false;

@@ -26,27 +26,52 @@ export function clearChat() {
 }
 
 const HARD = [
-  "nigger", "nigga", "faggot", "fag", "retard", "retarded", "kys", "kill yourself",
-  "nazi", "hitler", "rape", "rapist", "molest", "pedo", "paedo",
+  "nigger", "nigga", "nigg", "faggot", "faggots", "fag", "fags", "retard", "retarded", "retards",
+  "kys", "kill yourself", "kill urself", "killyourself",
+  "nazi", "hitler", "rape", "rapist", "raping", "molest", "pedo", "paedo", "pedophile",
+  "cunt", "cunts", "whore", "whores", "slut", "sluts", "bitch", "bitches",
+  "motherfucker", "motherfuck", "fuck you", "fuck u", "fuckoff", "fuck off",
+  "shithead", "asshole", "dickhead", "cock", "pussy", "bastard",
 ];
 const MILD = [
   "stupid", "idiot", "dumb", "moron", "loser", "trash", "noob", "suck", "shut up",
-  "ugly", "fat", "hate you", "nobody likes",
+  "ugly", "fatass", "hate you", "nobody likes", "dumbass", "shutthefuck",
 ];
 
 function normalize(s: string) {
-  return s.toLowerCase().replace(/[@0]/g, "o").replace(/1/g, "i").replace(/3/g, "e").replace(/\$/g, "s").replace(/[^a-z\s]/g, " ");
+  let n = s.toLowerCase();
+  // strip zero-width / separators used to evade filters
+  n = n.replace(/[\u200b-\u200f\u202a-\u202e]/g, "");
+  n = n.replace(/[@ø0]/g, "o").replace(/[1!|]/g, "i").replace(/3/g, "e").replace(/4/g, "a")
+    .replace(/5/g, "s").replace(/7/g, "t").replace(/\$/g, "s").replace(/@/g, "a");
+  // collapse repeated letters: fuuuuck → fuuck → enough for includes
+  n = n.replace(/(.)\1{2,}/g, "$1$1");
+  // remove non-letters between letters: f.u.c.k / f u c k
+  n = n.replace(/[^a-z]+/g, "");
+  return n;
+}
+
+function normalizeSpaced(s: string) {
+  return s.toLowerCase()
+    .replace(/[@0]/g, "o").replace(/1/g, "i").replace(/3/g, "e")
+    .replace(/[^a-z\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function filterChat(raw: string): string {
   const text = raw.slice(0, 50);
-  const n = normalize(text);
+  const compact = normalize(text);
+  const spaced = normalizeSpaced(text);
   for (const w of HARD) {
-    if (n.includes(w)) return "*splinter*";
+    const cw = normalize(w);
+    if (cw && compact.includes(cw)) return "*splinter*";
+    if (spaced.includes(w)) return "*splinter*";
   }
   let mild = false;
   for (const w of MILD) {
-    if (n.includes(w)) { mild = true; break; }
+    const cw = normalize(w);
+    if ((cw && compact.includes(cw)) || spaced.includes(w)) { mild = true; break; }
   }
   if (mild) {
     mildStrikes++;

@@ -300,7 +300,8 @@ export function sendPose(x: number, y: number, z: number, yaw: number, extra?: {
 
 export function hitPeer(to: string, dmg: number, stun = false, stunT?: number) {
   if (!to || to === myId()) return; // never damage yourself via a ghost peer
-  const ok = NET.kind === "pvp" ? NET.stage === "playing" : NET.kind === "lobby" || NET.kind === "coop";
+  // No friendly fire in party modes (kind "coop" = party campaign / party training); only 1v1 and lobbies let players hurt each other.
+  const ok = NET.kind === "pvp" ? NET.stage === "playing" : NET.kind === "lobby";
   if (!ok) return;
   send("hit", { to, dmg, stun, ...(stunT != null ? { stunT } : {}) });
 }

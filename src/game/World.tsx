@@ -404,6 +404,7 @@ export function World() {
   const tutKills = useRef(0);
   const tutBlueSpawn = useRef(0);
   const abilityReq = useRef(false);
+  const freecamWas = useRef(false);
   const teleportRef = useRef({
     active: false,
     phase: "fly" as "fly" | "expand",
@@ -1485,6 +1486,25 @@ const kd = (e: KeyboardEvent) => {
       G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.campaignDead || (NET.kind === "lobby" && G.pvpDead)
     );
 
+    // Freecam owns the keyboard/mouse: on entering AND leaving it, drop every held input so nothing
+    // (jump, WASD, shoot, scope, ability, grapple) keeps running from before the switch.
+    if (freecamOn !== freecamWas.current) {
+      freecamWas.current = freecamOn;
+      keys.current = {};
+      G.firing = false;
+      G.scoped = false;
+      G.grappling = false;
+      abilityReq.current = false;
+      grappleOnPad.current = -1;
+      grappleOnWall.current = -1;
+    }
+    // While in freecam, no gameplay action may fire (shooting would otherwise come out of the free camera like a ghost).
+    if (freecamOn) {
+      G.firing = false;
+      G.scoped = false;
+      abilityReq.current = false;
+    }
+
     // Mobile soft-lock: keep locked while playing unless user paused
     if (isMobilePlay() && G.phase === "playing" && !G.userPaused) {
       G.locked = true;
@@ -1688,10 +1708,15 @@ const kd = (e: KeyboardEvent) => {
     // Fire lines — 5× wider/taller, no self-dmg, can hit boss if under it
     const FIRE_W = 20; // was ~4, then 8; now 5× original
     const FIRE_H = 8; // 5× taller zone
+    // Players only hurt each other in 1v1s and lobbies — never in party campaign / party training
+    const canHurtPeers = G.mode === "pvp" || NET.kind === "pvp" || NET.kind === "lobby";
     for (const fire of abilityFires) {
       if (!fire.active) continue;
       fire.t -= dt;
       if (fire.t <= 0) { fire.active = false; fire.stung.clear(); fire.tickAcc.clear(); continue; }
+      // Copies of another player's fire are visual only — the caster's own client applies the damage,
+      // so you never get burned by your own fire (and nobody is hit twice).
+      if (!fire.netId.startsWith(`${myId()}-`)) continue;
       const segLen = Math.hypot(fire.bx - fire.ax, fire.by - fire.ay, fire.bz - fire.az) || 1;
       const nearSeg3 = (x: number, y: number, z: number) => {
         const dx = fire.bx - fire.ax, dy = fire.by - fire.ay, dz = fire.bz - fire.az;
@@ -1730,7 +1755,7 @@ const kd = (e: KeyboardEvent) => {
         }
       }
       for (const pr of NET.peers.values()) {
-        if (pr.dead || pr.id === myId()) continue;
+        if (!canHurtPeers || pr.dead || pr.id === myId()) continue;
         if (nearSeg3(pr.x, pr.y + 2, pr.z) >= FIRE_W) continue;
         if (!fire.stung.has(pr.id)) {
           fire.stung.add(pr.id);
@@ -1747,6 +1772,8 @@ const kd = (e: KeyboardEvent) => {
       if (!fb.active) continue;
       fb.t -= dt;
       if (fb.t <= 0 || fb.pos.y < -5) { fb.active = false; continue; }
+      // Remote copies of someone else's fireball are visual only (the caster applies damage + syncs the boom)
+      const mine = fb.netId.startsWith(`${myId()}-`);
       const travel = fb.vel.length() * dt;
       const steps = Math.max(1, Math.ceil(travel / 1.5));
       const stepV = fb.vel.clone().multiplyScalar(dt / steps);
@@ -1761,13 +1788,15 @@ const kd = (e: KeyboardEvent) => {
           bossBox(_mn, _mx);
           hit = q.x > _mn.x && q.x < _mx.x && q.y > _mn.y && q.y < _mx.y && q.z > _mn.z && q.z < _mx.z;
         }
-        if (!hit) {
+        if (!hit && mine && canHurtPeers) {
           for (const pr of NET.peers.values()) {
             if (pr.dead || pr.id === myId()) continue;
             if (q.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) < 4) { hit = true; break; }
           }
         }
-        if (hit) {
+        if (hit && !mine) {
+          fb.active = false;
+        } else if (hit) {
           const at = q.clone();
           for (let i = 0; i < tables.length; i++) {
             const tb = tables[i]!;
@@ -1789,7 +1818,7 @@ const kd = (e: KeyboardEvent) => {
             G.burnBuff = 4;
           }
           for (const pr of NET.peers.values()) {
-            if (pr.dead || pr.id === myId()) continue;
+            if (!canHurtPeers || pr.dead || pr.id === myId()) continue;
             if (tmpV.set(pr.x, pr.y, pr.z).distanceTo(at) >= blastR) continue;
             hitPeer(pr.id, BOMB_DMG, true);
             noteDmg(BOMB_DMG, pr.id, pr.x, pr.y + 2, pr.z);
@@ -1836,7 +1865,7 @@ const kd = (e: KeyboardEvent) => {
           if (u.alive && center.distanceTo(tmpV.copy(u.pos).setY(2)) < radius + 4) markStun(`b${i}`);
         }
         if (bossLive() && b.landed && distToBossBox(center) < radius + 2) markStun("boss");
-        for (const pr of NET.peers.values()) {
+        if (canHurtPeers) for (const pr of NET.peers.values()) {
           if (!pr.dead && pr.id !== myId() && center.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) < radius + 4) markStun(pr.id);
         }
       };

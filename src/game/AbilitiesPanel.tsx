@@ -10,7 +10,7 @@ const DETAILS: Record<AbilityId, { summary: string; lines: string[] }> = {
     lines: [
       "Press V to place a boss-sized wooden wall 5× farther along your crosshair.",
       "Height is 1.6× boss height; thickness is one table. Lasts 2 seconds.",
-      "4 charges, then a 3s cooldown. Walls have no friction (usable as ramps).",
+      "6 charges, then a 3s cooldown. Walls have no friction (usable as ramps).",
       "Omnidirectional: look down to place a floor/ceiling plate or a 45° ramp.",
       "You can GRAPPLE onto walls (hold C while aiming at one).",
       "If a wall despawns while you're grappled to it, the rope releases automatically.",
@@ -22,9 +22,9 @@ const DETAILS: Record<AbilityId, { summary: string; lines: string[] }> = {
     lines: [
       "Press V to place a pad the same way as walls (omnidirectional, 0.5× wall size).",
       "Visual is a green circle; the hitbox stays a rectangular volume.",
-      "3 charges, then a 4s cooldown. Pads last 3 seconds.",
+      "3 charges, then a 5s cooldown. Pads stay until that cooldown starts.",
       "Launch speed is at least 200 u/s, or your current speed if higher.",
-      "Grapple a trampoline (C): you are pulled straight toward it (other velocity ignored).",
+      "Grapple a trampoline (C), or auto-grapple the nearest pad within 2× grapple range if nothing else is hit.",
       "On touch, the rope vanishes and the pad launches you along its spring direction.",
       "If the pad despawns mid-grapple, the rope releases automatically.",
       "Campaign boss (after parry lock): Trampoline is disabled.",

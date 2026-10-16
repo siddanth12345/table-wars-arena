@@ -1015,9 +1015,10 @@ const kd = (e: KeyboardEvent) => {
             }
           }
         }
-        // If nothing on the crosshair ray, auto-grab nearest trampoline in grapple range
+        // If nothing on the crosshair ray, auto-grab nearest trampoline within 2× grapple range
         if (!bestPt) {
-          let nearD = maxG;
+          const autoMax = maxG * 2;
+          let nearD = autoMax;
           let nearI = -1;
           for (let i = 0; i < abilityPads.length; i++) {
             const pad = abilityPads[i]!;
@@ -1053,6 +1054,13 @@ const kd = (e: KeyboardEvent) => {
           grounded.current = false;
           bounce.current.t = 0;
           G.bounceWin = 0;
+        } else if (!grounded.current && slam.current.on) {
+          // Cancel slam mid-air → half normal slam cooldown
+          const tier = SLAM_TIERS.findIndex((q) => slam.current.h < q.maxH);
+          const q = SLAM_TIERS[tier >= 0 ? tier : SLAM_TIERS.length - 1]!;
+          slam.current.on = false;
+          G.slamming = false;
+          G.slamCd = cfg.slamCd(q.cd) * 0.5;
         } else if (!grounded.current && !slam.current.on && G.slamCd <= 0) {
           let ground = 0;
           for (const s of SOLIDS) if (s.y1 <= p.y + 0.01 && overlapXZ(p, s, PLAYER_R * 0.5)) ground = Math.max(ground, s.y1);
@@ -1261,7 +1269,7 @@ const kd = (e: KeyboardEvent) => {
       abilityPads.forEach((pad) => { pad.active = false; });
       abilityFires.forEach((f) => { f.active = false; f.stung.clear(); f.tickAcc.clear(); });
       G.abilityCd = 0;
-      G.abilityCharges = getAbility() === "wall" ? 4 : getAbility() === "trampoline" ? 3 : 1;
+      G.abilityCharges = getAbility() === "wall" ? 6 : getAbility() === "trampoline" ? 3 : 1;
       G.abilitySlow = 0;
       MAP.health = [];
       hazards.forEach((h) => (h.active = false));
@@ -1401,7 +1409,7 @@ const kd = (e: KeyboardEvent) => {
       G.abilityCd = Math.max(0, G.abilityCd - dt);
       if (G.abilityCd <= 0) {
         const ab = getAbility();
-        G.abilityCharges = ab === "wall" ? 4 : ab === "trampoline" ? 3 : 1;
+        G.abilityCharges = ab === "wall" ? 6 : ab === "trampoline" ? 3 : 1;
       }
     }
     if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
@@ -1493,10 +1501,14 @@ const kd = (e: KeyboardEvent) => {
               slot.yaw = pYaw; slot.pitch = pPitch;
               slot.hw = halfW * 0.5; slot.hh = halfH * 0.5; slot.hd = thick * 0.5;
               slot.nx = look.x; slot.ny = look.y; slot.nz = look.z;
-              slot.t = 3;
+              slot.t = 9999; // stay until ability cooldown starts
               slot.cd = 0;
               G.abilityCharges--;
-              if (G.abilityCharges <= 0) G.abilityCd = 4;
+              if (G.abilityCharges <= 0) {
+                G.abilityCd = 5; // +1s vs previous 4s
+                // Pads only despawn when the trampoline cooldown begins
+                for (const pad of abilityPads) pad.active = false;
+              }
             }
           }
         } else if (ab === "fire") {
@@ -1545,8 +1557,7 @@ const kd = (e: KeyboardEvent) => {
     }
     for (const pad of abilityPads) {
       if (!pad.active) continue;
-      pad.t -= dt;
-      if (pad.t <= 0) { pad.active = false; continue; }
+      // Lifetime is unlimited until trampoline ability cooldown starts
       pad.cd = Math.max(0, pad.cd - dt);
       // proximity in oriented local space
       orientLocal(_la, p.x - pad.cx, p.y - pad.cy, p.z - pad.cz, pad.yaw, pad.pitch);

@@ -14,13 +14,13 @@ export const ABILITY_LIST: AbilityDef[] = [
     id: "wall",
     name: "Wall",
     icon: "🧱",
-    desc: "Omnidirectional wooden cover. 4 uses → 3s cooldown. Grappleable.",
+    desc: "Omnidirectional wooden cover. 6 uses → 3s cooldown. Grappleable.",
   },
   {
     id: "trampoline",
     name: "Trampoline",
     icon: "🟢",
-    desc: "Omnidirectional spring pad (0.5× wall). 3 uses → 4s cooldown. Grapple pulls you in.",
+    desc: "Omnidirectional spring pad (0.5× wall). 3 uses → 5s cooldown; pads last until that cooldown starts. Auto-grapple within 2× range.",
   },
   {
     id: "fire",

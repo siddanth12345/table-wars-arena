@@ -22,14 +22,14 @@ export function ChatBar() {
     net.online &&
     (net.kind === "lobby" || net.kind === "pvp" || net.kind === "coop");
 
-  // Sync local open from G.chatOpen (center-click / resume can clear it)
   useEffect(() => {
     const id = setInterval(() => {
       if (!G.chatOpen && open) {
         setOpen(false);
         setDraft("");
       }
-    }, 50);
+      if (G.chatOpen && !open) setOpen(true);
+    }, 40);
     return () => clearInterval(id);
   }, [open]);
 
@@ -60,23 +60,26 @@ export function ChatBar() {
   }, [messages, open]);
 
   const openChat = () => {
+    // Set chat flag FIRST so pointerlockchange never opens pause
     G.chatOpen = true;
-    G.userPaused = false; // never open pause for chat
+    G.userPaused = false;
     setOpen(true);
     try { document.exitPointerLock?.(); } catch { /* ignore */ }
     try {
       document.body.style.cursor = "";
-      const canvas = document.querySelector("canvas") as HTMLElement | null;
-      if (canvas) canvas.style.cursor = "";
+      document.querySelectorAll("canvas").forEach((el) => {
+        (el as HTMLElement).style.cursor = "";
+      });
     } catch { /* ignore */ }
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
   const closeChatResume = (reLock: boolean) => {
     G.chatOpen = false;
+    G.userPaused = false;
     setOpen(false);
     setDraft("");
-    if (reLock && G.phase === "playing" && !G.userPaused) {
+    if (reLock && G.phase === "playing") {
       try { lockPointer(); } catch { /* ignore */ }
     }
   };
@@ -86,7 +89,6 @@ export function ChatBar() {
     if (!t) return;
     sendChat(t);
     setDraft("");
-    // Instantly close chat after send
     closeChatResume(true);
   };
 
@@ -94,7 +96,7 @@ export function ChatBar() {
 
   return (
     <div
-      className="pointer-events-auto fixed z-40 font-mono text-sm"
+      className="pointer-events-auto fixed z-[60] font-mono text-sm"
       style={{ right: "1.25rem", top: "50%", transform: "translateY(-50%)", width: "min(22rem, 42vw)" }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
@@ -136,7 +138,6 @@ export function ChatBar() {
                 }
                 if (e.key === "Escape") {
                   e.preventDefault();
-                  // Esc only closes chat — pauseGame blocked while chatOpen
                   closeChatResume(true);
                 }
               }}
@@ -165,7 +166,7 @@ export function ChatBar() {
   );
 }
 
-/** Center click closes chat + re-locks without opening pause. */
+/** Full-screen click outside chat closes it and re-locks — no pause menu. */
 export function ChatResumeCatcher() {
   const [active, setActive] = useState(false);
   useEffect(() => {
@@ -175,10 +176,10 @@ export function ChatResumeCatcher() {
   if (!active) return null;
   return (
     <div
-      className="fixed inset-0 z-30"
-      style={{ pointerEvents: "auto", cursor: "default" }}
+      className="fixed inset-0 z-[55]"
+      style={{ pointerEvents: "auto", cursor: "default", background: "transparent" }}
       onMouseDown={(e) => {
-        // Ignore clicks on the chat panel (right side)
+        // Right strip is the chat panel — ignore
         if (e.clientX > window.innerWidth * 0.55) return;
         e.preventDefault();
         e.stopPropagation();

@@ -830,8 +830,9 @@ export function World() {
       G.firing = false;
       G.scoped = false;
       keys.current = {};
-      // Chat open: release mouse without pausing
+      // Chat mouse-free: NEVER treat as pause menu
       if (G.chatOpen) {
+        G.userPaused = false;
         return;
       }
       if (G.phase === "playing") {
@@ -1741,7 +1742,7 @@ const kd = (e: KeyboardEvent) => {
           p.copy(tp.target);
           // do not clear hv / vy
           tp.active = false;
-          G.abilityCd = 5;
+          G.abilityCd = 2.5; // teleport CD
           G.abilityCharges = 0;
           tp.canRewind = true;
           tp.rewindUsed = false;

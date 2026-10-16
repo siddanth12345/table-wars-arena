@@ -20,7 +20,7 @@ export const ABILITY_LIST: AbilityDef[] = [
     id: "trampoline",
     name: "Trampoline",
     icon: "🟢",
-    desc: "Omnidirectional spring pad (0.5× wall). 3 uses → 5s cooldown; pads last until that cooldown starts. Auto-grapple within 2× range.",
+    desc: "Place up to 3 pads. After all 3, press V again to Reset Trampolines (5s CD, clears pads). Auto-grapple within 2× range.",
   },
   {
     id: "fire",

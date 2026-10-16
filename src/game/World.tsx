@@ -1055,11 +1055,13 @@ const kd = (e: KeyboardEvent) => {
           bounce.current.t = 0;
           G.bounceWin = 0;
         } else if (!grounded.current && slam.current.on) {
-          // Cancel slam mid-air → half normal slam cooldown
+          // Cancel slam mid-air → kill all velocity, half normal slam cooldown
           const tier = SLAM_TIERS.findIndex((q) => slam.current.h < q.maxH);
           const q = SLAM_TIERS[tier >= 0 ? tier : SLAM_TIERS.length - 1]!;
           slam.current.on = false;
           G.slamming = false;
+          hv.current.set(0, 0, 0);
+          vy.current = 0;
           G.slamCd = cfg.slamCd(q.cd) * 0.5;
         } else if (!grounded.current && !slam.current.on && G.slamCd <= 0) {
           let ground = 0;
@@ -1458,6 +1460,11 @@ const kd = (e: KeyboardEvent) => {
             tp.rewindUsed = false;
           }
         }
+      } else if (ab === "trampoline" && !G.abilityLocked && !G.parryLocked && G.abilityCd <= 0 && G.abilityCharges <= 0) {
+        // Reset trampolines: start cooldown and delete all placed pads
+        for (const pad of abilityPads) pad.active = false;
+        G.abilityCd = 5;
+        G.abilityCharges = 0;
       } else {
       const can = G.abilityCd <= 0 && G.abilityCharges > 0 && !G.abilityLocked && !G.parryLocked;
       if (can) {
@@ -1501,14 +1508,10 @@ const kd = (e: KeyboardEvent) => {
               slot.yaw = pYaw; slot.pitch = pPitch;
               slot.hw = halfW * 0.5; slot.hh = halfH * 0.5; slot.hd = thick * 0.5;
               slot.nx = look.x; slot.ny = look.y; slot.nz = look.z;
-              slot.t = 9999; // stay until ability cooldown starts
+              slot.t = 9999;
               slot.cd = 0;
               G.abilityCharges--;
-              if (G.abilityCharges <= 0) {
-                G.abilityCd = 5; // +1s vs previous 4s
-                // Pads only despawn when the trampoline cooldown begins
-                for (const pad of abilityPads) pad.active = false;
-              }
+              // After all 3 placed: wait for player to Reset Trampolines (ability key again)
             }
           }
         } else if (ab === "fire") {

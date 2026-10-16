@@ -22,7 +22,7 @@ const DETAILS: Record<AbilityId, { summary: string; lines: string[] }> = {
     lines: [
       "Press V to place a pad the same way as walls (omnidirectional, 0.5× wall size).",
       "Visual is a green circle; the hitbox stays a rectangular volume.",
-      "3 charges, then a 5s cooldown. Pads stay until that cooldown starts.",
+      "Place up to 3 pads. After all 3, press the ability key again to Reset Trampolines — starts the 5s cooldown and deletes every pad.",
       "Launch speed is at least 200 u/s, or your current speed if higher.",
       "Grapple a trampoline (C), or auto-grapple the nearest pad within 2× grapple range if nothing else is hit.",
       "On touch, the rope vanishes and the pad launches you along its spring direction.",

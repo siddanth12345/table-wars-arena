@@ -390,7 +390,15 @@ function HUD() {
           </span>
           <span>[{kl("dash")}] Dash {G.dashCd > 0 ? G.dashCd.toFixed(1) : "ready"}</span>
           <span>[{kl("bomb")}] Bomb {G.bombCd > 0 ? G.bombCd.toFixed(1) : "ready"}</span>
-          <span>[{kl("ability")}] {ABILITY_LIST.find((a) => a.id === getAbility())?.name ?? "Ability"} {G.abilityCd > 0 ? `${G.abilityCd.toFixed(1)}s` : G.abilityCharges > 0 ? `×${G.abilityCharges}` : "ready"}</span>
+          <span>[{kl("ability")}] {ABILITY_LIST.find((a) => a.id === getAbility())?.name ?? "Ability"}{" "}
+            {G.abilityCd > 0
+              ? `${G.abilityCd.toFixed(1)}s`
+              : getAbility() === "trampoline" && G.abilityCharges <= 0
+                ? "reset trampolines"
+                : G.abilityCharges > 0
+                  ? `×${G.abilityCharges}`
+                  : "ready"}
+          </span>
           <span className={G.grappling ? "text-shield" : ""}>[{kl("grapple")}] Grapple</span>
           <span className={G.slamming || G.bounceWin > 0 ? "text-shield" : ""}>[{kl("reload")} air] Slam {G.bounceWin > 0 ? `${kl("reload")} = BOUNCE` : G.slamCd > 0 ? G.slamCd.toFixed(1) : "ready"}</span>
         </div>

@@ -377,6 +377,7 @@ export function World() {
   const burns = useRef(new Map<string, { t: number; lx: number; ly: number; lz: number; acc: number }>());
   const wallMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const padMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const coilMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireballMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireParticleRefs = useRef<(THREE.Points | null)[]>([]);
@@ -1476,8 +1477,8 @@ const kd = (e: KeyboardEvent) => {
               slot.cx = place.x; slot.cy = place.y; slot.cz = place.z;
               slot.yaw = yaw; slot.pitch = pitch;
               slot.hw = halfW * 0.5; slot.hh = halfH * 0.5; slot.hd = thick * 0.5;
-              // Spring faces back toward you (launch along -look)
-              slot.nx = -look.x; slot.ny = -look.y; slot.nz = -look.z;
+              // Pad faces where you look — launches away from you along look
+              slot.nx = look.x; slot.ny = look.y; slot.nz = look.z;
               slot.t = 3;
               slot.cd = 0;
               G.abilityCharges--;
@@ -1535,17 +1536,17 @@ const kd = (e: KeyboardEvent) => {
       pad.cd = Math.max(0, pad.cd - dt);
       // proximity in oriented local space
       orientLocal(_la, p.x - pad.cx, p.y - pad.cy, p.z - pad.cz, pad.yaw, pad.pitch);
-      const onPad = Math.abs(_la.x) < pad.hw + 3 && Math.abs(_la.y) < pad.hh + 4 && Math.abs(_la.z) < pad.hd + 3;
+      // Generous volume so it feels snappy
+      const onPad = Math.abs(_la.x) < pad.hw + 5 && Math.abs(_la.y) < pad.hh + 6 && Math.abs(_la.z) < pad.hd + 5;
       if (!onPad || pad.cd > 0) continue;
       const n = tmpV.set(pad.nx, pad.ny, pad.nz).normalize();
       const speed3 = Math.hypot(hv.current.x, vy.current, hv.current.z);
       const launch = Math.max(200, speed3);
       hv.current.set(n.x * launch, 0, n.z * launch);
-      // preserve vertical component of launch along normal
       vy.current = n.y * launch;
-      if (Math.abs(n.y) < 0.2 && Math.abs(vy.current) < 30) vy.current = Math.max(vy.current, 40);
+      if (Math.abs(n.y) < 0.25 && Math.abs(vy.current) < 35) vy.current = Math.max(vy.current, 45);
       grounded.current = false;
-      pad.cd = 0.4;
+      pad.cd = 0.18; // more responsive
     }
     // Fire lines — 5× wider/taller, no self-dmg, can hit boss if under it
     const FIRE_W = 20; // was ~4, then 8; now 5× original
@@ -2952,14 +2953,28 @@ const kd = (e: KeyboardEvent) => {
     });
     abilityPads.forEach((pad, i) => {
       const m = padMeshRefs.current[i];
+      const coil = coilMeshRefs.current[i];
       if (!m) return;
       m.visible = pad.active;
+      if (coil) coil.visible = pad.active;
       if (!pad.active) return;
+      const n = tmpV.set(pad.nx, pad.ny, pad.nz).normalize();
       m.position.set(pad.cx, pad.cy, pad.cz);
-      // Face along spring normal; visual is a disk (hitbox stays oriented box)
-      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tmpV.set(pad.nx, pad.ny, pad.nz).normalize());
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
       const rad = Math.max(pad.hw, pad.hd);
       m.scale.set(rad * 2, 1, rad * 2);
+      // Silver coil on the BACK of the pad (opposite launch), length ~1.5× wall thickness
+      if (coil) {
+        const wallThick = TABLE_W; // full wall thickness
+        const coilLen = wallThick * 1.5;
+        coil.position.set(
+          pad.cx - n.x * (coilLen * 0.5 + 0.4),
+          pad.cy - n.y * (coilLen * 0.5 + 0.4),
+          pad.cz - n.z * (coilLen * 0.5 + 0.4),
+        );
+        coil.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n.clone().negate());
+        coil.scale.set(rad * 0.55, coilLen, rad * 0.55);
+      }
     });
     abilityFires.forEach((f, i) => {
       const m = fireMeshRefs.current[i];
@@ -3104,10 +3119,17 @@ const kd = (e: KeyboardEvent) => {
         </mesh>
       ))}
       {abilityPads.map((_, i) => (
-        <mesh key={`ap${i}`} ref={(m) => { padMeshRefs.current[i] = m; }} visible={false}>
-          <cylinderGeometry args={[0.5, 0.5, 0.12, 28]} />
-          <meshStandardMaterial color="#3cff70" emissive="#1a8a40" emissiveIntensity={1.1} />
-        </mesh>
+        <group key={`ap${i}`}>
+          <mesh ref={(m) => { padMeshRefs.current[i] = m; }} visible={false}>
+            <cylinderGeometry args={[0.5, 0.5, 0.12, 28]} />
+            <meshStandardMaterial color="#3cff70" emissive="#1a8a40" emissiveIntensity={1.1} />
+          </mesh>
+          {/* Decorative silver coil on the back (non-pad side) */}
+          <mesh ref={(m) => { coilMeshRefs.current[i] = m; }} visible={false}>
+            <cylinderGeometry args={[0.22, 0.28, 1, 10, 1, true]} />
+            <meshStandardMaterial color="#c0c7d1" metalness={0.95} roughness={0.25} emissive="#8a929c" emissiveIntensity={0.15} side={THREE.DoubleSide} />
+          </mesh>
+        </group>
       ))}
       {abilityFires.map((_, i) => (
         <mesh key={`af${i}`} ref={(m) => { fireMeshRefs.current[i] = m; }} visible={false}>

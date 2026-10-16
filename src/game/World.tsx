@@ -397,6 +397,19 @@ export function World() {
   const tutKills = useRef(0);
   const tutBlueSpawn = useRef(0);
   const abilityReq = useRef(false);
+  const teleportRef = useRef({
+    charging: false,
+    chargeT: 0,
+    chargeMax: 0.7,
+    target: new THREE.Vector3(),
+    origin: new THREE.Vector3(),
+    canRewind: false,
+    rewindUsed: false,
+    pendingStun: new Set<string>(),
+    stunIds: new Set<string>(),
+    stunUntil: 0,
+  });
+  const teleportMeshRef = useRef<THREE.Mesh | null>(null);
   const grappleOnPad = useRef(-1); // pad index if grappling a trampoline, else -1
   const grappleOnWall = useRef(-1);
   const snapRef = useRef<EntSnap | null>(null);
@@ -1360,6 +1373,46 @@ const kd = (e: KeyboardEvent) => {
     if (abilityReq.current && G.phase === "playing" && G.locked && !G.freecam && G.countdown <= 0.6 && G.stun <= 0 && !G.pvpDead && !G.campaignDead) {
       abilityReq.current = false;
       const ab = getAbility();
+      const tp = teleportRef.current;
+      if (ab === "teleport" && !G.abilityLocked && !G.parryLocked) {
+        if (tp.charging) {
+          tp.charging = false;
+          tp.pendingStun.clear();
+        } else if (G.abilityCd > 0 && tp.canRewind && !tp.rewindUsed) {
+          p.copy(tp.origin);
+          hv.current.set(0, 0, 0);
+          vy.current = 0;
+          tp.rewindUsed = true;
+          tp.canRewind = false;
+        } else if (G.abilityCd <= 0 && !tp.charging) {
+          const look = new THREE.Vector3();
+          cam.getWorldDirection(look);
+          const maxR = cfg.grapple(GRAPPLE_MAX) * 3.5;
+          let hitPt: THREE.Vector3 | null = null;
+          if (staticRef.current) {
+            const rc = new THREE.Raycaster(cam.position.clone(), look, 0.5, maxR);
+            const hit = rc.intersectObject(staticRef.current, true)[0];
+            if (hit) hitPt = hit.point.clone();
+          }
+          if (!hitPt) {
+            hitPt = cam.position.clone().addScaledVector(look, maxR);
+            if (look.y < -0.05) {
+              const tHit = -cam.position.y / look.y;
+              if (tHit > 0.5 && tHit < maxR) hitPt = cam.position.clone().addScaledVector(look, tHit);
+            }
+          }
+          if (hitPt) {
+            hitPt.addScaledVector(look, -PLAYER_R * 2);
+            tp.charging = true;
+            tp.chargeT = 0;
+            tp.target.copy(hitPt);
+            tp.origin.copy(p);
+            tp.pendingStun.clear();
+            tp.canRewind = false;
+            tp.rewindUsed = false;
+          }
+        }
+      } else {
       const can = G.abilityCd <= 0 && G.abilityCharges > 0 && !G.abilityLocked && !G.parryLocked;
       if (can) {
         const yaw = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ").y;
@@ -1415,7 +1468,7 @@ const kd = (e: KeyboardEvent) => {
               slot.t = 5;
               slot.traveled = 0;
               G.abilityCharges = 0;
-              G.abilityCd = 4;
+              G.abilityCd = 3; // air fireball CD
             }
           } else {
             const slot = abilityFires.find((f) => !f.active);
@@ -1435,6 +1488,7 @@ const kd = (e: KeyboardEvent) => {
           }
         }
       } // end if (can)
+      } // end non-teleport
     } else {
       abilityReq.current = false;
     }
@@ -1483,7 +1537,7 @@ const kd = (e: KeyboardEvent) => {
         const tb = tables[i]!;
         if (!tb.alive || nearSeg3(tb.pos.x, tb.pos.y + 2, tb.pos.z) >= FIRE_W + 3 * tb.s) continue;
         const id = `t${i}`;
-        if (!fire.stung.has(id)) { fire.stung.add(id); hitTable(tb, 10); }
+        if (!fire.stung.has(id)) { fire.stung.add(id); hitTable(tb, 15); }
         const acc = (fire.tickAcc.get(id) ?? 0) + dt;
         if (acc >= 0.1) { fire.tickAcc.set(id, acc - 0.1); hitTable(tb, 2); }
         else fire.tickAcc.set(id, acc);
@@ -1492,7 +1546,7 @@ const kd = (e: KeyboardEvent) => {
         const u = blues[i]!;
         if (!u.alive || nearSeg3(u.pos.x, 2, u.pos.z) >= FIRE_W) continue;
         const id = `b${i}`;
-        if (!fire.stung.has(id)) { fire.stung.add(id); hitBlue(u, 10); }
+        if (!fire.stung.has(id)) { fire.stung.add(id); hitBlue(u, 15); }
         const acc = (fire.tickAcc.get(id) ?? 0) + dt;
         if (acc >= 0.1) { fire.tickAcc.set(id, acc - 0.1); hitBlue(u, 2); }
         else fire.tickAcc.set(id, acc);
@@ -1513,66 +1567,135 @@ const kd = (e: KeyboardEvent) => {
         if (nearSeg3(pr.x, pr.y + 2, pr.z) >= FIRE_W) continue;
         if (!fire.stung.has(pr.id)) {
           fire.stung.add(pr.id);
-          hitPeer(pr.id, 10, true);
-          noteDmg(10, pr.id, pr.x, pr.y + 2, pr.z);
+          hitPeer(pr.id, 15, true);
+          noteDmg(15, pr.id, pr.x, pr.y + 2, pr.z);
         }
         const acc = (fire.tickAcc.get(pr.id) ?? 0) + dt;
         if (acc >= 0.1) { fire.tickAcc.set(pr.id, acc - 0.1); hitPeer(pr.id, 2, false); }
         else fire.tickAcc.set(pr.id, acc);
       }
     }
-    // Fireballs (air fire)
+    // Fireballs (air fire) — same flight/collision as F-bomb, 0.5× blast + burn
     for (const fb of fireballs) {
       if (!fb.active) continue;
-      const step = fb.vel.clone().multiplyScalar(dt);
-      fb.pos.add(step);
-      fb.traveled += step.length();
       fb.t -= dt;
-      if (fb.t <= 0 || fb.traveled > BOMB_R * 1.2 || fb.pos.y < -5) { fb.active = false; continue; }
-      // hit tables
-      let boom = false;
-      const hitR = BOMB_R * 0.5; // same bomb hitbox, half size
-      for (let i = 0; i < tables.length; i++) {
-        const tb = tables[i]!;
-        if (!tb.alive) continue;
-        if (fb.pos.distanceTo(tmpV.copy(tb.pos).setY(tb.pos.y + 2 * tb.s)) < hitR * 0.15 + 3 * tb.s) {
-          hitTable(tb, BOMB_DMG);
-          burns.current.set(`t${i}`, { t: 4, lx: tb.pos.x, ly: tb.pos.y, lz: tb.pos.z, acc: 0 });
-          G.burnBuff = 4; // +2 dmg on your next hits until burn ends
-          boom = true;
+      if (fb.t <= 0 || fb.pos.y < -5) { fb.active = false; continue; }
+      const travel = fb.vel.length() * dt;
+      const steps = Math.max(1, Math.ceil(travel / 1.5));
+      const stepV = fb.vel.clone().multiplyScalar(dt / steps);
+      const blastR = BOMB_R * 0.5;
+      for (let si = 0; si < steps && fb.active; si++) {
+        fb.pos.add(stepV);
+        fb.traveled += stepV.length();
+        const q = fb.pos;
+        let hit = q.y <= 0.3 || q.y >= ROOM.h || Math.hypot(q.x, q.z) >= R - 0.5 || inSolid(q);
+        if (!hit) hit = tables.some((tb) => tb.alive && q.distanceTo(tmpV.copy(tb.pos).setY(tb.pos.y + 2.6 * tb.s)) < 3.4 * tb.s);
+        if (!hit && bossLive()) {
+          bossBox(_mn, _mx);
+          hit = q.x > _mn.x && q.x < _mx.x && q.y > _mn.y && q.y < _mx.y && q.z > _mn.z && q.z < _mx.z;
+        }
+        if (!hit) {
+          for (const pr of NET.peers.values()) {
+            if (pr.dead || pr.id === myId()) continue;
+            if (q.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) < 4) { hit = true; break; }
+          }
+        }
+        if (hit) {
+          const at = q.clone();
+          for (let i = 0; i < tables.length; i++) {
+            const tb = tables[i]!;
+            if (!tb.alive || tb.pos.distanceTo(at) >= blastR) continue;
+            hitTable(tb, BOMB_DMG);
+            burns.current.set(`t${i}`, { t: 4, lx: tb.pos.x, ly: tb.pos.y, lz: tb.pos.z, acc: 0 });
+            G.burnBuff = 4;
+          }
+          for (let i = 0; i < blues.length; i++) {
+            const u = blues[i]!;
+            if (!u.alive || u.pos.distanceTo(at) >= blastR) continue;
+            hitBlue(u, BOMB_DMG);
+            burns.current.set(`b${i}`, { t: 4, lx: u.pos.x, ly: 0, lz: u.pos.z, acc: 0 });
+            G.burnBuff = 4;
+          }
+          if (bossLive() && b.landed && distToBossBox(at) < blastR) {
+            hitBoss(Math.round(BOMB_DMG / DMG));
+            burns.current.set("boss", { t: 4, lx: b.pos.x, ly: b.y, lz: b.pos.z, acc: 0 });
+            G.burnBuff = 4;
+          }
+          for (const pr of NET.peers.values()) {
+            if (pr.dead || pr.id === myId()) continue;
+            if (tmpV.set(pr.x, pr.y, pr.z).distanceTo(at) >= blastR) continue;
+            hitPeer(pr.id, BOMB_DMG, true);
+            noteDmg(BOMB_DMG, pr.id, pr.x, pr.y + 2, pr.z);
+            burns.current.set(pr.id, { t: 4, lx: pr.x, ly: pr.y, lz: pr.z, acc: 0 });
+            G.burnBuff = 4;
+          }
+          boomFx(at, blastR, 0.45);
+          G.shake = Math.max(G.shake, 0.5);
+          fb.active = false;
         }
       }
-      for (let i = 0; i < blues.length; i++) {
-        const u = blues[i]!;
-        if (!u.alive) continue;
-        if (fb.pos.distanceTo(tmpV.copy(u.pos).setY(2)) < hitR * 0.12 + 4) {
-          hitBlue(u, BOMB_DMG);
-          burns.current.set(`b${i}`, { t: 4, lx: u.pos.x, ly: 0, lz: u.pos.z, acc: 0 });
-          G.burnBuff = 4;
-          boom = true;
+      if (fb.active && fb.traveled > BOMB_R * 2.5) fb.active = false;
+    }
+
+    // Teleport wind-up
+    {
+      const tp = teleportRef.current;
+      if (tp.charging) {
+        tp.chargeT += dt;
+        const scale = TABLE_W * (1 + Math.min(1, tp.chargeT / tp.chargeMax));
+        const r = scale * 0.55;
+        for (let i = 0; i < tables.length; i++) {
+          const tb = tables[i]!;
+          if (tb.alive && tb.pos.distanceTo(tp.target) < r + 3 * tb.s) tp.pendingStun.add(`t${i}`);
         }
-      }
-      if (bossLive() && b.landed && distToBossBox(fb.pos) < hitR * 0.2) {
-        hitBoss(Math.round(BOMB_DMG / DMG));
-        burns.current.set("boss", { t: 4, lx: b.pos.x, ly: b.y, lz: b.pos.z, acc: 0 });
-        G.burnBuff = 4;
-        boom = true;
-      }
-      for (const pr of NET.peers.values()) {
-        if (pr.dead || pr.id === myId()) continue;
-        if (fb.pos.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) < hitR * 0.12) {
-          hitPeer(pr.id, 10, true);
-          noteDmg(10, pr.id, pr.x, pr.y + 2, pr.z);
-          burns.current.set(pr.id, { t: 4, lx: pr.x, ly: pr.y, lz: pr.z, acc: 0 });
-          G.burnBuff = 4;
-          boom = true;
+        for (let i = 0; i < blues.length; i++) {
+          const u = blues[i]!;
+          if (u.alive && u.pos.distanceTo(tp.target) < r + 4) tp.pendingStun.add(`b${i}`);
         }
-      }
-      if (boom) {
-        boomFx(fb.pos.clone(), hitR * 0.35, 0.35);
-        fb.active = false;
+        if (bossLive() && b.landed && distToBossBox(tp.target) < r) tp.pendingStun.add("boss");
+        for (const pr of NET.peers.values()) {
+          if (!pr.dead && pr.id !== myId() && tmpV.set(pr.x, pr.y, pr.z).distanceTo(tp.target) < r + 4) tp.pendingStun.add(pr.id);
+        }
+        if (tp.chargeT >= tp.chargeMax) {
+          p.copy(tp.target);
+          hv.current.set(0, 0, 0);
+          vy.current = 0;
+          tp.charging = false;
+          G.abilityCd = 5;
+          G.abilityCharges = 0;
+          tp.canRewind = true;
+          tp.rewindUsed = false;
+          tp.stunIds = new Set(tp.pendingStun);
+          tp.stunUntil = performance.now() / 1000 + 1;
+          if (tp.stunIds.has("boss")) b.lockT = Math.max(b.lockT, 1);
+          tp.pendingStun.clear();
+          G.shake = Math.max(G.shake, 0.3);
+        }
       }
     }
+
+
+    // Teleport post-stun: freeze marked enemies until 1s after arrival
+    {
+      const tp = teleportRef.current;
+      if (tp.stunUntil > 0 && performance.now() / 1000 < tp.stunUntil) {
+        for (const id of tp.stunIds) {
+          if (id.startsWith("t")) {
+            const tb = tables[+id.slice(1)];
+            if (tb?.alive) { /* hold position */ tb.dashT = Math.max(tb.dashT, 0.2); }
+          } else if (id.startsWith("b") && id !== "boss") {
+            const u = blues[+id.slice(1)];
+            if (u?.alive) { u.dash.set(0, 0, 0); u.dashT = 0.5; }
+          } else if (id === "boss") {
+            b.lockT = Math.max(b.lockT, 0.15);
+          }
+        }
+      } else if (tp.stunUntil > 0) {
+        tp.stunUntil = 0;
+        tp.stunIds.clear();
+      }
+    }
+
     // Burn DoT: 3 dmg / 0.1s when target moves; bots burn too; +2 hit buff while any burn active
     if (G.burnBuff > 0) {
       G.burnBuff = Math.max(0, G.burnBuff - dt);
@@ -2803,6 +2926,15 @@ const kd = (e: KeyboardEvent) => {
       m.visible = fb.active;
       if (fb.active) m.position.copy(fb.pos);
     });
+    if (teleportMeshRef.current) {
+      const tp = teleportRef.current;
+      teleportMeshRef.current.visible = !!tp.charging;
+      if (tp.charging) {
+        const s = TABLE_W * (1 + Math.min(1, tp.chargeT / tp.chargeMax));
+        teleportMeshRef.current.position.copy(tp.target);
+        teleportMeshRef.current.scale.setScalar(s);
+      }
+    }
 
     if (ropeRef.current) {
       ropeRef.current.visible = G.grappling;
@@ -2897,10 +3029,14 @@ const kd = (e: KeyboardEvent) => {
       ))}
       {fireballs.map((_, i) => (
         <mesh key={`fb${i}`} ref={(m) => { fireballMeshRefs.current[i] = m; }} visible={false}>
-          <sphereGeometry args={[0.9, 12, 10]} />
+          <sphereGeometry args={[0.8, 12, 10]} />
           <meshStandardMaterial color="#ff1a00" emissive="#cc0000" emissiveIntensity={4} />
         </mesh>
       ))}
+      <mesh ref={(m) => { teleportMeshRef.current = m; }} visible={false}>
+        <sphereGeometry args={[1, 20, 16]} />
+        <meshStandardMaterial color="#a855f7" emissive="#7c3aed" emissiveIntensity={2.5} transparent opacity={0.75} />
+      </mesh>
 
       <HomeShowcase />
       <RemotePlayers />

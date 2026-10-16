@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export type AbilityId = "wall" | "trampoline" | "fire";
+export type AbilityId = "wall" | "trampoline" | "fire" | "teleport";
 
 export type AbilityDef = {
   id: AbilityId;
@@ -14,19 +14,25 @@ export const ABILITY_LIST: AbilityDef[] = [
     id: "wall",
     name: "Wall",
     icon: "🧱",
-    desc: "Place a wooden wall in front of you (boss-height, 1 table thick). 4 uses, then 3s cooldown. Walls last 2s and have no friction.",
+    desc: "Omnidirectional wooden cover. 4 uses → 3s cooldown. Grappleable.",
   },
   {
     id: "trampoline",
     name: "Trampoline",
     icon: "🟢",
-    desc: "Stick a bounce pad on a surface within grapple range (faces outward). 3 uses, then 4s cooldown. Pads last 3s.",
+    desc: "Omnidirectional spring pad (0.5× wall). 3 uses → 4s cooldown. Grapple pulls you in.",
   },
   {
     id: "fire",
     name: "Fire",
     icon: "🔥",
-    desc: "Launch a fire line up to 2× grapple range. Stuns + 10 damage, ticks while standing in it, then slows leavers. 4s cooldown, lasts 3s.",
+    desc: "Ground: fire line 15 dmg (4s CD). Air: bomb-like fireball with burn (3s CD).",
+  },
+  {
+    id: "teleport",
+    name: "Teleport",
+    icon: "🟣",
+    desc: "Mark a point (3.5× grapple range). Purple ball grows, then you blink. Cancel free; rewind once during CD.",
   },
 ];
 
@@ -37,7 +43,7 @@ const subs = new Set<() => void>();
 function load() {
   try {
     const v = localStorage.getItem(STORE);
-    if (v === "wall" || v === "trampoline" || v === "fire") selected = v;
+    if (v === "wall" || v === "trampoline" || v === "fire" || v === "teleport") selected = v;
   } catch { /* ignore */ }
 }
 load();

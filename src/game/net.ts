@@ -5,6 +5,7 @@ import { setTodOverride, type TimeOfDay } from "./settings";
 import { displayName, getAccount, lookupUsername } from "./account";
 import { G, goHome, resetGame, type Mode } from "./state";
 import { SKIN, type Skin } from "./skins";
+import { onRemoteChat, clearChat } from "./chat";
 
 /**
  * Online play runs on realtime channels. Each player's browser simulates its own
@@ -174,6 +175,7 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
     bump();
   });
   ch.on("broadcast", { event: "shards" }, ({ payload }) => { G.shardProgress = payload.n as number; });
+  ch.on("broadcast", { event: "chat" }, ({ payload }) => { onRemoteChat(payload as Record<string, unknown>); });
   ch.on("broadcast", { event: "pickstart" }, ({ payload }) => beginPick(payload.ms as number));
   ch.on("broadcast", { event: "pick" }, ({ payload }) => { picks[payload.id as string] = payload.tod as TimeOfDay; });
   ch.on("broadcast", { event: "start" }, ({ payload }) => onStart(payload as StartMsg));
@@ -238,6 +240,7 @@ export function leaveRoom(full = true) {
   if (pickTimer) clearTimeout(pickTimer);
   if (room) void supabase.removeChannel(room);
   room = null;
+  clearChat();
   lastSkinSent = "";
   lastSkinVer = 0;
   lastSkinAt = 0;

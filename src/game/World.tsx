@@ -824,20 +824,22 @@ export function World() {
         }
         return;
       }
-      // PC: leaving pointer lock — always show cursor; pause if we were playing
+      // PC: leaving pointer lock — always show cursor
       setCursorLocked(false);
+      G.locked = false;
+      G.firing = false;
+      G.scoped = false;
+      keys.current = {};
+      // Chat open: release mouse without pausing
+      if (G.chatOpen) {
+        return;
+      }
       if (G.phase === "playing") {
         G.userPaused = true;
-        G.locked = false;
-        G.firing = false;
-        G.scoped = false;
-        keys.current = {};
         if (G.freecam && !G.campaignDead && !(NET.kind === "lobby" && G.pvpDead && G.lobbyRespawnT > 0)) {
           G.freecam = false;
           G.freecamSpeedIdx = 0;
         }
-      } else {
-        G.locked = false;
       }
     };
     document.addEventListener("pointerlockchange", onLock);
@@ -891,6 +893,7 @@ export function World() {
 const kd = (e: KeyboardEvent) => {
       const tg = e.target as HTMLElement | null;
       if (tg && (tg.tagName === "INPUT" || tg.tagName === "TEXTAREA")) return; // typing in a box
+      if (G.chatOpen) return; // chatting — no game keys / no pause from slash flow
       if (e.code === SETTINGS.keys.jump) e.preventDefault();
       const wasDown = keys.current[e.code];
       keys.current[e.code] = true;
@@ -1472,13 +1475,22 @@ const kd = (e: KeyboardEvent) => {
           } else {
             const slot = abilityPads.find((pad) => !pad.active);
             if (slot) {
-              // 0.5× wall size, same omnidirectional placement
+              // Omnidirectional, but place/orient along velocity when moving (else look)
+              const spd = Math.hypot(hv.current.x, vy.current, hv.current.z);
+              let dir = look.clone();
+              if (spd > 12) {
+                dir.set(hv.current.x, vy.current, hv.current.z).normalize();
+              }
+              const placePad = cam.position.clone().addScaledVector(dir, dist);
+              // Orient pad: yaw/pitch from velocity (or look) so surface is omnidirectional
+              const pYaw = Math.atan2(-dir.x, -dir.z);
+              const pPitch = Math.asin(Math.max(-1, Math.min(1, dir.y)));
               slot.active = true;
-              slot.cx = place.x; slot.cy = place.y; slot.cz = place.z;
-              slot.yaw = yaw; slot.pitch = pitch;
+              slot.cx = placePad.x; slot.cy = placePad.y; slot.cz = placePad.z;
+              slot.yaw = pYaw; slot.pitch = pPitch;
               slot.hw = halfW * 0.5; slot.hh = halfH * 0.5; slot.hd = thick * 0.5;
-              // Pad faces where you look — launches away from you along look
-              slot.nx = look.x; slot.ny = look.y; slot.nz = look.z;
+              // Launch along velocity/look (pad faces where you're going)
+              slot.nx = dir.x; slot.ny = dir.y; slot.nz = dir.z;
               slot.t = 3;
               slot.cd = 0;
               G.abilityCharges--;
@@ -1541,12 +1553,13 @@ const kd = (e: KeyboardEvent) => {
       if (!onPad || pad.cd > 0) continue;
       const n = tmpV.set(pad.nx, pad.ny, pad.nz).normalize();
       const speed3 = Math.hypot(hv.current.x, vy.current, hv.current.z);
-      const launch = Math.max(200, speed3);
+      // Default 350; if already faster than 350, launch at 400
+      const launch = speed3 > 350 ? 400 : 350;
       hv.current.set(n.x * launch, 0, n.z * launch);
       vy.current = n.y * launch;
       if (Math.abs(n.y) < 0.25 && Math.abs(vy.current) < 35) vy.current = Math.max(vy.current, 45);
       grounded.current = false;
-      pad.cd = 0.18; // more responsive
+      pad.cd = 0.18;
     }
     // Fire lines — 5× wider/taller, no self-dmg, can hit boss if under it
     const FIRE_W = 20; // was ~4, then 8; now 5× original
@@ -1931,7 +1944,7 @@ const kd = (e: KeyboardEvent) => {
             grappleOnWall.current = -1;
             const n = tmpV.set(pad.nx, pad.ny, pad.nz).normalize();
             const speed3 = Math.hypot(hv.current.x, vy.current, hv.current.z);
-            const launch = Math.max(200, speed3);
+            const launch = speed3 > 350 ? 400 : 350;
             hv.current.set(n.x * launch, 0, n.z * launch);
             vy.current = n.y * launch;
             if (Math.abs(n.y) < 0.2) vy.current = Math.max(vy.current, 40);

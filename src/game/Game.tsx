@@ -14,6 +14,7 @@ import { getAbility, ABILITY_LIST } from "./abilities";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
 import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
+import { ChatBar, ChatResumeCatcher } from "./ChatBar";
 import { NET, opponentId } from "./net";
 import { useAccount } from "./account";
 
@@ -815,7 +816,9 @@ export function Game() {
           <Scoreboard />
           <PvpEnd />
           <LobbyBar />
-          <Invites />
+          <ChatBar />
+      <ChatResumeCatcher />
+      <Invites />
         </>
       )}
     </div>

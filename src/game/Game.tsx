@@ -585,6 +585,21 @@ function Menu() {
   useTick(100);
   const [showSettings, setShowSettings] = useState(false);
   const phase = G.phase;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Enter" && e.code !== "NumpadEnter") return;
+      if (G.chatOpen) return;
+      if (G.phase !== "playing") return;
+      if (G.locked) return;
+      if (showSettings) return; // don't steal Enter while editing settings
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      resume();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showSettings]);
   if (phase === "lost") {
     return (
       <div className="fixed inset-0 z-20 flex items-center justify-center bg-hud-scrim font-mono text-hud">

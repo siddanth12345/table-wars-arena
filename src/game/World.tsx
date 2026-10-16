@@ -58,6 +58,7 @@ const SUMMON_HP = 2.5;
 const WAVE_H = 0.5 * 3.45 * TABLE_S; // half a table tall
 const WAVE_SPEED = 140;
 const WAVE_DMG = 20;
+const TELEPORT_CD = 2.5;
 const HEALTH_AMOUNT = 10;
 const HEALTH_INTERVAL = 5;
 const HEALTH_LIFE = 10;
@@ -1554,8 +1555,8 @@ const kd = (e: KeyboardEvent) => {
       if (!onPad || pad.cd > 0) continue;
       const n = tmpV.set(pad.nx, pad.ny, pad.nz).normalize();
       const speed3 = Math.hypot(hv.current.x, vy.current, hv.current.z);
-      // Default 350; if already faster than 350, launch at 400
-      const launch = speed3 > 350 ? 400 : 350;
+      // Default 200; if already faster, keep that speed
+      const launch = Math.max(200, speed3);
       hv.current.set(n.x * launch, 0, n.z * launch);
       vy.current = n.y * launch;
       if (Math.abs(n.y) < 0.25 && Math.abs(vy.current) < 35) vy.current = Math.max(vy.current, 45);
@@ -1742,7 +1743,7 @@ const kd = (e: KeyboardEvent) => {
           p.copy(tp.target);
           // do not clear hv / vy
           tp.active = false;
-          G.abilityCd = 2.5; // teleport CD
+          G.abilityCd = TELEPORT_CD; // 2.5s
           G.abilityCharges = 0;
           tp.canRewind = true;
           tp.rewindUsed = false;
@@ -1945,7 +1946,7 @@ const kd = (e: KeyboardEvent) => {
             grappleOnWall.current = -1;
             const n = tmpV.set(pad.nx, pad.ny, pad.nz).normalize();
             const speed3 = Math.hypot(hv.current.x, vy.current, hv.current.z);
-            const launch = speed3 > 350 ? 400 : 350;
+            const launch = Math.max(200, speed3);
             hv.current.set(n.x * launch, 0, n.z * launch);
             vy.current = n.y * launch;
             if (Math.abs(n.y) < 0.2) vy.current = Math.max(vy.current, 40);

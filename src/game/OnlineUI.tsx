@@ -337,7 +337,20 @@ export function PvpEnd() {
 export function OnlinePause({ onSettings }: { onSettings: () => void }) {
   const net = useNet();
   useTick(150);
-  if (!net.online || G.phase !== "playing" || G.locked || G.trainMenu) return null;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Enter" && e.code !== "NumpadEnter") return;
+      if (G.chatOpen || G.locked || G.phase !== "playing") return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      G.userPaused = false;
+      lockPointer();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  if (!net.online || G.phase !== "playing" || G.locked || G.trainMenu || G.chatOpen) return null;
   if (net.kind === "pvp" && net.stage !== "playing" && net.stage !== "roundEnd") return null;
   return (
     <div className="gui fixed inset-0 z-20 flex items-center justify-center bg-hud-scrim/60 font-mono text-hud" onClick={(e) => { if (e.target === e.currentTarget) { if (G.countdown <= 0) G.countdown = 0; lockPointer(); } }}>

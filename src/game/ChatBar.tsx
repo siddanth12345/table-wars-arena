@@ -134,7 +134,8 @@ export function ChatBar() {
                 e.stopPropagation();
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  onSend();
+                  if (draft.trim()) onSend();
+                  else closeChatResume(true); // empty Enter → back to game
                 }
                 if (e.key === "Escape") {
                   e.preventDefault();

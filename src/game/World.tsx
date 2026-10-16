@@ -1009,6 +1009,27 @@ const kd = (e: KeyboardEvent) => {
             }
           }
         }
+        // If nothing on the crosshair ray, auto-grab nearest trampoline in grapple range
+        if (!bestPt) {
+          let nearD = maxG;
+          let nearI = -1;
+          for (let i = 0; i < abilityPads.length; i++) {
+            const pad = abilityPads[i]!;
+            if (!pad.active) continue;
+            const d = origin.distanceTo(tmpV.set(pad.cx, pad.cy, pad.cz));
+            if (d < nearD) {
+              nearD = d;
+              nearI = i;
+            }
+          }
+          if (nearI >= 0) {
+            const pad = abilityPads[nearI]!;
+            bestPt = new THREE.Vector3(pad.cx, pad.cy, pad.cz);
+            bestDist = nearD;
+            bestPad = nearI;
+            bestWall = -1;
+          }
+        }
         if (bestPt) {
           anchor.current.copy(bestPt);
           ropeLen.current = bestDist * 0.9;

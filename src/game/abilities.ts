@@ -26,7 +26,7 @@ export const ABILITY_LIST: AbilityDef[] = [
     id: "fire",
     name: "Fire",
     icon: "🔥",
-    desc: "Ground: fire line 15 dmg (4s CD). Air: bomb-like fireball with burn (3s CD).",
+    desc: "Ground: fire line 10 dmg (5s CD). Air: bomb-like fireball with burn (4s CD).",
   },
   {
     id: "teleport",

@@ -1652,7 +1652,7 @@ const kd = (e: KeyboardEvent) => {
               slot.traveled = 0;
               slot.netId = `${myId()}-fb-${Date.now()}`;
               G.abilityCharges = 0;
-              G.abilityCd = 3; // air fireball CD
+              G.abilityCd = 4; // air fireball CD
               if (NET.online) sendNet("vfx", { k: "fball", id: slot.netId, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z, vx: slot.vel.x, vy: slot.vel.y, vz: slot.vel.z, life: 5 });
             }
           } else {
@@ -1669,7 +1669,7 @@ const kd = (e: KeyboardEvent) => {
               slot.tickAcc.clear();
               slot.netId = `${myId()}-f-${Date.now()}`;
               G.abilityCharges = 0;
-              G.abilityCd = 4;
+              G.abilityCd = 5;
               if (NET.online) sendNet("vfx", { k: "fire", id: slot.netId, ax: slot.ax, ay: slot.ay, az: slot.az, bx: slot.bx, by: slot.by, bz: slot.bz, life: 3 });
             }
           }
@@ -1729,7 +1729,7 @@ const kd = (e: KeyboardEvent) => {
         const tb = tables[i]!;
         if (!tb.alive || nearSeg3(tb.pos.x, tb.pos.y + 2, tb.pos.z) >= FIRE_W + 3 * tb.s) continue;
         const id = `t${i}`;
-        if (!fire.stung.has(id)) { fire.stung.add(id); hitTable(tb, 15); }
+        if (!fire.stung.has(id)) { fire.stung.add(id); hitTable(tb, 10); }
         const acc = (fire.tickAcc.get(id) ?? 0) + dt;
         if (acc >= 0.1) { fire.tickAcc.set(id, acc - 0.1); hitTable(tb, 2); }
         else fire.tickAcc.set(id, acc);
@@ -1738,7 +1738,7 @@ const kd = (e: KeyboardEvent) => {
         const u = blues[i]!;
         if (!u.alive || nearSeg3(u.pos.x, 2, u.pos.z) >= FIRE_W) continue;
         const id = `b${i}`;
-        if (!fire.stung.has(id)) { fire.stung.add(id); hitBlue(u, 15); }
+        if (!fire.stung.has(id)) { fire.stung.add(id); hitBlue(u, 10); }
         const acc = (fire.tickAcc.get(id) ?? 0) + dt;
         if (acc >= 0.1) { fire.tickAcc.set(id, acc - 0.1); hitBlue(u, 2); }
         else fire.tickAcc.set(id, acc);
@@ -1759,8 +1759,8 @@ const kd = (e: KeyboardEvent) => {
         if (nearSeg3(pr.x, pr.y + 2, pr.z) >= FIRE_W) continue;
         if (!fire.stung.has(pr.id)) {
           fire.stung.add(pr.id);
-          hitPeer(pr.id, 15, true);
-          noteDmg(15, pr.id, pr.x, pr.y + 2, pr.z);
+          hitPeer(pr.id, 10, true);
+          noteDmg(10, pr.id, pr.x, pr.y + 2, pr.z);
         }
         const acc = (fire.tickAcc.get(pr.id) ?? 0) + dt;
         if (acc >= 0.1) { fire.tickAcc.set(pr.id, acc - 0.1); hitPeer(pr.id, 2, false); }

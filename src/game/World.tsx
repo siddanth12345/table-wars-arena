@@ -398,9 +398,12 @@ export function World() {
   const tutBlueSpawn = useRef(0);
   const abilityReq = useRef(false);
   const teleportRef = useRef({
-    charging: false,
+    active: false,
+    phase: "fly" as "fly" | "expand",
     chargeT: 0,
     chargeMax: 0.7,
+    pos: new THREE.Vector3(),
+    vel: new THREE.Vector3(),
     target: new THREE.Vector3(),
     origin: new THREE.Vector3(),
     canRewind: false,
@@ -409,6 +412,8 @@ export function World() {
     stunIds: new Set<string>(),
     stunUntil: 0,
   });
+  /** ability-applied stun timers (seconds left) for bots — real freeze */
+  const abilityStun = useRef(new Map<string, number>());
   const teleportMeshRef = useRef<THREE.Mesh | null>(null);
   const grappleOnPad = useRef(-1); // pad index if grappling a trampoline, else -1
   const grappleOnWall = useRef(-1);
@@ -1375,16 +1380,16 @@ const kd = (e: KeyboardEvent) => {
       const ab = getAbility();
       const tp = teleportRef.current;
       if (ab === "teleport" && !G.abilityLocked && !G.parryLocked) {
-        if (tp.charging) {
-          tp.charging = false;
+        if (tp.active) {
+          // Cancel free during fly/expand — no cooldown
+          tp.active = false;
           tp.pendingStun.clear();
         } else if (G.abilityCd > 0 && tp.canRewind && !tp.rewindUsed) {
           p.copy(tp.origin);
-          hv.current.set(0, 0, 0);
-          vy.current = 0;
+          // keep velocity on rewind too
           tp.rewindUsed = true;
           tp.canRewind = false;
-        } else if (G.abilityCd <= 0 && !tp.charging) {
+        } else if (G.abilityCd <= 0 && !tp.active) {
           const look = new THREE.Vector3();
           cam.getWorldDirection(look);
           const maxR = cfg.grapple(GRAPPLE_MAX) * 3.5;
@@ -1403,8 +1408,11 @@ const kd = (e: KeyboardEvent) => {
           }
           if (hitPt) {
             hitPt.addScaledVector(look, -PLAYER_R * 2);
-            tp.charging = true;
+            tp.active = true;
+            tp.phase = "fly";
             tp.chargeT = 0;
+            tp.pos.copy(cam.position).addScaledVector(look, 1.5);
+            tp.vel.copy(look).multiplyScalar(BULLET_SPEED); // launch like a bullet
             tp.target.copy(hitPt);
             tp.origin.copy(p);
             tp.pendingStun.clear();
@@ -1637,62 +1645,81 @@ const kd = (e: KeyboardEvent) => {
       if (fb.active && fb.traveled > BOMB_R * 2.5) fb.active = false;
     }
 
-    // Teleport wind-up
+    // Teleport: bullet flight → expand (2× table→4×) → blink (keep velocity) + 2s bot stun
     {
       const tp = teleportRef.current;
-      if (tp.charging) {
-        tp.chargeT += dt;
-        const scale = TABLE_W * (1 + Math.min(1, tp.chargeT / tp.chargeMax));
-        const r = scale * 0.55;
+      // tick ability stun timers
+      for (const [id, left] of [...abilityStun.current.entries()]) {
+        const n = left - dt;
+        if (n <= 0) abilityStun.current.delete(id);
+        else abilityStun.current.set(id, n);
+      }
+      const markStun = (id: string) => { tp.pendingStun.add(id); };
+      const ballHitCheck = (center: THREE.Vector3, radius: number) => {
         for (let i = 0; i < tables.length; i++) {
           const tb = tables[i]!;
-          if (tb.alive && tb.pos.distanceTo(tp.target) < r + 3 * tb.s) tp.pendingStun.add(`t${i}`);
+          if (tb.alive && center.distanceTo(tmpV.copy(tb.pos).setY(tb.pos.y + 2 * tb.s)) < radius + 3 * tb.s) markStun(`t${i}`);
         }
         for (let i = 0; i < blues.length; i++) {
           const u = blues[i]!;
-          if (u.alive && u.pos.distanceTo(tp.target) < r + 4) tp.pendingStun.add(`b${i}`);
+          if (u.alive && center.distanceTo(tmpV.copy(u.pos).setY(2)) < radius + 4) markStun(`b${i}`);
         }
-        if (bossLive() && b.landed && distToBossBox(tp.target) < r) tp.pendingStun.add("boss");
+        if (bossLive() && b.landed && distToBossBox(center) < radius + 2) markStun("boss");
         for (const pr of NET.peers.values()) {
-          if (!pr.dead && pr.id !== myId() && tmpV.set(pr.x, pr.y, pr.z).distanceTo(tp.target) < r + 4) tp.pendingStun.add(pr.id);
+          if (!pr.dead && pr.id !== myId() && center.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) < radius + 4) markStun(pr.id);
         }
+      };
+      if (tp.active && tp.phase === "fly") {
+        const maxR = cfg.grapple(GRAPPLE_MAX) * 3.5;
+        const travel = tp.vel.length() * dt;
+        const steps = Math.max(1, Math.ceil(travel / 1.5));
+        const stepV = tp.vel.clone().multiplyScalar(dt / steps);
+        let arrived = false;
+        for (let si = 0; si < steps && tp.active && tp.phase === "fly"; si++) {
+          tp.pos.add(stepV);
+          // small projectile radius for contact stun during flight
+          ballHitCheck(tp.pos, TABLE_W * 0.55);
+          const toT = tmpV.copy(tp.target).sub(tp.pos);
+          if (toT.length() < 4 || tp.pos.distanceTo(tp.origin) >= maxR) {
+            arrived = true;
+            break;
+          }
+          // solid impact → stop and expand here
+          if (tp.pos.y <= 0.3 || inSolid(tp.pos) || Math.hypot(tp.pos.x, tp.pos.z) >= R - 1) {
+            arrived = true;
+            break;
+          }
+        }
+        if (arrived) {
+          tp.phase = "expand";
+          tp.chargeT = 0;
+          // snap target to current pos for expand center
+          tp.target.copy(tp.pos);
+        }
+      } else if (tp.active && tp.phase === "expand") {
+        tp.chargeT += dt;
+        // 2× bigger than before: start 2× table, end 4× table
+        const scale = TABLE_W * 2 * (1 + Math.min(1, tp.chargeT / tp.chargeMax));
+        ballHitCheck(tp.target, scale * 0.55);
         if (tp.chargeT >= tp.chargeMax) {
+          // Teleport — KEEP velocity
           p.copy(tp.target);
-          hv.current.set(0, 0, 0);
-          vy.current = 0;
-          tp.charging = false;
+          // do not clear hv / vy
+          tp.active = false;
           G.abilityCd = 5;
           G.abilityCharges = 0;
           tp.canRewind = true;
           tp.rewindUsed = false;
+          // 2s stun after arrival for everyone marked
+          for (const id of tp.pendingStun) {
+            abilityStun.current.set(id, 2);
+            if (id === "boss") b.lockT = Math.max(b.lockT, 2);
+          }
           tp.stunIds = new Set(tp.pendingStun);
-          tp.stunUntil = performance.now() / 1000 + 1;
-          if (tp.stunIds.has("boss")) b.lockT = Math.max(b.lockT, 1);
+          tp.stunUntil = 2;
           tp.pendingStun.clear();
           G.shake = Math.max(G.shake, 0.3);
         }
-      }
-    }
-
-
-    // Teleport post-stun: freeze marked enemies until 1s after arrival
-    {
-      const tp = teleportRef.current;
-      if (tp.stunUntil > 0 && performance.now() / 1000 < tp.stunUntil) {
-        for (const id of tp.stunIds) {
-          if (id.startsWith("t")) {
-            const tb = tables[+id.slice(1)];
-            if (tb?.alive) { /* hold position */ tb.dashT = Math.max(tb.dashT, 0.2); }
-          } else if (id.startsWith("b") && id !== "boss") {
-            const u = blues[+id.slice(1)];
-            if (u?.alive) { u.dash.set(0, 0, 0); u.dashT = 0.5; }
-          } else if (id === "boss") {
-            b.lockT = Math.max(b.lockT, 0.15);
-          }
-        }
-      } else if (tp.stunUntil > 0) {
-        tp.stunUntil = 0;
-        tp.stunIds.clear();
       }
     }
 
@@ -2073,8 +2100,10 @@ const kd = (e: KeyboardEvent) => {
       }
 
       // --- tables AI (followers mirror the host's tables instead) ---
-      for (const t of tables) {
+      for (let ti = 0; ti < tables.length; ti++) {
+        const t = tables[ti]!;
         if (!t.alive || follower) continue;
+        if ((abilityStun.current.get(`t${ti}`) ?? 0) > 0) continue; // teleport/ability stun
         const bp = t.pos;
         const speed = (5 + (1 - t.hp / (t.summoned ? SUMMON_HP : TABLE_HP)) * 9) * 4;
         const toT = tmpV.copy(t.target).sub(bp).setY(0);
@@ -2235,8 +2264,10 @@ const kd = (e: KeyboardEvent) => {
       }
 
       // --- blue chaser tables ---
-      for (const u of blues) {
+      for (let bi = 0; bi < blues.length; bi++) {
+        const u = blues[bi]!;
         if (!u.alive || follower) continue;
+        if ((abilityStun.current.get(`b${bi}`) ?? 0) > 0) continue; // teleport stun freeze
         // chase the closest player
         let cx = p.x, cz = p.z, cid: string | null = null, cd = Math.hypot(p.x - u.pos.x, p.z - u.pos.z);
         if (sharesEnemies()) for (const pr of NET.peers.values()) {
@@ -2928,11 +2959,16 @@ const kd = (e: KeyboardEvent) => {
     });
     if (teleportMeshRef.current) {
       const tp = teleportRef.current;
-      teleportMeshRef.current.visible = !!tp.charging;
-      if (tp.charging) {
-        const s = TABLE_W * (1 + Math.min(1, tp.chargeT / tp.chargeMax));
-        teleportMeshRef.current.position.copy(tp.target);
-        teleportMeshRef.current.scale.setScalar(s);
+      teleportMeshRef.current.visible = !!tp.active;
+      if (tp.active) {
+        if (tp.phase === "fly") {
+          teleportMeshRef.current.position.copy(tp.pos);
+          teleportMeshRef.current.scale.setScalar(TABLE_W * 2 * 0.35); // visible projectile, 2× baseline
+        } else {
+          const s = TABLE_W * 2 * (1 + Math.min(1, tp.chargeT / tp.chargeMax));
+          teleportMeshRef.current.position.copy(tp.target);
+          teleportMeshRef.current.scale.setScalar(s);
+        }
       }
     }
 
@@ -2956,6 +2992,7 @@ const kd = (e: KeyboardEvent) => {
   const flashRef = useRef<THREE.PointLight>(null);
   const fxLights = useRef<(THREE.PointLight | null)[]>([]);
   const botLights = useRef<(THREE.PointLight | null)[]>([]);
+  const abilityLightRefs = useRef<(THREE.PointLight | null)[]>([]);
   useFrame(() => {
     const L = lampIntensity(settings.timeOfDay);
     const playing = G.phase === "playing";
@@ -2993,6 +3030,33 @@ const kd = (e: KeyboardEvent) => {
       l.intensity = v && playing ? L * (settings.timeOfDay === "evening" ? 0.1 : 0.3) : 0;
       if (v) l.position.set(v.x, v.y + (i === 0 && G.stage === "boss" ? 0 : 6), v.z);
     });
+    // Ability props emit table-strength light
+    const aPts: { x: number; y: number; z: number; c: string }[] = [];
+    for (const w of abilityWalls) if (w.active) aPts.push({ x: w.cx, y: w.cy, z: w.cz, c: "#c4a574" });
+    for (const pad of abilityPads) if (pad.active) aPts.push({ x: pad.cx, y: pad.cy, z: pad.cz, c: "#3cff70" });
+    for (const f of abilityFires) if (f.active) aPts.push({ x: (f.ax + f.bx) / 2, y: ((f.ay + f.by) / 2) + 1, z: (f.az + f.bz) / 2, c: "#ff6a1a" });
+    for (const fb of fireballs) if (fb.active) aPts.push({ x: fb.pos.x, y: fb.pos.y, z: fb.pos.z, c: "#ff1a00" });
+    {
+      const tp = teleportRef.current;
+      if (tp.active) {
+        const src = tp.phase === "fly" ? tp.pos : tp.target;
+        aPts.push({ x: src.x, y: src.y, z: src.z, c: "#a855f7" });
+      }
+    }
+    abilityLightRefs.current.forEach((l, i) => {
+      if (!l) return;
+      const a = aPts[i];
+      if (a && playing) {
+        l.intensity = L * 0.55; // same as table light
+        l.distance = 220;
+        l.position.set(a.x, a.y, a.z);
+        l.color.set(a.c);
+        l.visible = true;
+      } else {
+        l.intensity = 0;
+        l.visible = false;
+      }
+    });
   });
 
   return (
@@ -3003,6 +3067,9 @@ const kd = (e: KeyboardEvent) => {
       ))}
       {Array.from({ length: BOT_LIGHTS }, (_, i) => (
         <pointLight key={`bot${i}`} ref={(l) => { botLights.current[i] = l; }} intensity={0} distance={180} color="#ffd9a8" />
+      ))}
+      {Array.from({ length: 12 }, (_, i) => (
+        <pointLight key={`ab${i}`} ref={(l) => { abilityLightRefs.current[i] = l; }} intensity={0} distance={220} color="#ffffff" />
       ))}
       <PointerLockControls ref={ctrl} selector="#no-auto-lock" pointerSpeed={0} />
       <group ref={staticRef}>

@@ -1379,6 +1379,7 @@ const kd = (e: KeyboardEvent) => {
             }
           }
         }
+      } // end if (can)
     } else {
       abilityReq.current = false;
     }

@@ -1683,7 +1683,6 @@ const kd = (e: KeyboardEvent) => {
         }
       }
       // support surfaces after substeps
-      {
       const prevY = p.y;
       let sup = 0;
       for (const s of SOLIDS) if (s.y1 <= Math.max(prevY, p.y) + STEP && overlapXZ(p, s, PLAYER_R * 0.5)) sup = Math.max(sup, s.y1);
@@ -2613,28 +2612,35 @@ const kd = (e: KeyboardEvent) => {
       if (!m) return;
       m.visible = w.active;
       if (!w.active) return;
-      m.position.set(w.x, (w.y0 + w.y1) / 2, w.z);
-      m.rotation.set(0, w.yaw, 0);
-      m.scale.set(w.hw * 2, w.y1 - w.y0, w.hd * 2);
+      m.position.set(w.cx, w.cy, w.cz);
+      m.rotation.set(w.pitch, w.yaw, 0, "YXZ");
+      m.scale.set(w.hw * 2, w.hh * 2, w.hd * 2);
     });
     abilityPads.forEach((pad, i) => {
       const m = padMeshRefs.current[i];
       if (!m) return;
       m.visible = pad.active;
       if (!pad.active) return;
-      m.position.copy(pad.pos).addScaledVector(pad.normal, 0.2);
-      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), pad.normal);
+      m.position.set(pad.cx, pad.cy, pad.cz);
+      m.rotation.set(pad.pitch, pad.yaw, 0, "YXZ");
+      m.scale.set(pad.hw * 2, pad.hh * 2, pad.hd * 2);
     });
     abilityFires.forEach((f, i) => {
       const m = fireMeshRefs.current[i];
       if (!m) return;
       m.visible = f.active;
       if (!f.active) return;
-      const mx = (f.ax + f.bx) / 2, mz = (f.az + f.bz) / 2;
-      const len = Math.hypot(f.bx - f.ax, f.bz - f.az) || 1;
-      m.position.set(mx, 0.4, mz);
-      m.rotation.set(0, Math.atan2(f.bx - f.ax, f.bz - f.az), 0);
-      m.scale.set(7, 1.2, len); // 2× wider fire line
+      const mx = (f.ax + f.bx) / 2, my = (f.ay + f.by) / 2, mz = (f.az + f.bz) / 2;
+      const len = Math.hypot(f.bx - f.ax, f.by - f.ay, f.bz - f.az) || 1;
+      m.position.set(mx, my, mz);
+      m.lookAt(f.bx, f.by, f.bz);
+      m.scale.set(35, 6, len); // 5× wider & taller fire line
+    });
+    fireballs.forEach((fb, i) => {
+      const m = fireballMeshRefs.current[i];
+      if (!m) return;
+      m.visible = fb.active;
+      if (fb.active) m.position.copy(fb.pos);
     });
 
     if (ropeRef.current) {
@@ -2717,15 +2723,21 @@ const kd = (e: KeyboardEvent) => {
         </mesh>
       ))}
       {abilityPads.map((_, i) => (
-        <mesh key={`ap${i}`} ref={(m) => { padMeshRefs.current[i] = m; }} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[3.2, 3.2, 0.35, 24]} />
-          <meshStandardMaterial color="#3cff70" emissive="#1a8a40" emissiveIntensity={0.8} />
+        <mesh key={`ap${i}`} ref={(m) => { padMeshRefs.current[i] = m; }} visible={false}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="#3cff70" emissive="#1a8a40" emissiveIntensity={0.9} />
         </mesh>
       ))}
       {abilityFires.map((_, i) => (
         <mesh key={`af${i}`} ref={(m) => { fireMeshRefs.current[i] = m; }} visible={false}>
           <boxGeometry args={[1, 0.6, 1]} />
           <meshStandardMaterial color="#ff6a1a" emissive="#ff3a00" emissiveIntensity={2} transparent opacity={0.85} />
+        </mesh>
+      ))}
+      {fireballs.map((_, i) => (
+        <mesh key={`fb${i}`} ref={(m) => { fireballMeshRefs.current[i] = m; }} visible={false}>
+          <sphereGeometry args={[1.8, 12, 10]} />
+          <meshStandardMaterial color="#ff4a00" emissive="#ff2200" emissiveIntensity={3} />
         </mesh>
       ))}
 

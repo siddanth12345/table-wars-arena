@@ -177,7 +177,12 @@ export function resetGame(mode: Mode = G.mode) {
 export function goHome() {
   resetGame("game");
   G.phase = "home";
-  document.exitPointerLock?.();
+  G.locked = false;
+  G.userPaused = false;
+  G.firing = false;
+  G.scoped = false;
+  setCursorLocked(false);
+  try { document.exitPointerLock?.(); } catch { /* ignore */ }
 }
 
 export function finishTutorial() {
@@ -203,10 +208,14 @@ export function isMobilePlay() {
   return false;
 }
 
-function setCursorLocked(on: boolean) {
+export function setCursorLocked(on: boolean) {
   try {
     document.body.style.cursor = on ? "none" : "";
     document.documentElement.style.cursor = on ? "none" : "";
+    // Clear any leftover canvas / capture-surface cursor
+    document.querySelectorAll("canvas, [data-look-layer]").forEach((el) => {
+      try { (el as HTMLElement).style.cursor = on ? "none" : ""; } catch { /* ignore */ }
+    });
   } catch { /* ignore */ }
 }
 

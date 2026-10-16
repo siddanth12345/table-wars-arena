@@ -795,7 +795,7 @@ export function Game() {
           <div
             className="absolute inset-0"
             style={{
-              cursor: isMobilePlay() && G.locked && G.phase === "playing" && !G.userPaused ? "none" : undefined,
+              cursor: isMobilePlay() && G.locked && G.phase === "playing" && !G.userPaused ? "none" : "auto",
             }}
           >
             <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, 3.2, 12], fov: 72, near: 0.1, far: 3000 }}>

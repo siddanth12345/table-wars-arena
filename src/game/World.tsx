@@ -8,7 +8,7 @@ import * as THREE from "three";
 import {
   G, MAG, FIRE_INTERVAL, DMG, PARRY_WINDOW, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, BUFF_TIME, DASH_CD, AIR_JUMPS, AIR_DASHES,
   BOMB_CD, BOMB_CD_BUFF, TABLE_HP, TABLE_CAP, BOSS_HITS, BOSS_WARN, setLocker,
-  MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, isMobilePlay, pauseGame, registerDamage, tryComboBurst, type TrainSpawn,
+  MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, isMobilePlay, pauseGame, setCursorLocked, registerDamage, tryComboBurst, type TrainSpawn,
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, SHARD_SPAWN_N, LOBBY_RESPAWN, FREECAM_SPEEDS,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
@@ -172,6 +172,49 @@ function clampCircle(p: THREE.Vector3, r: number) {
     p.z *= m / d;
   }
 }
+
+/** Oriented ability box: local axes after yaw then pitch (ramp/ceiling support). */
+function orientLocal(out: THREE.Vector3, dx: number, dy: number, dz: number, yaw: number, pitch: number) {
+  // inverse: -pitch then -yaw
+  const cp = Math.cos(-pitch), sp = Math.sin(-pitch);
+  const cy = Math.cos(-yaw), sy = Math.sin(-yaw);
+  let x = dx, y = dy, z = dz;
+  // -pitch about X
+  const y1 = y * cp - z * sp, z1 = y * sp + z * cp;
+  y = y1; z = z1;
+  // -yaw about Y
+  const x2 = x * cy + z * sy, z2 = -x * sy + z * cy;
+  out.set(x2, y, z2);
+}
+function orientWorld(out: THREE.Vector3, lx: number, ly: number, lz: number, yaw: number, pitch: number) {
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  // pitch about X then yaw about Y
+  let x = lx, y = ly * cp - lz * sp, z = ly * sp + lz * cp;
+  const x2 = x * cy + z * sy, z2 = -x * sy + z * cy;
+  out.set(x2, y, z2);
+}
+function pushOutOriented(
+  p: THREE.Vector3,
+  cx: number, cy: number, cz: number, yaw: number, pitch: number,
+  hw: number, hh: number, hd: number, r: number,
+) {
+  orientLocal(_la, p.x - cx, p.y - cy, p.z - cz, yaw, pitch);
+  const dx = _la.x, dy = _la.y, dz = _la.z;
+  const ox = hw + r - Math.abs(dx), oy = hh + r - Math.abs(dy), oz = hd + r - Math.abs(dz);
+  if (ox > 0 && oy > 0 && oz > 0) {
+    // push along smallest penetration axis
+    _lb.set(0, 0, 0);
+    if (ox <= oy && ox <= oz) _lb.x = (Math.sign(dx) || 1) * ox;
+    else if (oy <= ox && oy <= oz) _lb.y = (Math.sign(dy) || 1) * oy;
+    else _lb.z = (Math.sign(dz) || 1) * oz;
+    orientWorld(_la, _lb.x, _lb.y, _lb.z, yaw, pitch);
+    p.add(_la);
+    return true;
+  }
+  return false;
+}
+
 function pushOut(p: THREE.Vector3, s: (typeof SOLIDS)[number], r: number) {
   _la.set(p.x - s.x, 0, p.z - s.z);
   if (s.yaw) _la.applyAxisAngle(UP, -s.yaw);
@@ -316,18 +359,27 @@ export function World() {
   const health = useMemo(() => Array.from({ length: 24 }, () => ({ active: false, pos: new THREE.Vector3(), t: 0, isShard: false })), []);
   // Ability props: walls (solid), trampolines (bounce pads), fire lines
   const abilityWalls = useMemo(() => Array.from({ length: 8 }, () => ({
-    active: false, x: 0, z: 0, yaw: 0, hw: 0.5, hd: 0.5, y0: 0, y1: 1, t: 0,
+    active: false, cx: 0, cy: 0, cz: 0, yaw: 0, pitch: 0, hw: 0.5, hh: 0.5, hd: 0.5, t: 0,
   })), []);
   const abilityPads = useMemo(() => Array.from({ length: 6 }, () => ({
-    active: false, pos: new THREE.Vector3(), normal: new THREE.Vector3(0, 1, 0), t: 0, cd: 0,
+    active: false, cx: 0, cy: 0, cz: 0, yaw: 0, pitch: 0, hw: 0.5, hh: 0.5, hd: 0.5,
+    nx: 0, ny: 1, nz: 0, t: 0, cd: 0,
   })), []);
   const abilityFires = useMemo(() => Array.from({ length: 4 }, () => ({
-    active: false, ax: 0, az: 0, bx: 0, bz: 0, t: 0,
+    active: false, ax: 0, ay: 0, az: 0, bx: 0, by: 0, bz: 0, t: 0,
     stung: new Set<string>(), tickAcc: new Map<string, number>(),
   })), []);
+  // Air fireballs (fire ability while airborne)
+  const fireballs = useMemo(() => Array.from({ length: 6 }, () => ({
+    active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0,
+  })), []);
+  // Burn DoT on peers/bots from fireball
+  const burns = useRef(new Map<string, { t: number; lx: number; ly: number; lz: number; acc: number }>());
   const wallMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const padMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const fireballMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const fireParticleRefs = useRef<(THREE.Points | null)[]>([]);
   const slam = useRef({ on: false, fromY: 0, h: 0 });
   const bunnyHop = useRef(0); // time window to auto-jump on land after dash
   const doDashRef = useRef<(dirs: () => { f: THREE.Vector3; r: THREE.Vector3 }) => void>(() => {});
@@ -721,27 +773,35 @@ export function World() {
     const onLock = () => {
       const hard = !!document.pointerLockElement;
       if (hard) {
-        G.locked = true;
-        G.userPaused = false;
-        try { document.body.style.cursor = "none"; } catch { /* ignore */ }
+        // Hard pointer lock only counts while actually playing
+        if (G.phase === "playing" && !G.userPaused) {
+          G.locked = true;
+          G.userPaused = false;
+          setCursorLocked(true);
+        } else {
+          G.locked = false;
+          setCursorLocked(false);
+          try { document.exitPointerLock?.(); } catch { /* ignore */ }
+        }
         return;
       }
       const mobile = isMobilePlay();
       if (mobile) {
-        // Soft-lock: only unlock when pause button / pauseGame set userPaused
+        // Soft-lock: only invisible cursor while playing and not paused
         if (G.userPaused || G.phase !== "playing") {
           G.locked = false;
           G.firing = false;
           G.scoped = false;
           keys.current = {};
-          try { document.body.style.cursor = ""; } catch { /* ignore */ }
+          setCursorLocked(false);
         } else {
           G.locked = true;
-          try { document.body.style.cursor = "none"; } catch { /* ignore */ }
+          setCursorLocked(true);
         }
         return;
       }
-      // PC: leaving pointer lock = pause
+      // PC: leaving pointer lock — always show cursor; pause if we were playing
+      setCursorLocked(false);
       if (G.phase === "playing") {
         G.userPaused = true;
         G.locked = false;
@@ -977,9 +1037,7 @@ const kd = (e: KeyboardEvent) => {
       const el = captureTarget() || target;
       try { el?.setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
       try {
-        document.body.style.cursor = "none";
-        document.documentElement.style.cursor = "none";
-        if (el) (el as HTMLElement).style.cursor = "none";
+        setCursorLocked(true);
       } catch { /* ignore */ }
     };
     const onPointerUp = (e: PointerEvent) => {
@@ -1218,7 +1276,10 @@ const kd = (e: KeyboardEvent) => {
     // Mobile soft-lock: keep locked while playing unless user paused
     if (isMobilePlay() && G.phase === "playing" && !G.userPaused) {
       G.locked = true;
-      try { if (document.body.style.cursor !== "none") document.body.style.cursor = "none"; } catch { /* ignore */ }
+      setCursorLocked(true);
+    } else if (G.phase !== "playing" || G.userPaused) {
+      // Never keep an invisible cursor on home / pause / menus
+      if (!document.pointerLockElement) setCursorLocked(false);
     }
     // Online matches always run sim (mobile may not hard-lock); local control still needs locked
     const engaged = G.locked || NET.online || G.freecam;
@@ -1248,183 +1309,222 @@ const kd = (e: KeyboardEvent) => {
       if (can) {
         const yaw = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ").y;
         const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-        if (ab === "wall") {
-          const slot = abilityWalls.find((w) => !w.active);
-          if (slot) {
-            const thick = TABLE_W * 0.5;
-            const halfW = BOSS_H * 0.5;
-            // 5× farther in front; oriented perpendicular to look yaw (any facing angle)
-            const dist = (PLAYER_R + thick + 2) * 5;
-            const place = p.clone().addScaledVector(forward, dist);
-            slot.active = true;
-            slot.x = place.x; slot.z = place.z;
-            slot.yaw = yaw; // wall face perpendicular to crosshair facing
-            slot.hw = halfW; // length left-right
-            slot.hd = thick; // thickness toward you
-            slot.y0 = 0;
-            slot.y1 = BOSS_H;
-            slot.t = 2;
-            G.abilityCharges--;
-            if (G.abilityCharges <= 0) G.abilityCd = 3;
-          }
-        } else if (ab === "trampoline") {
-          const dir = new THREE.Vector3();
-          cam.getWorldDirection(dir);
-          const maxR = cfg.grapple(GRAPPLE_MAX);
-          const rc = new THREE.Raycaster(cam.position.clone(), dir.clone().normalize(), 0.2, maxR);
-          let hitPoint: THREE.Vector3 | null = null;
-          let hitNormal = new THREE.Vector3(0, 1, 0);
-          if (staticRef.current) {
-            const hit = rc.intersectObject(staticRef.current, true)[0];
-            if (hit) {
-              hitPoint = hit.point.clone();
-              if (hit.face) {
-                hitNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld).normalize();
-                if (hitNormal.y < 0) hitNormal.negate();
-              }
+        if (ab === "wall" || ab === "trampoline") {
+          const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ");
+          const yaw = euler.y;
+          const pitch = euler.x; // look down = negative in YXZ? three.js YXZ: pitch is x
+          const look = new THREE.Vector3();
+          cam.getWorldDirection(look);
+          const thick = TABLE_W * 0.5;
+          const halfW = BOSS_H * 0.5;
+          const halfH = BOSS_H * 0.5;
+          const dist = (PLAYER_R + thick + 2) * 5;
+          const place = cam.position.clone().addScaledVector(look, dist);
+          if (ab === "wall") {
+            const slot = abilityWalls.find((w) => !w.active);
+            if (slot) {
+              slot.active = true;
+              slot.cx = place.x; slot.cy = place.y; slot.cz = place.z;
+              slot.yaw = yaw; slot.pitch = pitch;
+              slot.hw = halfW; slot.hh = halfH; slot.hd = thick;
+              slot.t = 2;
+              G.abilityCharges--;
+              if (G.abilityCharges <= 0) G.abilityCd = 3;
             }
-          }
-          // Floor fallback so pads always place when aiming at ground
-          if (!hitPoint && dir.y < -0.05) {
-            const tHit = -cam.position.y / dir.y;
-            if (tHit > 0.3 && tHit <= maxR) {
-              hitPoint = cam.position.clone().addScaledVector(dir, tHit);
-              hitNormal.set(0, 1, 0);
+          } else {
+            const slot = abilityPads.find((pad) => !pad.active);
+            if (slot) {
+              // 0.5× wall size, same omnidirectional placement
+              slot.active = true;
+              slot.cx = place.x; slot.cy = place.y; slot.cz = place.z;
+              slot.yaw = yaw; slot.pitch = pitch;
+              slot.hw = halfW * 0.5; slot.hh = halfH * 0.5; slot.hd = thick * 0.5;
+              // Spring faces back toward you (launch along -look)
+              slot.nx = -look.x; slot.ny = -look.y; slot.nz = -look.z;
+              slot.t = 3;
+              slot.cd = 0;
+              G.abilityCharges--;
+              if (G.abilityCharges <= 0) G.abilityCd = 4;
             }
-          }
-          // Aim-at-feet fallback within range
-          if (!hitPoint) {
-            const ahead = p.clone().addScaledVector(forward, Math.min(20, maxR * 0.5));
-            ahead.y = 0;
-            hitPoint = ahead;
-            hitNormal.set(0, 1, 0);
-          }
-          const slot = abilityPads.find((pad) => !pad.active);
-          if (slot && hitPoint) {
-            slot.active = true;
-            slot.pos.copy(hitPoint);
-            slot.normal.copy(hitNormal);
-            slot.t = 3;
-            slot.cd = 0;
-            G.abilityCharges--;
-            if (G.abilityCharges <= 0) G.abilityCd = 4;
           }
         } else if (ab === "fire") {
-          const slot = abilityFires.find((f) => !f.active);
-          if (slot) {
-            const dist = cfg.grapple(GRAPPLE_MAX) * 2;
-            const start = p.clone().addScaledVector(forward, 2);
-            const end = p.clone().addScaledVector(forward, dist);
-            slot.active = true;
-            slot.ax = start.x; slot.az = start.z; slot.bx = end.x; slot.bz = end.z;
-            slot.t = 3;
-            slot.stung.clear();
-            slot.tickAcc.clear();
-            G.abilityCharges = 0;
-            G.abilityCd = 4;
+          const look = new THREE.Vector3();
+          cam.getWorldDirection(look);
+          if (!grounded.current) {
+            // Air: fireball — bomb speed/range/damage + burn
+            const slot = fireballs.find((f) => !f.active);
+            if (slot) {
+              slot.active = true;
+              slot.pos.copy(cam.position).addScaledVector(look, 1.5);
+              slot.vel.copy(look).multiplyScalar(BULLET_SPEED);
+              slot.t = 5;
+              slot.traveled = 0;
+              G.abilityCharges = 0;
+              G.abilityCd = 4;
+            }
+          } else {
+            const slot = abilityFires.find((f) => !f.active);
+            if (slot) {
+              const dist = cfg.grapple(GRAPPLE_MAX) * 2;
+              const start = p.clone().addScaledVector(look, 2);
+              const end = p.clone().addScaledVector(look, dist);
+              slot.active = true;
+              slot.ax = start.x; slot.ay = Math.max(0.2, start.y); slot.az = start.z;
+              slot.bx = end.x; slot.by = Math.max(0.2, end.y); slot.bz = end.z;
+              slot.t = 3;
+              slot.stung.clear();
+              slot.tickAcc.clear();
+              G.abilityCharges = 0;
+              G.abilityCd = 4;
+            }
           }
         }
-      }
     } else {
       abilityReq.current = false;
     }
-    // lifetime + wall collision + pad bounce + fire dmg
+    // lifetime + oriented wall collision + pad bounce + fire line + fireballs + burns
     for (const w of abilityWalls) {
       if (!w.active) continue;
       w.t -= dt;
       if (w.t <= 0) { w.active = false; continue; }
-      // solid push (no friction — only horizontal push, keep vertical vel)
-      if (p.y + BODY_H > w.y0 && p.y < w.y1) {
-        pushOut(p, w, PLAYER_R);
-      }
+      pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R);
     }
     for (const pad of abilityPads) {
       if (!pad.active) continue;
       pad.t -= dt;
       if (pad.t <= 0) { pad.active = false; continue; }
       pad.cd = Math.max(0, pad.cd - dt);
-      // Horizontal distance to pad center (ignore Y a bit for floor pads)
-      const dXZ = Math.hypot(p.x - pad.pos.x, p.z - pad.pos.z);
-      const onPad = dXZ < 5.5 && p.y < pad.pos.y + 5 && p.y > pad.pos.y - 2;
+      // proximity in oriented local space
+      orientLocal(_la, p.x - pad.cx, p.y - pad.cy, p.z - pad.cz, pad.yaw, pad.pitch);
+      const onPad = Math.abs(_la.x) < pad.hw + 3 && Math.abs(_la.y) < pad.hh + 4 && Math.abs(_la.z) < pad.hd + 3;
       if (!onPad || pad.cd > 0) continue;
-      const vel = hv.current.clone();
-      vel.y = vy.current;
-      const approach = -vel.dot(pad.normal);
-      const horiz = Math.hypot(hv.current.x, hv.current.z);
-      if (approach > 3) {
-        // Moving into the pad — bounce with approach speed (or 2/3 if not face-on to normal)
-        const factor = Math.abs(pad.normal.y) > 0.85 ? 1 : 2 / 3;
-        const boost = Math.max(approach * factor, 35);
-        vel.addScaledVector(pad.normal, approach + boost);
-        hv.current.set(vel.x, 0, vel.z);
-        vy.current = Math.max(vel.y, 35);
-        grounded.current = false;
-        pad.cd = 0.35;
-      } else if (horiz < 4 && Math.abs(vy.current) < 8 && pad.normal.y > 0.4) {
-        // Idle on pad — bounce up 3× normal jump
-        vy.current = JUMP_V * 3;
-        grounded.current = false;
-        pad.cd = 0.45;
-      }
+      const n = tmpV.set(pad.nx, pad.ny, pad.nz).normalize();
+      const speed3 = Math.hypot(hv.current.x, vy.current, hv.current.z);
+      const launch = Math.max(200, speed3);
+      hv.current.set(n.x * launch, 0, n.z * launch);
+      // preserve vertical component of launch along normal
+      vy.current = n.y * launch;
+      if (Math.abs(n.y) < 0.2 && Math.abs(vy.current) < 30) vy.current = Math.max(vy.current, 40);
+      grounded.current = false;
+      pad.cd = 0.4;
     }
+    // Fire lines — 5× wider/taller, no self-dmg, can hit boss if under it
+    const FIRE_W = 20; // was ~4, then 8; now 5× original
+    const FIRE_H = 8; // 5× taller zone
     for (const fire of abilityFires) {
       if (!fire.active) continue;
       fire.t -= dt;
       if (fire.t <= 0) { fire.active = false; fire.stung.clear(); fire.tickAcc.clear(); continue; }
-      const segLen = Math.hypot(fire.bx - fire.ax, fire.bz - fire.az) || 1;
-      const nearSeg = (x: number, z: number) => {
-        const dx = fire.bx - fire.ax, dz = fire.bz - fire.az;
-        let t = ((x - fire.ax) * dx + (z - fire.az) * dz) / (segLen * segLen);
-        t = Math.max(0, Math.min(1, t));
-        const px = fire.ax + dx * t, pz = fire.az + dz * t;
-        return Math.hypot(x - px, z - pz);
+      const segLen = Math.hypot(fire.bx - fire.ax, fire.by - fire.ay, fire.bz - fire.az) || 1;
+      const nearSeg3 = (x: number, y: number, z: number) => {
+        const dx = fire.bx - fire.ax, dy = fire.by - fire.ay, dz = fire.bz - fire.az;
+        let tt = ((x - fire.ax) * dx + (y - fire.ay) * dy + (z - fire.az) * dz) / (segLen * segLen);
+        tt = Math.max(0, Math.min(1, tt));
+        const px = fire.ax + dx * tt, py = fire.ay + dy * tt, pz = fire.az + dz * tt;
+        return Math.hypot(x - px, y - py, z - pz);
       };
-      // Fire never damages the caster
-      // bots (tables + blues) — skip boss; 2× wider line
       for (let i = 0; i < tables.length; i++) {
         const tb = tables[i]!;
-        if (!tb.alive || nearSeg(tb.pos.x, tb.pos.z) >= 8 + 3 * tb.s) continue;
+        if (!tb.alive || nearSeg3(tb.pos.x, tb.pos.y + 2, tb.pos.z) >= FIRE_W + 3 * tb.s) continue;
         const id = `t${i}`;
-        if (!fire.stung.has(id)) {
-          fire.stung.add(id);
-          hitTable(tb, 10);
-        }
+        if (!fire.stung.has(id)) { fire.stung.add(id); hitTable(tb, 10); }
         const acc = (fire.tickAcc.get(id) ?? 0) + dt;
-        if (acc >= 0.1) {
-          fire.tickAcc.set(id, acc - 0.1);
-          hitTable(tb, 2);
-        } else fire.tickAcc.set(id, acc);
+        if (acc >= 0.1) { fire.tickAcc.set(id, acc - 0.1); hitTable(tb, 2); }
+        else fire.tickAcc.set(id, acc);
       }
       for (let i = 0; i < blues.length; i++) {
         const u = blues[i]!;
-        if (!u.alive || nearSeg(u.pos.x, u.pos.z) >= 10) continue;
+        if (!u.alive || nearSeg3(u.pos.x, 2, u.pos.z) >= FIRE_W) continue;
         const id = `b${i}`;
-        if (!fire.stung.has(id)) {
-          fire.stung.add(id);
-          hitBlue(u, 10);
-        }
+        if (!fire.stung.has(id)) { fire.stung.add(id); hitBlue(u, 10); }
         const acc = (fire.tickAcc.get(id) ?? 0) + dt;
-        if (acc >= 0.1) {
-          fire.tickAcc.set(id, acc - 0.1);
-          hitBlue(u, 2);
-        } else fire.tickAcc.set(id, acc);
+        if (acc >= 0.1) { fire.tickAcc.set(id, acc - 0.1); hitBlue(u, 2); }
+        else fire.tickAcc.set(id, acc);
       }
-      // pvp peers
+      // Boss: if fire is under / through boss volume
+      if (bossLive() && b.landed) {
+        const bx = b.pos.x, by = b.y + 20, bz = b.pos.z;
+        if (nearSeg3(bx, by, bz) < FIRE_W + 3 * BOSS_S || nearSeg3(bx, 5, bz) < FIRE_W + 3 * BOSS_S) {
+          const id = "boss";
+          if (!fire.stung.has(id)) { fire.stung.add(id); hitBoss(2); }
+          const acc = (fire.tickAcc.get(id) ?? 0) + dt;
+          if (acc >= 0.1) { fire.tickAcc.set(id, acc - 0.1); hitBoss(1); }
+          else fire.tickAcc.set(id, acc);
+        }
+      }
       for (const pr of NET.peers.values()) {
         if (pr.dead || pr.id === myId()) continue;
-        if (nearSeg(pr.x, pr.z) >= 10) continue;
+        if (nearSeg3(pr.x, pr.y + 2, pr.z) >= FIRE_W) continue;
         if (!fire.stung.has(pr.id)) {
           fire.stung.add(pr.id);
           hitPeer(pr.id, 10, true);
           noteDmg(10, pr.id, pr.x, pr.y + 2, pr.z);
         }
         const acc = (fire.tickAcc.get(pr.id) ?? 0) + dt;
-        if (acc >= 0.1) {
-          fire.tickAcc.set(pr.id, acc - 0.1);
-          hitPeer(pr.id, 2, false);
-        } else fire.tickAcc.set(pr.id, acc);
+        if (acc >= 0.1) { fire.tickAcc.set(pr.id, acc - 0.1); hitPeer(pr.id, 2, false); }
+        else fire.tickAcc.set(pr.id, acc);
       }
     }
+    // Fireballs (air fire)
+    for (const fb of fireballs) {
+      if (!fb.active) continue;
+      const step = fb.vel.clone().multiplyScalar(dt);
+      fb.pos.add(step);
+      fb.traveled += step.length();
+      fb.t -= dt;
+      if (fb.t <= 0 || fb.traveled > BOMB_R * 1.2 || fb.pos.y < -5) { fb.active = false; continue; }
+      // hit tables
+      let boom = false;
+      for (const tb of tables) {
+        if (!tb.alive) continue;
+        if (fb.pos.distanceTo(tmpV.copy(tb.pos).setY(tb.pos.y + 2 * tb.s)) < 4 * tb.s) {
+          hitTable(tb, BOMB_DMG);
+          boom = true;
+        }
+      }
+      for (const u of blues) {
+        if (!u.alive) continue;
+        if (fb.pos.distanceTo(tmpV.copy(u.pos).setY(2)) < 5) {
+          hitBlue(u, BOMB_DMG);
+          boom = true;
+        }
+      }
+      if (bossLive() && b.landed && distToBossBox(fb.pos) < 8) {
+        hitBoss(Math.round(BOMB_DMG / DMG));
+        boom = true;
+      }
+      for (const pr of NET.peers.values()) {
+        if (pr.dead || pr.id === myId()) continue;
+        if (fb.pos.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) < 6) {
+          hitPeer(pr.id, 10, true);
+          noteDmg(10, pr.id, pr.x, pr.y + 2, pr.z);
+          burns.current.set(pr.id, { t: 4, lx: pr.x, ly: pr.y, lz: pr.z, acc: 0 });
+          boom = true;
+        }
+      }
+      if (boom) {
+        boomFx(fb.pos.clone(), BOMB_R * 0.25, 0.35);
+        fb.active = false;
+      }
+    }
+    // Burn DoT: 3 dmg / 0.1s when target moves, 0.7× speed for 4s
+    for (const [id, br] of [...burns.current.entries()]) {
+      br.t -= dt;
+      if (br.t <= 0) { burns.current.delete(id); continue; }
+      const pr = NET.peers.get(id);
+      if (!pr || pr.dead) { burns.current.delete(id); continue; }
+      const moved = Math.hypot(pr.x - br.lx, pr.y - br.ly, pr.z - br.lz) > 0.15;
+      br.lx = pr.x; br.ly = pr.y; br.lz = pr.z;
+      if (moved) {
+        br.acc += dt;
+        if (br.acc >= 0.1) {
+          br.acc -= 0.1;
+          hitPeer(id, 3, false);
+          noteDmg(3, id, pr.x, pr.y + 2, pr.z);
+        }
+      }
+    }
+
 
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
     const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;
@@ -1562,16 +1662,29 @@ const kd = (e: KeyboardEvent) => {
         G.grappling = false;
       }
 
-      // --- integrate + collide ---
-      const prevY = p.y;
-      p.addScaledVector(v, dt);
-      p.y += vy.current * dt;
-      for (const s of SOLIDS) {
-        if (vy.current > 0 && prevY + BODY_H <= s.y0 + 0.01 && p.y + BODY_H > s.y0 && overlapXZ(p, s, PLAYER_R * 0.7)) {
-          p.y = s.y0 - BODY_H;
-          vy.current = 0;
+      // --- integrate + collide (substep when fast so we don't clip walls/solids) ---
+      const speed3 = Math.hypot(v.x, vy.current, v.z);
+      const subN = speed3 > 120 ? Math.min(12, Math.max(2, Math.ceil(speed3 * dt / 6))) : 1;
+      const sdt = dt / subN;
+      for (let si = 0; si < subN; si++) {
+        const prevY = p.y;
+        p.addScaledVector(v, sdt);
+        p.y += vy.current * sdt;
+        for (const s of SOLIDS) {
+          if (vy.current > 0 && prevY + BODY_H <= s.y0 + 0.01 && p.y + BODY_H > s.y0 && overlapXZ(p, s, PLAYER_R * 0.7)) {
+            p.y = s.y0 - BODY_H;
+            vy.current = 0;
+          }
+        }
+        for (const s of SOLIDS) if (p.y < s.y1 - STEP && p.y + BODY_H > s.y0) pushOut(p, s, PLAYER_R);
+        for (const w of abilityWalls) {
+          if (!w.active) continue;
+          pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R);
         }
       }
+      // support surfaces after substeps
+      {
+      const prevY = p.y;
       let sup = 0;
       for (const s of SOLIDS) if (s.y1 <= Math.max(prevY, p.y) + STEP && overlapXZ(p, s, PLAYER_R * 0.5)) sup = Math.max(sup, s.y1);
       if (vy.current <= 0 && p.y <= sup + 0.001) {

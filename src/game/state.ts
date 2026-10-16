@@ -114,6 +114,8 @@ export const G = {
   hits: 0,
   parries: 0,
   time: 0,
+  stormR: 0, // 1v1 storm radius (0 = no storm yet)
+  inStorm: false,
   resetToken: 0,
   respawnToken: 0,
   respawnMsg: 0,
@@ -163,7 +165,7 @@ export function resetGame(mode: Mode = G.mode) {
     speed: 0, altitude: 0, slamAoe: 1.35, slamAoeMax: 10.8,
     hitFlash: 0, hurtFlash: 0, parryFlash: 0, redFlash: 0, shake: 0, alive: 1, bluesAlive: 0, kills: 0, capReached: false,
     bossWarn: 0, bossHits: 0, bossTime: 0, parryLocked: false, compromisedT: 0, stun: 0, bombBig: 0, countdown: 0,
-    shots: 0, hits: 0, parries: 0, time: 0, firing: false, scoped: false, respawnMsg: 0, tutStep: 0,
+    shots: 0, hits: 0, parries: 0, time: 0, stormR: 0, inStorm: false, firing: false, scoped: false, respawnMsg: 0, tutStep: 0,
     tut: { enter: false, dashed: false, zoomed: false, bombed: false, slammed: false },
     crosshair: "normal", canGrapple: false, mobileTut: false, mobileTutStep: 0, mobilePaused: false,
     trainMenu: false, userPaused: false, chatOpen: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,

@@ -79,6 +79,8 @@ const SLAM_TIERS = [
   { maxH: Infinity, d: 6 * BOSS_S * 1.5, dmg: 25, cd: 10 },
 ];
 const R = ROOM.r;
+// 1v1 storm: starts 60s into a round, closes in from the arena edge at 30 u/s, 5 dmg every 0.1s while inside
+const STORM_START = 60, STORM_SPEED = 30, STORM_DMG = 5, STORM_TICK = 0.1;
 const UP = new THREE.Vector3(0, 1, 0);
 
 type Bullet = { pos: THREE.Vector3; prev: THREE.Vector3; vel: THREE.Vector3; life: number; alive: boolean; dmg: number };
@@ -325,7 +327,7 @@ function LocalFreecamBody() {
 }
 
 export function World() {
-  const { camera } = useThree();
+  const { camera, gl } = useThree();
   const settings = useSettings();
   const ctrl = useRef<ElementRef<typeof PointerLockControls>>(null);
   const staticRef = useRef<THREE.Group>(null);
@@ -404,6 +406,10 @@ export function World() {
   const tutKills = useRef(0);
   const tutBlueSpawn = useRef(0);
   const abilityReq = useRef(false);
+  const stormMesh = useRef<THREE.Mesh>(null);
+  const stormAcc = useRef(0);
+  const stormGrey = useRef(false);
+  useEffect(() => () => { gl.domElement.style.filter = ""; }, [gl]); // never leave the grey storm filter on the canvas
   const freecamWas = useRef(false);
   const teleportRef = useRef({
     active: false,
@@ -1993,6 +1999,32 @@ const kd = (e: KeyboardEvent) => {
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
     const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;
     const canControl = active && !G.pvpDead && !G.campaignDead && !freecamOn;
+
+    // --- 1v1 storm: 60s into a round a wall closes in from the arena edge at 30 u/s ---
+    {
+      const stormLive = G.mode === "pvp" && NET.stage === "playing" && G.time >= STORM_START && !G.pvpDead;
+      G.stormR = stormLive ? Math.max(0, R - STORM_SPEED * (G.time - STORM_START)) : 0;
+      const inside = stormLive && Math.hypot(p.x, p.z) > G.stormR;
+      G.inStorm = inside;
+      if (active && inside && !G.frozen) {
+        stormAcc.current += dt;
+        while (stormAcc.current >= STORM_TICK) {
+          stormAcc.current -= STORM_TICK;
+          damagePlayer(STORM_DMG, true);
+        }
+      } else stormAcc.current = 0;
+      // grey-and-white world while standing in the storm
+      if (stormGrey.current !== inside) {
+        stormGrey.current = inside;
+        gl.domElement.style.filter = inside ? "grayscale(1) brightness(1.25) contrast(0.8)" : "";
+        gl.domElement.style.transition = "filter 0.4s";
+      }
+      const sm = stormMesh.current;
+      if (sm) {
+        sm.visible = stormLive && G.stormR > 0.5;
+        if (sm.visible) sm.scale.set(G.stormR, 1, G.stormR);
+      }
+    }
     G.hitFlash = Math.max(0, G.hitFlash - dt);
     G.hurtFlash = Math.max(0, G.hurtFlash - dt);
     G.parryFlash = Math.max(0, G.parryFlash - dt);
@@ -3306,6 +3338,11 @@ const kd = (e: KeyboardEvent) => {
       <group ref={staticRef}>
         <Room />
       </group>
+      {/* 1v1 storm wall (radius driven per frame) */}
+      <mesh ref={stormMesh} visible={false} position={[0, ROOM.h / 2, 0]} renderOrder={5}>
+        <cylinderGeometry args={[1, 1, ROOM.h, 72, 1, true]} />
+        <meshBasicMaterial color="#e9eef2" transparent opacity={0.3} side={THREE.DoubleSide} depthWrite={false} fog={false} />
+      </mesh>
 
       {abilityWalls.map((_, i) => (
         <mesh key={`aw${i}`} ref={(m) => { wallMeshRefs.current[i] = m; }} visible={false} castShadow>

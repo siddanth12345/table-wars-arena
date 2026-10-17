@@ -1,4 +1,5 @@
 export const MAG = 40;
+import { playSfx } from "./sfx";
 /** 1v1: seconds into a round before the storm starts closing in */
 export const STORM_START = 60;
 export const FIRE_INTERVAL = 5 / 24; // 24 splinters in 5s
@@ -273,6 +274,7 @@ export function lockPointer() {
 /** Record damage you dealt: floating number + combo meter. amount = actual HP/hit points applied. */
 export function registerDamage(amount: number, targetId: string, screenX = 0.5, screenY = 0.42) {
   if (!(amount > 0) || G.phase !== "playing") return;
+  playSfx("hit_marker");
   const a = Math.round(amount * 10) / 10;
   G.combo += a;
   G.comboTimer = G.mode === "pvp" ? 5 : 2.5;
@@ -322,6 +324,7 @@ export function tryComboBurst() {
   G.playerHp = Math.min(cfg.maxHp(), G.playerHp + heal);
   G.hitFlash = 0.25;
   G.parryFlash = 0.2;
+  playSfx("combo_burst");
   return true;
 }
 

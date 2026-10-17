@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { World } from "./World";
 import { startMusic } from "./music";
+import { startUiSfx } from "./sfx";
 import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial, comboBurstThreshold, comboBurstHeal, comboDecayTime, STORM_START } from "./state";
 import { SkinsPanel } from "./SkinsPanel";
 import { AbilitiesPanel } from "./AbilitiesPanel";
@@ -804,7 +805,7 @@ export function Game() {
     const id = setInterval(() => force((n) => n + 1), 200);
     return () => clearInterval(id);
   }, [loaded]);
-  useEffect(() => { startMusic(); }, []);
+  useEffect(() => { startMusic(); startUiSfx(); }, []);
   useEffect(() => {
     // Feed the cursor position to whichever GUI button it is over, for the hover glow.
     const move = (e: PointerEvent) => {

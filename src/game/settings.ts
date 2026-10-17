@@ -52,6 +52,8 @@ export type Settings = {
   cameraDrift: number;
   /** Music volume 0–100 (0 = off). */
   musicVolume: number;
+  /** Sound effects volume 0–100 (0 = off). */
+  sfxVolume: number;
 };
 
 export const DEFAULT_MOBILE_LAYOUT: MobileLayout = {
@@ -79,6 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
   chatEnabled: true,
   cameraDrift: 50,
   musicVolume: 50,
+  sfxVolume: 50,
 };
 
 const STORE_KEY = "tw-settings";

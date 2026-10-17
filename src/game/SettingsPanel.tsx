@@ -120,6 +120,9 @@ export function SettingsPanel() {
         <Row label={`Music volume · ${Math.round(draft.musicVolume ?? 50)}${(draft.musicVolume ?? 50) <= 0 ? " (off)" : ""}`}>
           <input type="range" min={0} max={100} step={5} value={draft.musicVolume ?? 50} onChange={(e) => set("musicVolume", Number(e.target.value))} className="w-56 accent-[var(--crosshair)]" />
         </Row>
+        <Row label={`Sound effects volume · ${Math.round(draft.sfxVolume ?? 50)}${(draft.sfxVolume ?? 50) <= 0 ? " (off)" : ""}`}>
+          <input type="range" min={0} max={100} step={5} value={draft.sfxVolume ?? 50} onChange={(e) => set("sfxVolume", Number(e.target.value))} className="w-56 accent-[var(--crosshair)]" />
+        </Row>
         <Row label="Shadows"><Switch on={draft.shadows} onChange={(v) => set("shadows", v)} a="On" b="Off" /></Row>
         <Row label="Screen shake"><Switch on={draft.screenShake} onChange={(v) => set("screenShake", v)} a="On" b="Off" /></Row>
         <Row label="Shooting"><Switch on={draft.fireMode === "hold"} onChange={(v) => set("fireMode", v ? "hold" : "toggle")} a="Hold" b="Toggle" /></Row>

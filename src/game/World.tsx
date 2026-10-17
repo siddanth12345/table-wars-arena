@@ -1,6 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { NET, NET_HOOKS, PVP_DMG, PVP_HITBOX, PVP_CENTER_Y, hitPeer, reportDeath, sendPose, sharesEnemies, isFollower, sendNet, enemyHitPeer, myId, type EntSnap } from "./net";
 import { RemotePlayers } from "./RemotePlayers";
+import { playSfx } from "./sfx";
 import { PointerLockControls } from "@react-three/drei";
 import { SETTINGS, useSettings, lampIntensity } from "./settings";
 import { useEffect, useMemo, useRef, type ElementRef } from "react";
@@ -1551,6 +1552,7 @@ const kd = (e: KeyboardEvent) => {
           tp.pendingStun.clear();
         } else if (G.abilityCd > 0 && tp.canRewind && !tp.rewindUsed) {
           p.copy(tp.origin);
+          playSfx("teleport_success"); // rewind uses the same sound as a successful teleport
           // keep velocity on rewind too
           tp.rewindUsed = true;
           tp.canRewind = false;
@@ -1588,6 +1590,7 @@ const kd = (e: KeyboardEvent) => {
       } else if (ab === "trampoline" && !G.abilityLocked && !G.parryLocked && G.abilityCd <= 0 && G.abilityCharges <= 0) {
         // Reset trampolines: start cooldown and delete all placed pads
         for (const pad of abilityPads) pad.active = false;
+        playSfx("spring_reset");
         G.abilityCd = 5;
         G.abilityCharges = 0;
         if (NET.online) sendNet("vfx", { k: "padclear", owner: myId() });
@@ -1612,6 +1615,7 @@ const kd = (e: KeyboardEvent) => {
             if (slot) {
               slot.active = true;
               slot.netId = `${myId()}-w-${Date.now()}`;
+              playSfx("wall_place");
               slot.cx = place.x; slot.cy = place.y; slot.cz = place.z;
               slot.yaw = yaw; slot.pitch = pitch;
               slot.hw = halfW; slot.hh = halfH; slot.hd = thick;
@@ -1639,6 +1643,7 @@ const kd = (e: KeyboardEvent) => {
               slot.t = 9999;
               slot.cd = 0;
               slot.netId = `${myId()}-p-${Date.now()}`;
+              playSfx("spring_place");
               G.abilityCharges--;
               if (NET.online) sendNet("vfx", { k: "pad", id: slot.netId, cx: slot.cx, cy: slot.cy, cz: slot.cz, yaw: slot.yaw, pitch: slot.pitch, hw: slot.hw, hh: slot.hh, hd: slot.hd, nx: slot.nx, ny: slot.ny, nz: slot.nz, life: 9999 });
               // After all 3 placed: wait for player to Reset Trampolines (ability key again)
@@ -1657,6 +1662,7 @@ const kd = (e: KeyboardEvent) => {
               slot.t = 5;
               slot.traveled = 0;
               slot.netId = `${myId()}-fb-${Date.now()}`;
+              playSfx("fire_air");
               G.abilityCharges = 0;
               G.abilityCd = 4; // air fireball CD
               if (NET.online) sendNet("vfx", { k: "fball", id: slot.netId, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z, vx: slot.vel.x, vy: slot.vel.y, vz: slot.vel.z, life: 5 });
@@ -1674,6 +1680,7 @@ const kd = (e: KeyboardEvent) => {
               slot.stung.clear();
               slot.tickAcc.clear();
               slot.netId = `${myId()}-f-${Date.now()}`;
+              playSfx("fire_ground");
               G.abilityCharges = 0;
               G.abilityCd = 5;
               if (NET.online) sendNet("vfx", { k: "fire", id: slot.netId, ax: slot.ax, ay: slot.ay, az: slot.az, bx: slot.bx, by: slot.by, bz: slot.bz, life: 3 });
@@ -1898,6 +1905,7 @@ const kd = (e: KeyboardEvent) => {
         }
         if (arrived) {
           tp.phase = "expand";
+          playSfx("teleport_expand");
           tp.chargeT = 0;
           // snap target to current pos for expand center
           tp.target.copy(tp.pos);
@@ -1914,6 +1922,7 @@ const kd = (e: KeyboardEvent) => {
           } else {
             // Teleport — KEEP velocity
             p.copy(tp.target);
+            playSfx("teleport_success");
             tp.active = false;
             G.abilityCd = TELEPORT_CD; // 2.5s
             G.abilityCharges = 0;

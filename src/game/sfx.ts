@@ -19,7 +19,7 @@ export type Sfx =
   | "stun" | "death" | "respawn" | "storm_loop" | "storm_tick";
 
 const TRIM: Record<Sfx, number> = {
-  ui_hover: 0.45, ui_click: 0.8, ui_back: 0.7,
+  ui_hover: 1.0, ui_click: 1.0, ui_back: 1.0,
   jump: 0.6, air_jump: 0.65, dash: 0.7, land: 0.7, wallrun: 0.6,
   grapple_fire: 0.75, grapple_attach: 0.8, grapple_release: 0.6, bounce_pad: 0.85,
   shoot: 0.45, reload: 0.7, hit_marker: 0.6, kill: 0.9, player_hurt: 0.9,
@@ -33,7 +33,7 @@ const TRIM: Record<Sfx, number> = {
 };
 /** Minimum milliseconds between two plays of the same sound. */
 const MIN_GAP: Partial<Record<Sfx, number>> = {
-  ui_hover: 40, hit_marker: 60, player_hurt: 150, land: 150, shoot: 40, bounce_pad: 120, kill: 80,
+  ui_hover: 50, hit_marker: 60, player_hurt: 150, land: 150, shoot: 40, bounce_pad: 120, kill: 80,
 };
 
 const cache = new Map<Sfx, HTMLAudioElement>();

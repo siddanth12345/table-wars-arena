@@ -14,7 +14,7 @@ type TrackId =
 type StingId = "victory" | "defeat" | "round_win" | "round_lose" | "match_over" | "join" | "revive" | "tutorial";
 
 const TRACK_GAIN: Record<TrackId, number> = {
-  home_morning: 0.8, home_evening: 0.8, home_night: 0.75, tutorial: 0.85, campaign: 0.7, boss: 0.7, training: 0.75,
+  home_morning: 0.45, home_evening: 0.45, home_night: 0.42, tutorial: 0.85, campaign: 0.7, boss: 0.7, training: 0.75,
   lobby: 0.7, pick: 0.75, round: 0.7, party: 0.7, freecam: 0.9,
 };
 

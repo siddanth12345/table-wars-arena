@@ -410,7 +410,7 @@ export function World() {
   const stormMesh = useRef<THREE.Mesh>(null);
   const stormAcc = useRef(0);
   const stormGrey = useRef(false);
-  const sfxPrev = useRef({ reload: 0, stun: 0, dead: false, count: 0, parryWin: 0, parries: 0, grounded: true, airT: 0 });
+  const sfxPrev = useRef({ reload: 0, stun: 0, dead: false, count: 0, parryWin: 0, parries: 0, grounded: true, airT: 0, peerDead: new Map<string, boolean>() });
   useEffect(() => () => { gl.domElement.style.filter = ""; setLoop("wallrun", false); setLoop("storm_loop", false); }, [gl]); // never leave the grey storm filter on the canvas
   const freecamWas = useRef(false);
   const teleportRef = useRef({
@@ -1249,6 +1249,9 @@ const kd = (e: KeyboardEvent) => {
     if (d > 0) damagePlayer(d);
     if (stun && !G.pvpDead) G.stun = Math.max(G.stun, stunT ?? STUN_TIME);
   };
+  // Gain for a sound that happened at (x,y,z): full volume up close, fading with distance
+  const nearGain = (x: number, y: number, z: number) =>
+    Math.max(0.12, 1 - Math.hypot(x - camera.position.x, y - camera.position.y, z - camera.position.z) / 450);
   NET_HOOKS.onVfx = (payload) => {
     const k = String(payload.k ?? "");
     const nid = String(payload.id ?? "");
@@ -1265,6 +1268,7 @@ const kd = (e: KeyboardEvent) => {
       slot.yaw = Number(payload.yaw); slot.pitch = Number(payload.pitch);
       slot.hw = Number(payload.hw); slot.hh = Number(payload.hh); slot.hd = Number(payload.hd);
       slot.t = Number(payload.life) || 2;
+      playSfx("wall_place", nearGain(slot.cx, slot.cy, slot.cz));
       return;
     }
     if (k === "pad") {
@@ -1278,12 +1282,14 @@ const kd = (e: KeyboardEvent) => {
       slot.nx = Number(payload.nx); slot.ny = Number(payload.ny); slot.nz = Number(payload.nz);
       slot.t = Number(payload.life) || 9999;
       slot.cd = 0;
+      playSfx("spring_place", nearGain(slot.cx, slot.cy, slot.cz));
       return;
     }
     if (k === "padclear") {
       for (const pad of abilityPads) {
         if (!payload.owner || pad.netId.startsWith(String(payload.owner))) pad.active = false;
       }
+      playSfx("spring_reset", 0.5);
       return;
     }
     if (k === "fire") {
@@ -1295,6 +1301,7 @@ const kd = (e: KeyboardEvent) => {
       slot.bx = Number(payload.bx); slot.by = Number(payload.by); slot.bz = Number(payload.bz);
       slot.t = Number(payload.life) || 3;
       slot.stung.clear(); slot.tickAcc.clear();
+      playSfx("fire_ground", nearGain((slot.ax + slot.bx) / 2, (slot.ay + slot.by) / 2, (slot.az + slot.bz) / 2));
       return;
     }
     if (k === "fball") {
@@ -1306,10 +1313,14 @@ const kd = (e: KeyboardEvent) => {
       slot.vel.set(Number(payload.vx), Number(payload.vy), Number(payload.vz));
       slot.t = Number(payload.life) || 5;
       slot.traveled = 0;
+      playSfx("fire_air", nearGain(slot.pos.x, slot.pos.y, slot.pos.z));
       return;
     }
     if (k === "tp") {
       const tp = teleportRef.current;
+      const rx = Number(payload.x), ry = Number(payload.y), rz = Number(payload.z);
+      if (payload.phase === "expand" && (!tp.active || tp.phase === "fly")) playSfx("teleport_expand", nearGain(rx, ry, rz));
+      if (payload.phase === "done") playSfx("teleport_success", nearGain(rx, ry, rz));
       // visual only for remote: use teleport mesh if local not using
       if (!tp.active) {
         tp.active = true;
@@ -1339,6 +1350,7 @@ const kd = (e: KeyboardEvent) => {
       slot.pos.set(Number(payload.x), Number(payload.y), Number(payload.z));
       slot.vel.set(Number(payload.vx), Number(payload.vy), Number(payload.vz));
       slot.t = Number(payload.life) || 1.2;
+      playSfx("shoot", nearGain(slot.pos.x, slot.pos.y, slot.pos.z) * 0.8);
       return;
     }
   };
@@ -2079,6 +2091,11 @@ const kd = (e: KeyboardEvent) => {
         if (gr && !sp.grounded && sp.airT > 0.35 && bounce.current.t <= 0) playSfx("land");
         sp.airT = gr ? 0 : sp.airT + dt;
         sp.grounded = gr;
+      }
+      for (const pr of NET.peers.values()) {
+        const was = sp.peerDead.get(pr.id) ?? false;
+        if (pr.dead && !was && live && (G.mode === "pvp" || NET.kind === "lobby")) playSfx("kill", nearGain(pr.x, pr.y, pr.z));
+        sp.peerDead.set(pr.id, !!pr.dead);
       }
       sp.reload = G.reloading; sp.stun = G.stun; sp.parryWin = G.parryWin; sp.parries = G.parries;
       setLoop("wallrun", live && G.wallrun && !G.freecam);

@@ -36,6 +36,32 @@ const MIN_GAP: Partial<Record<Sfx, number>> = {
   ui_hover: 50, hit_marker: 60, player_hurt: 150, land: 150, shoot: 40, bounce_pad: 120, kill: 80,
 };
 
+/** Sounds other players hear from you. Anything not on this list is never played from a network message. */
+export const REMOTE_SFX: ReadonlySet<string> = new Set<Sfx>([
+  "jump", "air_jump", "dash", "land", "slam_start", "slam_land", "slam_cancel", "slam_bounce",
+  "parry_raise", "parry_success", "parry_fail", "bomb_throw", "grapple_fire", "teleport_success",
+]);
+
+// Lighter network use: shared sounds are batched and sent at most 4 times a second as one tiny message.
+const FLUSH_MS = 250;
+let sink: ((ids: Sfx[]) => void) | null = null;
+const pending = new Set<Sfx>();
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+/** World registers a function that broadcasts a batch of sounds (with the player's position). */
+export function setSfxSink(fn: ((ids: Sfx[]) => void) | null) { sink = fn; }
+/** Play a sound for yourself AND let nearby players hear it (batched). */
+export function playSfxShared(id: Sfx, gain = 1) {
+  playSfx(id, gain);
+  if (!sink || !REMOTE_SFX.has(id)) return;
+  pending.add(id);
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    const ids = [...pending]; pending.clear();
+    if (ids.length && sink) sink(ids);
+  }, FLUSH_MS);
+}
+
 const cache = new Map<Sfx, HTMLAudioElement>();
 const lastPlay = new Map<Sfx, number>();
 const loops = new Map<Sfx, HTMLAudioElement>();

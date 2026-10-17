@@ -1,7 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { NET, NET_HOOKS, PVP_DMG, PVP_HITBOX, PVP_CENTER_Y, hitPeer, reportDeath, sendPose, sharesEnemies, isFollower, sendNet, enemyHitPeer, myId, type EntSnap } from "./net";
 import { RemotePlayers } from "./RemotePlayers";
-import { playSfx, setLoop } from "./sfx";
+import { playSfx, playSfxShared, setLoop, setSfxSink, REMOTE_SFX } from "./sfx";
 import { PointerLockControls } from "@react-three/drei";
 import { SETTINGS, useSettings, lampIntensity } from "./settings";
 import { useEffect, useMemo, useRef, type ElementRef } from "react";
@@ -411,7 +411,7 @@ export function World() {
   const stormAcc = useRef(0);
   const stormGrey = useRef(false);
   const sfxPrev = useRef({ reload: 0, stun: 0, dead: false, count: 0, parryWin: 0, parries: 0, grounded: true, airT: 0, peerDead: new Map<string, boolean>() });
-  useEffect(() => () => { gl.domElement.style.filter = ""; setLoop("wallrun", false); setLoop("storm_loop", false); }, [gl]); // never leave the grey storm filter on the canvas
+  useEffect(() => () => { gl.domElement.style.filter = ""; setLoop("wallrun", false); setLoop("storm_loop", false); setSfxSink(null); }, [gl]); // never leave the grey storm filter on the canvas
   const freecamWas = useRef(false);
   const teleportRef = useRef({
     active: false,
@@ -894,7 +894,7 @@ export function World() {
         G.tut.dashed = true;
         if (hv.current.length() > MAX_HSPEED) hv.current.setLength(MAX_HSPEED);
         G.dashCd = cfg.dashCd();
-        playSfx("dash");
+        playSfxShared("dash");
         return;
       }
       if (!grounded.current && G.airDashes > 0) {
@@ -909,7 +909,7 @@ export function World() {
         G.tut.dashed = true;
         if (hv.current.length() > MAX_HSPEED) hv.current.setLength(MAX_HSPEED);
         G.airDashes--;
-        playSfx("dash");
+        playSfxShared("dash");
         if (vy.current < 0) vy.current = 0;
         bunnyHop.current = 0.55;
       }
@@ -965,13 +965,13 @@ const kd = (e: KeyboardEvent) => {
       if (G.countdown > 0.6 || G.stun > 0) return;
       if (e.code === SETTINGS.keys.parry && G.parryCd <= 0 && !G.parryLocked) {
         G.parryWin = PARRY_WINDOW;
-        playSfx("parry_raise");
+        playSfxShared("parry_raise");
         G.parryCd = PARRY_CD_MISS; // assume miss until a successful parry
       }
       if (e.code === SETTINGS.keys.jump && !grounded.current && !G.wallrun && !wallNormal(pos.current) && G.airJumps > 0) {
         G.airJumps--;
         vy.current = JUMP_V;
-        playSfx("air_jump");
+        playSfxShared("air_jump");
       }
       if (e.code === SETTINGS.keys.dash && !G.wallrun) {
         doDash(camDirs);
@@ -986,7 +986,7 @@ const kd = (e: KeyboardEvent) => {
         bomb.current.pos.copy(camera.position).addScaledVector(dir, 1.5);
         bomb.current.vel.copy(dir).multiplyScalar(BULLET_SPEED);
         G.bombCd = cfg.bombCd(G.buff > 0);
-        playSfx("bomb_throw");
+        playSfxShared("bomb_throw");
       }
       if (e.code === SETTINGS.keys.grapple) {
         const dir = new THREE.Vector3();
@@ -1067,7 +1067,7 @@ const kd = (e: KeyboardEvent) => {
           anchor.current.copy(bestPt);
           ropeLen.current = bestDist * 0.9;
           G.grappling = true;
-          playSfx("grapple_fire");
+          playSfxShared("grapple_fire");
           setTimeout(() => playSfx("grapple_attach"), 90);
           grappleOnPad.current = bestPad;
           grappleOnWall.current = bestWall;
@@ -1079,7 +1079,7 @@ const kd = (e: KeyboardEvent) => {
           // double-tap R after a slam: bounce back up to the pre-slam height
           const rise = Math.max(0, bounce.current.y - p.y);
           vy.current = Math.sqrt(2 * GRAVITY * rise);
-          playSfx("slam_bounce");
+          playSfxShared("slam_bounce");
           grounded.current = false;
           bounce.current.t = 0;
           G.bounceWin = 0;
@@ -1092,13 +1092,13 @@ const kd = (e: KeyboardEvent) => {
           hv.current.set(0, 0, 0);
           vy.current = 0;
           G.slamCd = cfg.slamCd(q.cd) * 0.5;
-          playSfx("slam_cancel");
+          playSfxShared("slam_cancel");
         } else if (!grounded.current && !slam.current.on && G.slamCd <= 0) {
           let ground = 0;
           for (const s of SOLIDS) if (s.y1 <= p.y + 0.01 && overlapXZ(p, s, PLAYER_R * 0.5)) ground = Math.max(ground, s.y1);
           Object.assign(slam.current, { on: true, fromY: p.y, h: p.y - ground });
           G.slamming = true;
-          playSfx("slam_start");
+          playSfxShared("slam_start");
           G.grappling = false;
           G.wallrun = false;
         } else if (grounded.current && G.buff <= 0 && G.ammo < MAG && G.reloading <= 0) G.reloading = 1.5;
@@ -1252,8 +1252,21 @@ const kd = (e: KeyboardEvent) => {
   // Gain for a sound that happened at (x,y,z): full volume up close, fading with distance
   const nearGain = (x: number, y: number, z: number) =>
     Math.max(0.12, 1 - Math.hypot(x - camera.position.x, y - camera.position.y, z - camera.position.z) / 450);
+  // Share my movement/combat sounds with the other players in one small batched message
+  setSfxSink((ids) => {
+    if (!NET.online) return;
+    const q = pos.current;
+    sendNet("vfx", { k: "sfx", s: ids.join(","), x: Math.round(q.x), y: Math.round(q.y), z: Math.round(q.z) });
+  });
   NET_HOOKS.onVfx = (payload) => {
     const k = String(payload.k ?? "");
+    if (k === "sfx") {
+      const x = Number(payload.x), y = Number(payload.y), z = Number(payload.z);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+      const g = nearGain(x, y, z) * 0.85;
+      for (const id of String(payload.s ?? "").split(",").slice(0, 8)) if (REMOTE_SFX.has(id)) playSfx(id as Parameters<typeof playSfx>[0], g);
+      return;
+    }
     const nid = String(payload.id ?? "");
     if (k === "boom") {
       boomFx(tmpV.set(Number(payload.x), Number(payload.y), Number(payload.z)), Number(payload.r) || 8, Number(payload.t) || 0.4, false);
@@ -1582,7 +1595,7 @@ const kd = (e: KeyboardEvent) => {
           tp.pendingStun.clear();
         } else if (G.abilityCd > 0 && tp.canRewind && !tp.rewindUsed) {
           p.copy(tp.origin);
-          playSfx("teleport_success"); // rewind uses the same sound as a successful teleport
+          playSfxShared("teleport_success"); // rewind uses the same sound as a successful teleport (opponents hear it too)
           // keep velocity on rewind too
           tp.rewindUsed = true;
           tp.canRewind = false;
@@ -2085,10 +2098,10 @@ const kd = (e: KeyboardEvent) => {
           sp.count = n;
         } else if (sp.count > 0) { playSfx("countdown_go"); sp.count = 0; }
         // a parry window that ran out without catching anything
-        if (sp.parryWin > 0 && G.parryWin <= 0 && G.buff <= 0 && G.parries === sp.parries) playSfx("parry_fail");
+        if (sp.parryWin > 0 && G.parryWin <= 0 && G.buff <= 0 && G.parries === sp.parries) playSfxShared("parry_fail");
         // landing after a real fall (slam landings have their own sound)
         const gr = grounded.current;
-        if (gr && !sp.grounded && sp.airT > 0.35 && bounce.current.t <= 0) playSfx("land");
+        if (gr && !sp.grounded && sp.airT > 0.35 && bounce.current.t <= 0) playSfxShared("land");
         sp.airT = gr ? 0 : sp.airT + dt;
         sp.grounded = gr;
       }
@@ -2189,7 +2202,7 @@ const kd = (e: KeyboardEvent) => {
         if (grounded.current && !G.grappling) {
           if (space && !stunned) {
             vy.current = JUMP_V;
-            playSfx("jump");
+            playSfxShared("jump");
             grounded.current = false;
           } else {
             const spd = (G.scoped ? SPEED * 0.55 : SPEED) * (G.abilitySlow > 0 ? 0.5 : 1);
@@ -2312,7 +2325,7 @@ const kd = (e: KeyboardEvent) => {
         if (slam.current.on) {
           slam.current.on = false;
           G.slamming = false;
-          playSfx("slam_land");
+          playSfxShared("slam_land");
           const tier = SLAM_TIERS.findIndex((q) => slam.current.h < q.maxH);
           const q = SLAM_TIERS[tier]!;
           const r = q.d / 2;
@@ -2932,7 +2945,7 @@ const kd = (e: KeyboardEvent) => {
                 G.parryFlash = 0.3;
                 G.parries++;
                 onParrySuccess(); // resets all cooldowns + 50 combo
-                playSfx("parry_success");
+                playSfxShared("parry_success");
               } else damagePlayer(bl.dmg);
             } else if (tWorld < Infinity) bl.alive = false;
           }

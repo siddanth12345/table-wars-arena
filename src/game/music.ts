@@ -18,6 +18,13 @@ const TRACK_GAIN: Record<TrackId, number> = {
   lobby: 0.7, pick: 0.75, round: 0.7, party: 0.7, freecam: 0.9,
 };
 
+// Overall loudness trims (the SFX will sit above the music, so keep the music well under them)
+const MUSIC_MASTER = 0.5;
+const STING_GAIN: Record<StingId, number> = {
+  victory: 0.55, defeat: 0.55, round_win: 0.5, round_lose: 0.5, match_over: 0.55, join: 0.3, revive: 0.3,
+  tutorial: 0.22, // bell-heavy and piercing, so much lower
+};
+
 const FADE_MS = 1200;
 const TICK_MS = 100;
 
@@ -68,11 +75,11 @@ function tod(): TrackId {
 
 function playSting(id: StingId) {
   if (!unlocked) return;
-  const vol = SETTINGS.musicVolume ?? 60;
+  const vol = SETTINGS.musicVolume ?? 50;
   if (vol <= 0) return;
   try {
     const el = new Audio(src(`sting_${id}`));
-    el.volume = Math.min(1, (vol / 100) * 1.0);
+    el.volume = Math.min(1, (vol / 100) * STING_GAIN[id]);
     stingUntil = performance.now() + 3500; // music ducks while a sting plays
     el.addEventListener("loadedmetadata", () => { stingUntil = performance.now() + (el.duration || 3) * 1000 + 300; });
     void el.play().catch(() => { /* blocked */ });
@@ -110,7 +117,7 @@ function detectEvents() {
 function tick() {
   if (!unlocked) return;
   detectEvents();
-  const vol = (SETTINGS.musicVolume ?? 60) / 100;
+  const vol = (SETTINGS.musicVolume ?? 50) / 100;
   const next = vol > 0 ? trackFor() : null;
   if (next !== want) {
     want = next;
@@ -131,7 +138,7 @@ function tick() {
   const step = TICK_MS / FADE_MS;
   for (const v of voices) {
     v.level += Math.sign(v.target - v.level) * Math.min(step, Math.abs(v.target - v.level));
-    v.el.volume = Math.max(0, Math.min(1, v.level * TRACK_GAIN[v.id] * vol * duck));
+    v.el.volume = Math.max(0, Math.min(1, v.level * TRACK_GAIN[v.id] * MUSIC_MASTER * vol * duck));
   }
   voices = voices.filter((v) => {
     if (v.target === 0 && v.level <= 0.001) { v.el.pause(); v.el.src = ""; return false; }

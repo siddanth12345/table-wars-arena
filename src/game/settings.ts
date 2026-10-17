@@ -78,7 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mobileLayout: { ...DEFAULT_MOBILE_LAYOUT },
   chatEnabled: true,
   cameraDrift: 50,
-  musicVolume: 60,
+  musicVolume: 50,
 };
 
 const STORE_KEY = "tw-settings";

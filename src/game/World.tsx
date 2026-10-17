@@ -2223,10 +2223,7 @@ const kd = (e: KeyboardEvent) => {
             }
           }
         }
-        for (const pad of abilityPads) {
-          if (!pad.active) continue;
-          pushOutOriented(p, pad.cx, pad.cy, pad.cz, pad.yaw, pad.pitch, pad.hw, pad.hh, pad.hd, PLAYER_R * 0.5);
-        }
+        // Trampoline pads are intentionally NOT solid: you pass into them and get launched by the bounce trigger below.
       }
       // support surfaces after substeps
       const prevY = p.y;

@@ -50,6 +50,8 @@ export type Settings = {
   chatEnabled: boolean;
   /** Camera drift 0–100: 0 = sharp, 50 = default, 100 = very slow. */
   cameraDrift: number;
+  /** Music volume 0–100 (0 = off). */
+  musicVolume: number;
 };
 
 export const DEFAULT_MOBILE_LAYOUT: MobileLayout = {
@@ -76,6 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mobileLayout: { ...DEFAULT_MOBILE_LAYOUT },
   chatEnabled: true,
   cameraDrift: 50,
+  musicVolume: 60,
 };
 
 const STORE_KEY = "tw-settings";

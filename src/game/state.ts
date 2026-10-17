@@ -1,4 +1,6 @@
 export const MAG = 40;
+/** 1v1: seconds into a round before the storm starts closing in */
+export const STORM_START = 60;
 export const FIRE_INTERVAL = 5 / 24; // 24 splinters in 5s
 export const DMG = 5;
 export const PARRY_WINDOW = 1;
@@ -41,7 +43,7 @@ export const TUT_STEPS: { title: string; text: string; enter?: boolean }[] = [
   { title: "Scope", text: "HOLD RIGHT CLICK to scope in, then SCROLL the mouse wheel to change zoom." },
   { title: "Brown tables", text: "Brown tables are the normal enemies — they hop around and shoot splinters. LEFT CLICK to shoot this one: your splinters explode on impact and hurt everything nearby. R reloads (on the ground). In the air, R is a GROUND POUND." },
   { title: "Bombs", text: "Press F to throw a bomb. It explodes in a big area. Blow this table up!" },
-  { title: "Combo meter", text: "Damage you deal builds a combo on the right of the screen. It resets after 2.5 seconds without hits. When the combo is high enough (100 offline / 50 in 1v1), press SHIFT (rebindable in Settings) to reset ALL cooldowns and heal (30 offline / 20 in 1v1). You cannot use this while dead." },
+  { title: "Combo meter", text: "Damage you deal builds a combo on the right of the screen. It resets after 2.5 seconds without hits. A successful parry resets all cooldowns and adds 50 combo. When the combo is high enough (100 offline / 50 in 1v1), press SHIFT (rebindable in Settings) to reset ALL cooldowns and heal (30 offline / 20 in 1v1). You cannot use this while dead." },
   { title: "Abilities", text: "Press V (default, rebindable) to use your selected ability. Choose Wall, Trampoline, or Fire from the Abilities menu on the home screen. Wall places wooden cover, Trampoline sticks a bounce pad to surfaces, Fire launches a burning line. Charges and cooldowns depend on the ability." },
   { title: "Parry", text: "This table shoots back! Press E right before a bullet hits you to PARRY it — the reflected shot deals 10 damage and you get a 2 second power boost (infinite ammo, 2x damage). Successful parry: 4s cooldown. Missed parry: 7s cooldown." },
   { title: "Blue tables", text: "Blue tables are fast chasers. They rush at you and explode on contact. Shoot them before they reach you!" },
@@ -294,8 +296,20 @@ export function comboBurstThreshold() {
 export function comboBurstHeal() {
   return G.mode === "pvp" ? 20 : 30;
 }
+/** Successful parry: reset every cooldown (ability included) and add 50 to the combo meter. */
+export function onParrySuccess() {
+  G.slamCd = 0;
+  G.parryCd = 0;
+  G.dashCd = 0;
+  G.bombCd = 0;
+  G.reloading = 0;
+  // tiny positive value so World's ability tick finishes the cooldown and refills the charges itself
+  if (G.abilityCd > 0) G.abilityCd = 0.0001;
+  G.combo += 50;
+  G.comboTimer = comboDecayTime();
+}
 export function tryComboBurst() {
-  if (G.phase !== "playing" || G.combo <= comboBurstThreshold()) return false;
+  if (G.phase !== "playing" || G.combo < comboBurstThreshold()) return false;
   if (G.playerHp <= 0 || G.pvpDead || G.campaignDead) return false;
   const heal = comboBurstHeal();
   G.combo = 0;

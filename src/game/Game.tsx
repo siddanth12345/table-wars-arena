@@ -7,7 +7,8 @@ import { Environment, Lightformer } from "@react-three/drei";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { World } from "./World";
-import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial, comboBurstThreshold, comboBurstHeal, comboDecayTime } from "./state";
+import { startMusic } from "./music";
+import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial, comboBurstThreshold, comboBurstHeal, comboDecayTime, STORM_START } from "./state";
 import { SkinsPanel } from "./SkinsPanel";
 import { AbilitiesPanel } from "./AbilitiesPanel";
 import { getAbility, ABILITY_LIST } from "./abilities";
@@ -379,6 +380,21 @@ function HUD() {
           <div className="mx-auto mt-2 h-2 w-72 bg-hud-track">
             <div className="h-full bg-destructive-foreground" style={{ width: `${(G.bossWarn / 10) * 100}%` }} />
           </div>
+        </div>
+      )}
+
+      {G.mode === "pvp" && NET.stage === "playing" && G.countdown <= 0.6 && (
+        <div className="absolute left-1/2 top-6 -translate-x-1/2 rounded bg-hud-panel px-6 py-2 text-center font-mono font-black uppercase tracking-widest">
+          {G.time < STORM_START ? (
+            <>
+              <div className="text-[10px] opacity-70">Storm in</div>
+              <div className={`text-3xl ${STORM_START - G.time <= 10 ? "text-destructive" : ""}`}>
+                {(() => { const s = Math.max(0, Math.ceil(STORM_START - G.time)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; })()}
+              </div>
+            </>
+          ) : (
+            <div className="text-xl text-destructive">Storm closing in!</div>
+          )}
         </div>
       )}
 
@@ -788,6 +804,7 @@ export function Game() {
     const id = setInterval(() => force((n) => n + 1), 200);
     return () => clearInterval(id);
   }, [loaded]);
+  useEffect(() => { startMusic(); }, []);
   useEffect(() => {
     // Feed the cursor position to whichever GUI button it is over, for the hover glow.
     const move = (e: PointerEvent) => {

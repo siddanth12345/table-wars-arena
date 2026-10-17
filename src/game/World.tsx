@@ -8,7 +8,7 @@ import * as THREE from "three";
 import {
   G, MAG, FIRE_INTERVAL, DMG, PARRY_WINDOW, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, BUFF_TIME, DASH_CD, AIR_JUMPS, AIR_DASHES,
   BOMB_CD, BOMB_CD_BUFF, TABLE_HP, TABLE_CAP, BOSS_HITS, BOSS_WARN, setLocker,
-  MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, isMobilePlay, pauseGame, setCursorLocked, registerDamage, tryComboBurst, type TrainSpawn,
+  MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, isMobilePlay, pauseGame, setCursorLocked, registerDamage, tryComboBurst, onParrySuccess, STORM_START, type TrainSpawn,
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, SHARD_SPAWN_N, LOBBY_RESPAWN, FREECAM_SPEEDS,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
@@ -79,8 +79,8 @@ const SLAM_TIERS = [
   { maxH: Infinity, d: 6 * BOSS_S * 1.5, dmg: 25, cd: 10 },
 ];
 const R = ROOM.r;
-// 1v1 storm: starts 60s into a round, closes in from the arena edge at 30 u/s, 5 dmg every 0.1s while inside
-const STORM_START = 60, STORM_SPEED = 30, STORM_DMG = 5, STORM_TICK = 0.1;
+// 1v1 storm: starts 60s into a round, closes in from the arena edge at 30 u/s, 5 dmg every 0.6s while inside
+const STORM_SPEED = 30, STORM_DMG = 5, STORM_TICK = 0.6;
 const UP = new THREE.Vector3(0, 1, 0);
 
 type Bullet = { pos: THREE.Vector3; prev: THREE.Vector3; vel: THREE.Vector3; life: number; alive: boolean; dmg: number };
@@ -2855,6 +2855,7 @@ const kd = (e: KeyboardEvent) => {
                 G.buff = BUFF_TIME;
                 G.parryFlash = 0.3;
                 G.parries++;
+                onParrySuccess(); // resets all cooldowns + 50 combo
               } else damagePlayer(bl.dmg);
             } else if (tWorld < Infinity) bl.alive = false;
           }

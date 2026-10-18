@@ -456,6 +456,7 @@ export function World() {
   const bInst = useRef<THREE.InstancedMesh>(null);
   const splI = useRef<THREE.InstancedMesh>(null);
   const bombMesh = useRef<THREE.Mesh>(null);
+  const bombGroupRef = useRef<THREE.Group | null>(null);
   const boomRefs = useRef<(THREE.Mesh | null)[]>([]);
   const boomRingRefs = useRef<(THREE.Mesh | null)[]>([]);
   const bombRingRef = useRef<THREE.Mesh | null>(null);
@@ -3633,29 +3634,35 @@ const kd = (e: KeyboardEvent) => {
     }
 
     // --- bomb / explosions / hazards / boss visuals ---
-    if (bombMesh.current) {
-      bombMesh.current.visible = bomb.current.alive;
-      bombMesh.current.position.copy(bomb.current.pos);
-      bombMesh.current.scale.setScalar(G.bombBig > 0 ? 1.5 : 1);
-      {
-        const bmat = bombMesh.current.material as THREE.MeshStandardMaterial;
-        bmat.color.set(bomb.current.tele ? "#ffffff" : "#222222");
-        bmat.emissive.set(bomb.current.tele ? "#e5e7eb" : "#ff7a1a");
+    {
+      const alive = bomb.current.alive;
+      const sc = G.bombBig > 0 ? 1.6 : 1;
+      if (bombGroupRef.current) {
+        bombGroupRef.current.visible = alive;
+        if (alive) {
+          bombGroupRef.current.position.copy(bomb.current.pos);
+          bombGroupRef.current.scale.setScalar(sc);
+        }
       }
-    }
-    if (bombRingRef.current) {
-      bombRingRef.current.visible = bomb.current.alive;
-      if (bomb.current.alive) {
-        bombRingRef.current.position.copy(bomb.current.pos);
-        const s = (G.bombBig > 0 ? 1.7 : 1.15);
-        bombRingRef.current.scale.set(s, s, s);
-        bombRingRef.current.rotation.y += dt * 2.8;
-        bombRingRef.current.rotation.x = 0.4;
-        const rm = bombRingRef.current.material as THREE.MeshStandardMaterial;
-        // Normal/F bomb: bright red saturn ring; teleport bomb stays white
-        rm.color.set(bomb.current.tele ? "#f8fafc" : "#ff1a1a");
-        rm.emissive.set(bomb.current.tele ? "#ffffff" : "#ff0000");
-        rm.emissiveIntensity = bomb.current.tele ? 1.2 : 2.4;
+      if (bombMesh.current) {
+        bombMesh.current.visible = alive;
+        const bmat = bombMesh.current.material as THREE.MeshStandardMaterial;
+        bmat.color.set(bomb.current.tele ? "#ffffff" : "#1a1a1a");
+        bmat.emissive.set(bomb.current.tele ? "#e5e7eb" : "#ff7a1a");
+        bmat.emissiveIntensity = bomb.current.tele ? 1.5 : 1.8;
+      }
+      // LARGE saturn rings (clearly outside the bomb body)
+      if (bombRingRef.current) {
+        bombRingRef.current.visible = alive;
+        if (alive) {
+          bombRingRef.current.rotation.x = 0.55;
+          bombRingRef.current.rotation.z = 0.15;
+          bombRingRef.current.rotation.y += dt * 3.2;
+          const rm = bombRingRef.current.material as THREE.MeshStandardMaterial;
+          rm.color.set(bomb.current.tele ? "#f8fafc" : "#ff2020");
+          rm.emissive.set(bomb.current.tele ? "#ffffff" : "#ff0000");
+          rm.emissiveIntensity = bomb.current.tele ? 1.5 : 3.5;
+        }
       }
     }
     booms.forEach((bm, i) => {
@@ -3834,49 +3841,70 @@ const kd = (e: KeyboardEvent) => {
       if (!f.active) return;
       const len = Math.hypot(f.bx - f.ax, f.by - f.ay, f.bz - f.az) || 1;
       const mx = (f.ax + f.bx) / 2, mz = (f.az + f.bz) / 2;
-      const my = Math.max(0.06, (f.ay + f.by) / 2);
-      grp.position.set(mx, my, mz);
-      // orient group so local +Z is along the fissure
+      // Sit ON the floor so the trench cuts into the ground
+      grp.position.set(mx, 0.02, mz);
       const dx = f.bx - f.ax, dz = f.bz - f.az;
       grp.rotation.set(0, Math.atan2(dx, dz), 0);
-      // Subtle lava/fire color shimmer (no size pulse)
-      const shimmer = 0.92 + 0.08 * Math.sin(performance.now() / 280 + i * 1.7);
-      const coreCol = f.m ? "#60a5fa" : "#ffcc33";
-      const plateCol = f.m ? "#1e3a8a" : "#c2410c";
+      const shimmer = 0.9 + 0.1 * Math.sin(performance.now() / 320 + i);
       const glowCol = f.m ? "#3b82f6" : "#ff6a1a";
-      grp.children.forEach((ch, ci) => {
-        const mesh = ch as THREE.Mesh;
-        if (!mesh.isMesh) return;
-        const mat = mesh.material as THREE.MeshStandardMaterial;
-        if (ci === 0) {
-          // glowing core ribbon along full length (flat to the ground)
-          mesh.scale.set(f.m ? 2.8 : 1.9, 0.1, len);
+      const coreCol = f.m ? "#93c5fd" : "#ffe566";
+      const w = f.m ? 1.35 : 1; // wider trench when mastered
+      const parts = grp.userData.parts as {
+        left?: THREE.Mesh; right?: THREE.Mesh; floor?: THREE.Mesh;
+        core?: THREE.Mesh; lipL?: THREE.Mesh; lipR?: THREE.Mesh;
+      } | undefined;
+      if (parts) {
+        // Trench walls (black, angled) — depth into the ground
+        if (parts.left) {
+          parts.left.scale.set(0.35 * w, 1, len);
+          parts.left.position.set(-1.1 * w, -1.1, 0);
+        }
+        if (parts.right) {
+          parts.right.scale.set(0.35 * w, 1, len);
+          parts.right.position.set(1.1 * w, -1.1, 0);
+        }
+        if (parts.floor) {
+          parts.floor.scale.set(2.0 * w, 0.15, len);
+          parts.floor.position.set(0, -2.15, 0);
+        }
+        if (parts.core) {
+          parts.core.scale.set(1.1 * w, 0.45, len * 0.98);
+          parts.core.position.set(0, -1.55, 0);
+          const mat = parts.core.material as THREE.MeshStandardMaterial;
           mat.color.set(coreCol);
           mat.emissive.set(glowCol);
-          mat.emissiveIntensity = 3.2 * shimmer;
-        } else {
-          // jagged plates distributed along full fissure length
-          const pi = ci - 1;
-          const side = pi % 2 === 0 ? 1 : -1;
-          const along = (pi / FIRE_PLATES - 0.5) * len;
-          const out = (f.m ? 2.4 : 1.5) * (1.0 + (pi % 3) * 0.25);
-          mesh.position.set(side * out, 0.03, along);
-          mesh.scale.set(f.m ? 1.35 : 1, 1, f.m ? 1.2 : 1);
-          mat.color.set(plateCol);
-          mat.emissive.set(glowCol);
-          mat.emissiveIntensity = 1.15 * shimmer;
+          mat.emissiveIntensity = 4.5 * shimmer;
         }
-      });
-      // Point lights along the crack (shared light sources)
+        if (parts.lipL) {
+          parts.lipL.scale.set(0.9 * w, 0.12, len);
+          parts.lipL.position.set(-1.55 * w, 0.05, 0);
+        }
+        if (parts.lipR) {
+          parts.lipR.scale.set(0.9 * w, 0.12, len);
+          parts.lipR.position.set(1.55 * w, 0.05, 0);
+        }
+      }
+      // Side branch cracks on the surface
+      const branches = grp.userData.branches as THREE.Mesh[] | undefined;
+      if (branches) {
+        for (let bi = 0; bi < branches.length; bi++) {
+          const br = branches[bi]!;
+          const along = ((bi / branches.length) - 0.5) * len * 0.9;
+          const side = bi % 2 === 0 ? 1 : -1;
+          br.position.set(side * 2.2 * w, 0.04, along);
+          br.scale.set(1.2 + (bi % 3) * 0.4, 1, 0.7);
+          br.visible = true;
+        }
+      }
       const lights = grp.userData.lights as THREE.PointLight[] | undefined;
       if (lights) {
         for (let li = 0; li < lights.length; li++) {
           const L = lights[li]!;
-          const t = (li + 0.5) / lights.length;
-          L.position.set(0, 1.2, (t - 0.5) * len);
+          const tt = (li + 0.5) / lights.length;
+          L.position.set(0, -0.4, (tt - 0.5) * len);
           L.color.set(glowCol);
-          L.intensity = (f.m ? 2.4 : 2.0) * shimmer;
-          L.distance = 40;
+          L.intensity = (f.m ? 3.2 : 2.6) * shimmer;
+          L.distance = 55;
         }
       }
     });
@@ -3912,19 +3940,20 @@ const kd = (e: KeyboardEvent) => {
       if (!rb.active) return;
       m.position.copy(rb.pos);
       const mat = m.material as THREE.MeshStandardMaterial;
-      mat.color.set(rb.tele ? "#ffffff" : "#222222");
+      mat.color.set(rb.tele ? "#ffffff" : "#1a1a1a");
       mat.emissive.set(rb.tele ? "#e5e7eb" : "#ff7a1a");
       const ring = remoteBombRingRefs.current[i];
       if (ring) {
         ring.visible = rb.active;
         ring.position.copy(rb.pos);
-        ring.rotation.y += dt * 2.2;
-        ring.rotation.x = 0.35;
+        ring.rotation.y += dt * 3.2;
+        ring.rotation.x = 0.55;
+        ring.rotation.z = 0.15;
+        ring.scale.setScalar(1);
         const rm = ring.material as THREE.MeshStandardMaterial;
-        rm.color.set(rb.tele ? "#f8fafc" : "#ff1a1a");
+        rm.color.set(rb.tele ? "#f8fafc" : "#ff2020");
         rm.emissive.set(rb.tele ? "#ffffff" : "#ff0000");
-        rm.emissiveIntensity = rb.tele ? 1.2 : 2.4;
-        ring.scale.setScalar(1.15);
+        rm.emissiveIntensity = rb.tele ? 1.5 : 3.5;
       }
     });
     remoteBulletMeshRefs.current.forEach((m, i) => {
@@ -4110,29 +4139,45 @@ const kd = (e: KeyboardEvent) => {
             fireGroupRefs.current[i] = g;
             if (g && !g.userData.built) {
               g.userData.built = true;
-              // core
+              const black = () => new THREE.MeshStandardMaterial({ color: "#0a0a0a", roughness: 0.95, metalness: 0.05 });
+              const dark = () => new THREE.MeshStandardMaterial({ color: "#14110e", roughness: 1 });
+              // Left / right trench walls (angled inward) — depth into the ground
+              const left = new THREE.Mesh(new THREE.BoxGeometry(1, 2.4, 1), black());
+              left.rotation.z = 0.45;
+              g.add(left);
+              const right = new THREE.Mesh(new THREE.BoxGeometry(1, 2.4, 1), black());
+              right.rotation.z = -0.45;
+              g.add(right);
+              // Trench floor
+              const floor = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), black());
+              g.add(floor);
+              // Lava / fire core at the bottom of the trench
               const core = new THREE.Mesh(
                 new THREE.BoxGeometry(1, 1, 1),
-                new THREE.MeshStandardMaterial({ color: "#ffcc33", emissive: "#ff6a1a", emissiveIntensity: 3, transparent: true, opacity: 0.95, depthWrite: false }),
+                new THREE.MeshStandardMaterial({ color: "#ffe566", emissive: "#ff6a1a", emissiveIntensity: 4.5, roughness: 0.35 }),
               );
               g.add(core);
-              // jagged plates along both sides (image-like fissure)
-              for (let p = 0; p < FIRE_PLATES; p++) {
-                const side = p % 2 === 0 ? 1 : -1;
-                const along = (p / FIRE_PLATES - 0.5);
-                const plate = new THREE.Mesh(
-                  new THREE.BoxGeometry(1.4 + (p % 3) * 0.5, 0.08, 0.55 + (p % 4) * 0.15),
-                  new THREE.MeshStandardMaterial({ color: "#c2410c", emissive: "#ff4500", emissiveIntensity: 1.2, roughness: 0.85 }),
+              // Surface lips (broken asphalt edge)
+              const lipL = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), dark());
+              g.add(lipL);
+              const lipR = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), dark());
+              g.add(lipR);
+              g.userData.parts = { left, right, floor, core, lipL, lipR };
+              // Side hairline cracks
+              const branches: THREE.Mesh[] = [];
+              for (let b = 0; b < 10; b++) {
+                const br = new THREE.Mesh(
+                  new THREE.BoxGeometry(1.6, 0.06, 0.12),
+                  new THREE.MeshBasicMaterial({ color: "#0c0c0c" }),
                 );
-                plate.position.set(side * (1.1 + (p % 3) * 0.35), 0.02, along * 0.92);
-                plate.rotation.y = side * (0.15 + (p % 5) * 0.08);
-                plate.rotation.z = side * 0.12;
-                g.add(plate);
+                br.rotation.y = (b % 2 === 0 ? 1 : -1) * (0.4 + (b % 4) * 0.15);
+                g.add(br);
+                branches.push(br);
               }
-              // lights along the fissure
+              g.userData.branches = branches;
               const lights: THREE.PointLight[] = [];
-              for (let li = 0; li < 4; li++) {
-                const L = new THREE.PointLight("#ff6a1a", 2, 40);
+              for (let li = 0; li < 5; li++) {
+                const L = new THREE.PointLight("#ff6a1a", 2.5, 55);
                 g.add(L);
                 lights.push(L);
               }
@@ -4201,23 +4246,30 @@ const kd = (e: KeyboardEvent) => {
         <boxGeometry args={[0.45, 3, 0.45]} />
         <meshStandardMaterial color="#1f4fa8" roughness={0.5} envMapIntensity={2} />
       </instancedMesh>
-      <mesh ref={bombMesh} visible={false}>
-        <sphereGeometry args={[0.8, 16, 12]} />
-        <meshStandardMaterial color="#222" emissive="#ff7a1a" emissiveIntensity={1.5} />
-      </mesh>
-      <mesh ref={(m) => { bombRingRef.current = m; }} visible={false}>
-        <torusGeometry args={[1.45, 0.12, 12, 40]} />
-        <meshStandardMaterial color="#ff1a1a" emissive="#ff0000" emissiveIntensity={2.4} metalness={0.35} roughness={0.25} />
-      </mesh>
+      <group ref={(g) => { bombGroupRef.current = g; }} visible={false}>
+        <mesh ref={bombMesh}>
+          <sphereGeometry args={[0.85, 18, 14]} />
+          <meshStandardMaterial color="#1a1a1a" emissive="#ff7a1a" emissiveIntensity={1.8} />
+        </mesh>
+        {/* Large Saturn ring — clearly outside the bomb */}
+        <mesh ref={(m) => { bombRingRef.current = m; }} rotation={[0.55, 0, 0.15]}>
+          <torusGeometry args={[2.4, 0.22, 12, 48]} />
+          <meshStandardMaterial color="#ff2020" emissive="#ff0000" emissiveIntensity={3.5} metalness={0.4} roughness={0.2} toneMapped={false} />
+        </mesh>
+        <mesh rotation={[0.55, 0, 0.15]}>
+          <torusGeometry args={[3.1, 0.08, 8, 48]} />
+          <meshStandardMaterial color="#ff4444" emissive="#ff2222" emissiveIntensity={2.2} transparent opacity={0.85} toneMapped={false} />
+        </mesh>
+      </group>
       {remoteBombs.map((_, i) => (
         <group key={`rbomb${i}`}>
           <mesh ref={(m) => { remoteBombMeshRefs.current[i] = m; }} visible={false}>
-            <sphereGeometry args={[0.8, 16, 12]} />
-            <meshStandardMaterial color="#222" emissive="#ff7a1a" emissiveIntensity={1.5} />
+            <sphereGeometry args={[0.85, 18, 14]} />
+            <meshStandardMaterial color="#1a1a1a" emissive="#ff7a1a" emissiveIntensity={1.8} />
           </mesh>
           <mesh ref={(m) => { remoteBombRingRefs.current[i] = m; }} visible={false}>
-            <torusGeometry args={[1.45, 0.12, 12, 40]} />
-            <meshStandardMaterial color="#ff1a1a" emissive="#ff0000" emissiveIntensity={2.4} metalness={0.35} roughness={0.25} />
+            <torusGeometry args={[2.4, 0.22, 12, 48]} />
+            <meshStandardMaterial color="#ff2020" emissive="#ff0000" emissiveIntensity={3.5} metalness={0.4} roughness={0.2} toneMapped={false} />
           </mesh>
         </group>
       ))}

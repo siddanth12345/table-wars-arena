@@ -395,8 +395,8 @@ export function World() {
   const padMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const coilMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireGroupRefs = useRef<(THREE.Group | null)[]>([]);
-  const FIRE_VFX_VER = 5; // zigzag fissure segments
-  const FIRE_SEGS = 16;
+  const FIRE_VFX_VER = 6; // jagged + rocks + DNA
+  const FIRE_SEGS = 20;
   const fireballMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireParticleRefs = useRef<(THREE.Points | null)[]>([]);
   const slam = useRef({ on: false, fromY: 0, h: 0 });
@@ -3831,55 +3831,115 @@ const kd = (e: KeyboardEvent) => {
       if (!grp) return;
       grp.visible = f.active;
       if (!f.active) return;
-      // World-space zigzag: group at origin, segments placed along A→B
       grp.position.set(0, 0, 0);
       grp.rotation.set(0, 0, 0);
       const len = Math.hypot(f.bx - f.ax, f.by - f.ay, f.bz - f.az) || 1;
       const dx = (f.bx - f.ax) / len, dz = (f.bz - f.az) / len;
-      // Perpendicular on XZ for zigzag
       const px = -dz, pz = dx;
       const shimmer = 0.9 + 0.1 * Math.sin(performance.now() / 280 + i);
       const glowCol = f.m ? "#3b82f6" : "#ff2a1a";
       const coreCol = f.m ? "#93c5fd" : "#ffcc33";
-      const amp = f.m ? 4.5 : 3.2; // zigzag amplitude
-      const bedW = f.m ? 2.8 : 2.0;
-      const coreW = f.m ? 1.1 : 0.75;
-      const segs = grp.userData.segs as { bed: THREE.Mesh; core: THREE.Mesh; light: THREE.PointLight }[] | undefined;
+      // Sharp jagged offsets (not smooth curves) — alternate hard steps
+      const jagAmp = f.m ? 5.5 : 4.2;
+      const bedW = f.m ? 2.4 : 1.8;
+      const coreW = f.m ? 0.95 : 0.65;
+      const rockH = bedW; // protrusion = thickness
+      const segs = grp.userData.segs as {
+        bed: THREE.Mesh; core: THREE.Mesh; light: THREE.PointLight;
+        rockL: THREE.Mesh; rockR: THREE.Mesh;
+        dnaBed?: THREE.Mesh; dnaCore?: THREE.Mesh;
+      }[] | undefined;
       if (!segs) return;
+      // Precompute jagged sample points along main path
+      const pts: { x: number; z: number; j: number }[] = [];
+      for (let si = 0; si <= segs.length; si++) {
+        const tt = si / segs.length;
+        // Sharp turns: quantize sine into steps + occasional hard flip
+        const raw = Math.sin(tt * Math.PI * 7) + 0.35 * Math.sin(tt * Math.PI * 13);
+        const stepped = Math.sign(raw) * Math.min(1, Math.abs(raw) * 1.8);
+        const j = stepped * jagAmp * (si % 3 === 0 ? 1.25 : 1);
+        pts.push({
+          x: f.ax + dx * len * tt + px * j,
+          z: f.az + dz * len * tt + pz * j,
+          j,
+        });
+      }
       for (let si = 0; si < segs.length; si++) {
-        const t0 = si / segs.length;
-        const t1 = (si + 1) / segs.length;
-        const zig0 = Math.sin(t0 * Math.PI * 5) * amp;
-        const zig1 = Math.sin(t1 * Math.PI * 5) * amp;
-        const x0 = f.ax + dx * len * t0 + px * zig0;
-        const z0 = f.az + dz * len * t0 + pz * zig0;
-        const x1 = f.ax + dx * len * t1 + px * zig1;
-        const z1 = f.az + dz * len * t1 + pz * zig1;
-        const mx = (x0 + x1) * 0.5, mz = (z0 + z1) * 0.5;
-        const sdx = x1 - x0, sdz = z1 - z0;
+        const p0 = pts[si]!, p1 = pts[si + 1]!;
+        const mx = (p0.x + p1.x) * 0.5, mz = (p0.z + p1.z) * 0.5;
+        const sdx = p1.x - p0.x, sdz = p1.z - p0.z;
         const segLen = Math.hypot(sdx, sdz) || 1;
         const yaw = Math.atan2(sdx, sdz);
-        const { bed, core, light } = segs[si]!;
-        bed.visible = true;
-        core.visible = true;
-        bed.position.set(mx, 0.05, mz);
-        bed.rotation.set(0, yaw, 0);
-        bed.scale.set(bedW, 0.12, segLen * 1.08);
-        core.position.set(mx, 0.12, mz);
-        core.rotation.set(0, yaw, 0);
-        core.scale.set(coreW, 0.1, segLen * 1.02);
-        const cm = core.material as THREE.MeshStandardMaterial;
+        const s = segs[si]!;
+        s.bed.visible = true;
+        s.core.visible = true;
+        s.bed.position.set(mx, 0.04, mz);
+        s.bed.rotation.set(0, yaw, 0);
+        s.bed.scale.set(bedW, 0.1, segLen * 1.1);
+        s.core.position.set(mx, 0.11, mz);
+        s.core.rotation.set(0, yaw, 0);
+        s.core.scale.set(coreW, 0.09, segLen * 1.05);
+        const cm = s.core.material as THREE.MeshStandardMaterial;
         cm.color.set(coreCol);
         cm.emissive.set(glowCol);
         cm.emissiveIntensity = 6.5 * shimmer;
-        const bm = bed.material as THREE.MeshBasicMaterial;
-        bm.color.set("#050505");
-        // Light per segment so the whole path glows, not just the middle
-        light.position.set(mx, 2.5, mz);
-        light.color.set(glowCol);
-        light.intensity = (f.m ? 3.2 : 2.6) * shimmer;
-        light.distance = 55;
-        light.visible = true;
+        // Rocks on both sides — same thickness as black bed, protrude upward by that thickness
+        for (const [rock, side] of [[s.rockL, -1] as const, [s.rockR, 1] as const]) {
+          rock.visible = true;
+          rock.position.set(mx + px * side * (bedW * 0.55 + rockH * 0.35), rockH * 0.5, mz + pz * side * (bedW * 0.55 + rockH * 0.35));
+          rock.rotation.set(0, yaw + side * 0.15, side * 0.08);
+          rock.scale.set(rockH * (0.7 + (si % 3) * 0.15), rockH * (0.85 + (si % 2) * 0.2), segLen * (0.45 + (si % 4) * 0.08));
+          const rm = rock.material as THREE.MeshStandardMaterial;
+          if (f.m) {
+            rm.color.set(si % 2 === 0 ? "#1e3a8a" : "#0f172a");
+            rm.emissive.set("#3b82f6");
+            rm.emissiveIntensity = 2.2 * shimmer;
+          } else {
+            rm.color.set(si % 2 === 0 ? "#3a3a3a" : "#1a1a1a");
+            rm.emissive.set("#000000");
+            rm.emissiveIntensity = 0;
+          }
+        }
+        s.light.position.set(mx, 2.2, mz);
+        s.light.color.set(glowCol);
+        s.light.intensity = (f.m ? 3.0 : 2.4) * shimmer;
+        s.light.distance = 50;
+        s.light.visible = true;
+        // Mastered DNA second jagged strand (phase-shifted sharp path)
+        if (s.dnaBed && s.dnaCore) {
+          if (f.m) {
+            const tt0 = si / segs.length, tt1 = (si + 1) / segs.length;
+            const raw0 = Math.sin(tt0 * Math.PI * 7 + 2.2) + 0.4 * Math.sin(tt0 * Math.PI * 15);
+            const raw1 = Math.sin(tt1 * Math.PI * 7 + 2.2) + 0.4 * Math.sin(tt1 * Math.PI * 15);
+            const j0 = Math.sign(raw0) * Math.min(1, Math.abs(raw0) * 1.8) * jagAmp * 0.85;
+            const j1 = Math.sign(raw1) * Math.min(1, Math.abs(raw1) * 1.8) * jagAmp * 0.85;
+            // Cross over the main strand for DNA look
+            const cross = (si % 4 < 2 ? 1 : -1);
+            const dx0 = f.ax + dx * len * tt0 + px * (j0 * cross);
+            const dz0 = f.az + dz * len * tt0 + pz * (j0 * cross);
+            const dx1 = f.ax + dx * len * tt1 + px * (j1 * cross);
+            const dz1 = f.az + dz * len * tt1 + pz * (j1 * cross);
+            const dmx = (dx0 + dx1) * 0.5, dmz = (dz0 + dz1) * 0.5;
+            const dsdx = dx1 - dx0, dsdz = dz1 - dz0;
+            const dLen = Math.hypot(dsdx, dsdz) || 1;
+            const dyaw = Math.atan2(dsdx, dsdz);
+            s.dnaBed.visible = true;
+            s.dnaCore.visible = true;
+            s.dnaBed.position.set(dmx, 0.05, dmz);
+            s.dnaBed.rotation.set(0, dyaw, 0);
+            s.dnaBed.scale.set(bedW * 0.75, 0.09, dLen * 1.1);
+            s.dnaCore.position.set(dmx, 0.12, dmz);
+            s.dnaCore.rotation.set(0, dyaw, 0);
+            s.dnaCore.scale.set(coreW * 0.85, 0.08, dLen * 1.05);
+            const dm = s.dnaCore.material as THREE.MeshStandardMaterial;
+            dm.color.set("#60a5fa");
+            dm.emissive.set("#2563eb");
+            dm.emissiveIntensity = 7 * shimmer;
+          } else {
+            s.dnaBed.visible = false;
+            s.dnaCore.visible = false;
+          }
+        }
       }
     });
     fireballs.forEach((fb, i) => {
@@ -4112,8 +4172,11 @@ const kd = (e: KeyboardEvent) => {
               else mat?.dispose?.();
             }
             g.userData.vfxVer = FIRE_VFX_VER;
-            // Zigzag crack = many short black beds + colored cores + per-seg lights
-            const segs: { bed: THREE.Mesh; core: THREE.Mesh; light: THREE.PointLight }[] = [];
+            const segs: {
+              bed: THREE.Mesh; core: THREE.Mesh; light: THREE.PointLight;
+              rockL: THREE.Mesh; rockR: THREE.Mesh;
+              dnaBed: THREE.Mesh; dnaCore: THREE.Mesh;
+            }[] = [];
             for (let s = 0; s < FIRE_SEGS; s++) {
               const bed = new THREE.Mesh(
                 new THREE.BoxGeometry(1, 1, 1),
@@ -4126,14 +4189,26 @@ const kd = (e: KeyboardEvent) => {
                   roughness: 0.25, toneMapped: false,
                 }),
               );
-              const light = new THREE.PointLight("#ff6a1a", 2.5, 55);
-              bed.visible = false;
-              core.visible = false;
-              light.visible = false;
-              g.add(bed);
-              g.add(core);
-              g.add(light);
-              segs.push({ bed, core, light });
+              const rockMat = () => new THREE.MeshStandardMaterial({ color: "#2a2a2a", roughness: 0.95, metalness: 0.05 });
+              const rockL = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), rockMat());
+              const rockR = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), rockMat());
+              const dnaBed = new THREE.Mesh(
+                new THREE.BoxGeometry(1, 1, 1),
+                new THREE.MeshBasicMaterial({ color: "#050505" }),
+              );
+              const dnaCore = new THREE.Mesh(
+                new THREE.BoxGeometry(1, 1, 1),
+                new THREE.MeshStandardMaterial({
+                  color: "#60a5fa", emissive: "#2563eb", emissiveIntensity: 7,
+                  roughness: 0.25, toneMapped: false,
+                }),
+              );
+              const light = new THREE.PointLight("#ff6a1a", 2.5, 50);
+              bed.visible = core.visible = rockL.visible = rockR.visible = false;
+              dnaBed.visible = dnaCore.visible = light.visible = false;
+              g.add(bed); g.add(core); g.add(rockL); g.add(rockR);
+              g.add(dnaBed); g.add(dnaCore); g.add(light);
+              segs.push({ bed, core, light, rockL, rockR, dnaBed, dnaCore });
             }
             g.userData.segs = segs;
           }}

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { saveTraining } from "./account";
 import { LobbyInvite } from "./OnlineUI";
 import { ABILITY_LIST, getAbility, setAbility, useAbility } from "./abilities";
-import { hasMastery, masteryOn, setMasteryOn, useProgress } from "./mastery";
+import { masteryOn, setTrainMastery, useProgress } from "./mastery";
 import { G, TRAIN, TRAIN_CMD, TRAIN_DEFAULTS, TRAIN_Q, lockPointer, type TrainCfg, type TrainSpawn } from "./state";
 
 function useTick(ms: number) {
@@ -53,13 +53,12 @@ function AbilityTab() {
       G.abilityCd = 0;
       G.abilityCharges = id === "wall" ? 6 : id === "trampoline" ? 3 : 1;
     }
-    if (hasMastery(id)) setMasteryOn(id, mastered);
+    setTrainMastery(id, mastered); // training-only: works even if not earned, never saved
   };
   return (
     <div className="space-y-3">
-      <p className="text-xs uppercase tracking-widest opacity-70">Changes apply instantly. Mastered versions unlock by earning their achievement.</p>
+      <p className="text-xs uppercase tracking-widest opacity-70">Changes apply instantly. Mastered versions are free to use here, but only in training — other modes need the earned mastery.</p>
       {ABILITY_LIST.map((a) => {
-        const has = hasMastery(a.id);
         const on = cur === a.id && masteryOn(a.id);
         const base = cur === a.id && !on;
         return (
@@ -73,12 +72,10 @@ function AbilityTab() {
               Normal
             </button>
             <button
-              disabled={!has}
-              title={has ? "" : "Earn this ability's achievement to unlock"}
-              className={`${btn} border-2 py-2 ${on ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"} ${has ? "" : "cursor-not-allowed opacity-40"}`}
+              className={`${btn} border-2 py-2 ${on ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"}`}
               onClick={() => choose(a.id, true)}
             >
-              {has ? "Mastered" : "Mastered 🔒"}
+              Mastered
             </button>
           </div>
         );

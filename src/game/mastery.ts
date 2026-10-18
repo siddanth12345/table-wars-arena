@@ -103,7 +103,14 @@ export const hasAchievement = (id: AchievementId) => !!progress.earned[id];
 /** The mastery has been earned (whether or not it is switched on). */
 export const hasMastery = (ab: AbilityId) => !!progress.earned[achievementFor(ab).id];
 /** The mastery is earned AND switched on — gameplay code asks this. */
-export const masteryOn = (ab: AbilityId) => hasMastery(ab) && !progress.off[ab];
+export const masteryOn = (ab: AbilityId) => {
+  // Training sandbox: whatever was picked in the training menu wins (earned or not) and is never saved
+  if (G.mode === "training" && trainPick[ab] !== undefined) return trainPick[ab]!;
+  return hasMastery(ab) && !progress.off[ab];
+};
+const trainPick: Partial<Record<AbilityId, boolean>> = {};
+/** Training menu only: use the mastered (or normal) version of an ability, even if it isn't earned. Not saved. */
+export function setTrainMastery(ab: AbilityId, on: boolean) { trainPick[ab] = on; bump(); }
 
 export function setMasteryOn(ab: AbilityId, on: boolean) {
   if (!hasMastery(ab)) return;

@@ -395,7 +395,7 @@ export function World() {
   const padMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const coilMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireGroupRefs = useRef<(THREE.Group | null)[]>([]);
-  const FIRE_PLATES = 14; // jagged plates along the fissure
+  const FIRE_VFX_VER = 4; // bump to force rebuild of cached fire groups
   const fireballMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireParticleRefs = useRef<(THREE.Points | null)[]>([]);
   const slam = useRef({ on: false, fromY: 0, h: 0 });
@@ -3838,59 +3838,57 @@ const kd = (e: KeyboardEvent) => {
       const shimmer = 0.88 + 0.12 * Math.sin(performance.now() / 300 + i);
       const glowCol = f.m ? "#3b82f6" : "#ff6a1a";
       const coreCol = f.m ? "#93c5fd" : "#ffe566";
-      const w = f.m ? 1.5 : 1.15;
+      const w = f.m ? 2.2 : 1.7;
       const parts = grp.userData.parts as {
         mask?: THREE.Mesh; left?: THREE.Mesh; right?: THREE.Mesh; floor?: THREE.Mesh;
         core?: THREE.Mesh; lipL?: THREE.Mesh; lipR?: THREE.Mesh;
       } | undefined;
       if (parts) {
-        // Floor cut-out mask — hides the real floor so the trench reads as a hole
+        // Black strip over floor = visible cut-out hole
         if (parts.mask) {
-          parts.mask.scale.set(3.2 * w, 1, len * 1.02);
-          parts.mask.position.set(0, 0.02, 0);
+          parts.mask.scale.set(5.5 * w, 1, len * 1.04);
+          parts.mask.position.set(0, 0.06, 0);
         }
-        // Wider black trench walls (angled) so depth is obvious
         if (parts.left) {
-          parts.left.scale.set(0.55 * w, 1, len);
-          parts.left.position.set(-1.35 * w, -1.4, 0);
+          parts.left.scale.set(1.2 * w, 3.2, len);
+          parts.left.position.set(-2.0 * w, -1.6, 0);
         }
         if (parts.right) {
-          parts.right.scale.set(0.55 * w, 1, len);
-          parts.right.position.set(1.35 * w, -1.4, 0);
+          parts.right.scale.set(1.2 * w, 3.2, len);
+          parts.right.position.set(2.0 * w, -1.6, 0);
         }
         if (parts.floor) {
-          parts.floor.scale.set(2.6 * w, 0.2, len);
-          parts.floor.position.set(0, -2.7, 0);
+          parts.floor.scale.set(4.0 * w, 0.25, len);
+          parts.floor.position.set(0, -3.2, 0);
         }
         if (parts.core) {
-          parts.core.scale.set(1.5 * w, 0.7, len * 0.98);
-          parts.core.position.set(0, -1.9, 0);
+          parts.core.scale.set(2.4 * w, 1.1, len * 0.98);
+          parts.core.position.set(0, -1.7, 0);
           const mat = parts.core.material as THREE.MeshStandardMaterial;
           mat.color.set(coreCol);
           mat.emissive.set(glowCol);
-          mat.emissiveIntensity = 5.5 * shimmer;
+          mat.emissiveIntensity = 8 * shimmer;
         }
         if (parts.lipL) {
-          parts.lipL.scale.set(1.1 * w, 0.14, len);
-          parts.lipL.position.set(-2.0 * w, 0.06, 0);
+          parts.lipL.scale.set(1.6 * w, 0.18, len);
+          parts.lipL.position.set(-3.0 * w, 0.08, 0);
         }
         if (parts.lipR) {
-          parts.lipR.scale.set(1.1 * w, 0.14, len);
-          parts.lipR.position.set(2.0 * w, 0.06, 0);
+          parts.lipR.scale.set(1.6 * w, 0.18, len);
+          parts.lipR.position.set(3.0 * w, 0.08, 0);
         }
       }
-      // Evenly spaced glow slabs along the trench (not one middle light)
       const glows = grp.userData.glows as THREE.Mesh[] | undefined;
       if (glows) {
         for (let gi = 0; gi < glows.length; gi++) {
           const gm = glows[gi]!;
           const tt = (gi + 0.5) / glows.length;
-          gm.position.set(0, -1.35, (tt - 0.5) * len * 0.95);
-          gm.scale.set(1.35 * w, 0.55, Math.max(2, len / glows.length * 1.1));
+          gm.position.set(0, -1.2, (tt - 0.5) * len * 0.96);
+          gm.scale.set(2.0 * w, 0.9, Math.max(3, len / glows.length * 1.15));
           const mat = gm.material as THREE.MeshStandardMaterial;
           mat.color.set(coreCol);
           mat.emissive.set(glowCol);
-          mat.emissiveIntensity = 4.2 * shimmer;
+          mat.emissiveIntensity = 7 * shimmer;
           gm.visible = true;
         }
       }
@@ -3900,8 +3898,8 @@ const kd = (e: KeyboardEvent) => {
           const br = branches[bi]!;
           const along = ((bi / branches.length) - 0.5) * len * 0.9;
           const side = bi % 2 === 0 ? 1 : -1;
-          br.position.set(side * 2.6 * w, 0.05, along);
-          br.scale.set(1.3 + (bi % 3) * 0.4, 1, 0.75);
+          br.position.set(side * 3.4 * w, 0.07, along);
+          br.scale.set(1.5 + (bi % 3) * 0.5, 1, 0.8);
           br.visible = true;
         }
       }
@@ -3910,10 +3908,10 @@ const kd = (e: KeyboardEvent) => {
         for (let li = 0; li < lights.length; li++) {
           const L = lights[li]!;
           const tt = (li + 0.5) / lights.length;
-          L.position.set(0, -0.2, (tt - 0.5) * len);
+          L.position.set(0, 0.5, (tt - 0.5) * len);
           L.color.set(glowCol);
-          L.intensity = (f.m ? 2.8 : 2.2) * shimmer;
-          L.distance = 48;
+          L.intensity = (f.m ? 4.5 : 3.5) * shimmer;
+          L.distance = 80;
         }
       }
     });
@@ -4135,64 +4133,85 @@ const kd = (e: KeyboardEvent) => {
           key={`af${i}`}
           ref={(g) => {
             fireGroupRefs.current[i] = g;
-            if (g && !g.userData.built) {
-              g.userData.built = true;
-              const black = () => new THREE.MeshStandardMaterial({ color: "#050505", roughness: 0.98, metalness: 0.02 });
-              const dark = () => new THREE.MeshStandardMaterial({ color: "#12100c", roughness: 1 });
-              // Floor cut-out: solid black strip that covers the real floor so the trench looks open
-              const mask = new THREE.Mesh(
-                new THREE.BoxGeometry(1, 0.08, 1),
-                new THREE.MeshBasicMaterial({ color: "#020202", depthWrite: true }),
-              );
-              g.add(mask);
-              const left = new THREE.Mesh(new THREE.BoxGeometry(1, 3.0, 1), black());
-              left.rotation.z = 0.5;
-              g.add(left);
-              const right = new THREE.Mesh(new THREE.BoxGeometry(1, 3.0, 1), black());
-              right.rotation.z = -0.5;
-              g.add(right);
-              const floor = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), black());
-              g.add(floor);
-              const core = new THREE.Mesh(
-                new THREE.BoxGeometry(1, 1, 1),
-                new THREE.MeshStandardMaterial({ color: "#ffe566", emissive: "#ff6a1a", emissiveIntensity: 5.5, roughness: 0.3, toneMapped: false }),
-              );
-              g.add(core);
-              const lipL = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), dark());
-              g.add(lipL);
-              const lipR = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), dark());
-              g.add(lipR);
-              g.userData.parts = { mask, left, right, floor, core, lipL, lipR };
-              // Even glow segments along the fissure
-              const glows: THREE.Mesh[] = [];
-              for (let gi = 0; gi < 8; gi++) {
-                const gm = new THREE.Mesh(
-                  new THREE.BoxGeometry(1, 1, 1),
-                  new THREE.MeshStandardMaterial({ color: "#ffe566", emissive: "#ff6a1a", emissiveIntensity: 4.2, roughness: 0.25, toneMapped: false }),
-                );
-                g.add(gm);
-                glows.push(gm);
-              }
-              g.userData.glows = glows;
-              const branches: THREE.Mesh[] = [];
-              for (let b = 0; b < 10; b++) {
-                const br = new THREE.Mesh(
-                  new THREE.BoxGeometry(1.6, 0.06, 0.12),
-                  new THREE.MeshBasicMaterial({ color: "#0c0c0c" }),
-                );
-                br.rotation.y = (b % 2 === 0 ? 1 : -1) * (0.4 + (b % 4) * 0.15);
-                g.add(br);
-                branches.push(br);
-              }
-              g.userData.branches = branches;
-              const lights: THREE.PointLight[] = [];
-              for (let li = 0; li < 8; li++) {
-                const L = new THREE.PointLight("#ff6a1a", 2.2, 48);
-                g.add(L);
-                lights.push(L);
-              }
-              g.userData.lights = lights;
+            if (!g) return;
+            // Rebuild when version changes (old groups kept thorns/plates forever)
+            if (g.userData.vfxVer === FIRE_VFX_VER) return;
+            while (g.children.length) {
+              const ch = g.children[0]!;
+              g.remove(ch);
+              const mesh = ch as THREE.Mesh;
+              mesh.geometry?.dispose?.();
+              const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+              if (Array.isArray(mat)) mat.forEach((x) => x.dispose?.());
+              else mat?.dispose?.();
             }
+            g.userData.vfxVer = FIRE_VFX_VER;
+            const black = () => new THREE.MeshStandardMaterial({ color: "#030303", roughness: 1, metalness: 0 });
+            const dark = () => new THREE.MeshStandardMaterial({ color: "#1a1510", roughness: 1 });
+            // Wide floor mask — covers real floor so trench is a visible HOLE
+            const mask = new THREE.Mesh(
+              new THREE.BoxGeometry(1, 0.12, 1),
+              new THREE.MeshBasicMaterial({ color: "#000000" }),
+            );
+            mask.renderOrder = 2;
+            g.add(mask);
+            // Deep angled walls
+            const left = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), black());
+            left.rotation.z = 0.55;
+            g.add(left);
+            const right = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), black());
+            right.rotation.z = -0.55;
+            g.add(right);
+            const floor = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), black());
+            g.add(floor);
+            // Bright lava ribbon
+            const core = new THREE.Mesh(
+              new THREE.BoxGeometry(1, 1, 1),
+              new THREE.MeshStandardMaterial({
+                color: "#ffe566", emissive: "#ff5500", emissiveIntensity: 8,
+                roughness: 0.2, toneMapped: false,
+              }),
+            );
+            core.renderOrder = 3;
+            g.add(core);
+            const lipL = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), dark());
+            g.add(lipL);
+            const lipR = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), dark());
+            g.add(lipR);
+            g.userData.parts = { mask, left, right, floor, core, lipL, lipR };
+            // Many glow chunks evenly along the trench
+            const glows: THREE.Mesh[] = [];
+            for (let gi = 0; gi < 12; gi++) {
+              const gm = new THREE.Mesh(
+                new THREE.BoxGeometry(1, 1, 1),
+                new THREE.MeshStandardMaterial({
+                  color: "#ffcc44", emissive: "#ff6a1a", emissiveIntensity: 7,
+                  roughness: 0.2, toneMapped: false,
+                }),
+              );
+              gm.renderOrder = 3;
+              g.add(gm);
+              glows.push(gm);
+            }
+            g.userData.glows = glows;
+            const branches: THREE.Mesh[] = [];
+            for (let b = 0; b < 12; b++) {
+              const br = new THREE.Mesh(
+                new THREE.BoxGeometry(2.2, 0.08, 0.14),
+                new THREE.MeshBasicMaterial({ color: "#0a0a0a" }),
+              );
+              br.rotation.y = (b % 2 === 0 ? 1 : -1) * (0.35 + (b % 5) * 0.12);
+              g.add(br);
+              branches.push(br);
+            }
+            g.userData.branches = branches;
+            const lights: THREE.PointLight[] = [];
+            for (let li = 0; li < 10; li++) {
+              const L = new THREE.PointLight("#ff6a1a", 3.5, 70);
+              g.add(L);
+              lights.push(L);
+            }
+            g.userData.lights = lights;
           }}
           visible={false}
         />

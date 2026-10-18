@@ -354,8 +354,8 @@ export function World() {
   const botPool = useMemo(() => bulletPool(320), []);
   const tables = useMemo(() => Array.from({ length: TABLE_POOL }, newTable), []);
   const splinters = useMemo<Splinter[]>(() => [], []);
-  const bomb = useRef({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), tele: null as THREE.Vector3 | null });
-  const booms = useMemo(() => Array.from({ length: 24 }, () => ({ t: 0, pos: new THREE.Vector3(), r: BOMB_R, col: "#ffb347", dur: 0.5, hold: false })), []);
+  const bomb = useRef({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), tele: null as THREE.Vector3 | null, netId: "" });
+  const booms = useMemo(() => Array.from({ length: 24 }, () => ({ t: 0, pos: new THREE.Vector3(), r: BOMB_R, col: "#ffb347", dur: 0.5, hold: false, ring: false, ringCol: "#ffffff", rx: 0, ry: 0, rz: 0 })), []);
   const hazards = useMemo<Hazard[]>(() => Array.from({ length: 8 }, () => ({ active: false, kind: "aoe", t: 0, total: 1, fx: 0, x: 0, z: 0, a0: 0 })), []);
   const blues = useMemo(() => Array.from({ length: BLUE_N }, () => ({ alive: false, pos: new THREE.Vector3(), dash: new THREE.Vector3(), hp: BLUE_HP, hitCd: 0, dashT: 8, yaw: 0 })), []);
   const blueT = useRef(6);
@@ -365,11 +365,11 @@ export function World() {
   // Ability props: walls (solid), trampolines (bounce pads), fire lines
   const abilityWalls = useMemo(() => Array.from({ length: 16 }, () => ({
     active: false, cx: 0, cy: 0, cz: 0, yaw: 0, pitch: 0, hw: 0.5, hh: 0.5, hd: 0.5, t: 0, netId: "" as string,
-    m: false, ret: false, rt: 0, hit: new Map<string, number>(),
+    m: false, ret: false, rt: 0, hit: new Map<string, number>(), grow: 1,
   })), []);
   const abilityPads = useMemo(() => Array.from({ length: 12 }, () => ({
     active: false, cx: 0, cy: 0, cz: 0, yaw: 0, pitch: 0, hw: 0.5, hh: 0.5, hd: 0.5,
-    nx: 0, ny: 1, nz: 0, t: 0, cd: 0, netId: "" as string, m: false,
+    nx: 0, ny: 1, nz: 0, t: 0, cd: 0, netId: "" as string, m: false, squish: 0,
   })), []);
   const abilityFires = useMemo(() => Array.from({ length: 8 }, () => ({
     active: false, ax: 0, ay: 0, az: 0, bx: 0, by: 0, bz: 0, t: 0,
@@ -383,6 +383,11 @@ export function World() {
     active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0,
   })), []);
   const remoteBulletMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const remoteBombs = useMemo(() => Array.from({ length: 8 }, () => ({
+    active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, tele: false, netId: "" as string,
+  })), []);
+  const remoteBombMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const remoteBombRingRefs = useRef<(THREE.Mesh | null)[]>([]);
   const lastTpVfx = useRef(0);
   // Burn DoT on peers/bots from fireball
   const burns = useRef(new Map<string, { t: number; lx: number; ly: number; lz: number; acc: number }>());
@@ -451,6 +456,11 @@ export function World() {
   const splI = useRef<THREE.InstancedMesh>(null);
   const bombMesh = useRef<THREE.Mesh>(null);
   const boomRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const boomRingRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const bombRingRef = useRef<THREE.Mesh | null>(null);
+  const teleportRingRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const slamCracks = useMemo(() => Array.from({ length: 10 }, () => ({ active: false, x: 0, y: 0, z: 0, t: 0, yaw: 0 })), []);
+  const crackMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const hazRefs = useRef<({ disc: THREE.Mesh | null; sector: THREE.Mesh | null; sword: THREE.Group | null })[]>(
     Array.from({ length: 8 }, () => ({ disc: null, sector: null, sword: null })),
   );
@@ -714,7 +724,7 @@ export function World() {
     boomFx(at, br, 0.5, true, "bomb", tele ? "#ffffff" : "");
     G.shake = 0.6;
   };
-  const boomFx = (at: THREE.Vector3, r: number, dur = 0.5, sync = true, kind: "bomb" | "fire" | "none" = "bomb", col = "", hold = false) => {
+  const boomFx = (at: THREE.Vector3, r: number, dur = 0.5, sync = true, kind: "bomb" | "fire" | "none" = "bomb", col = "", hold = false, ringCol?: string) => {
     const bm = booms.find((x) => x.t <= 0) ?? booms[0]!;
     bm.t = dur;
     bm.dur = dur;
@@ -722,8 +732,20 @@ export function World() {
     bm.col = col || "#ffb347";
     bm.pos.copy(at);
     bm.r = r;
+    bm.ring = !!ringCol;
+    bm.ringCol = ringCol || "#ffffff";
+    bm.rx = Math.random() * Math.PI;
+    bm.ry = Math.random() * Math.PI;
+    bm.rz = Math.random() * Math.PI;
     if (kind !== "none") playSfx(kind === "fire" ? "fire_explode" : "bomb_explode", Math.max(0.15, 1 - at.distanceTo(camera.position) / 350));
-    if (sync && NET.online) sendNet("vfx", { k: "boom", x: at.x, y: at.y, z: at.z, r, t: dur, ...(col ? { c: col } : {}), ...(hold ? { h: 1 } : {}) });
+    if (sync && NET.online) sendNet("vfx", { k: "boom", x: at.x, y: at.y, z: at.z, r, t: dur, ...(col ? { c: col } : {}), ...(hold ? { h: 1 } : {}), ...(ringCol ? { rc: ringCol } : {}) });
+  };
+  const spawnSlamCrack = (x: number, y: number, z: number) => {
+    const c = slamCracks.find((q) => !q.active) ?? slamCracks[0]!;
+    c.active = true;
+    c.x = x; c.y = y + 0.05; c.z = z;
+    c.t = 4;
+    c.yaw = Math.random() * Math.PI * 2;
   };
   // 1v1: damage every opponent whose (enlarged) hitbox is inside the blast
   const pvpBlast = (at: THREE.Vector3, r: number, dmg: number, stun = false) => {
@@ -814,7 +836,7 @@ export function World() {
         noteDmg(5, pr.id, pr.x, pr.y + 2, pr.z);
       }
     }
-    boomFx(at, r, 0.5, true, "bomb", "#ff2a2a");
+    boomFx(at, r, 0.5, true, "bomb", "#ff2a2a", false, "#22c55e"); // green ring, random orient
     G.shake = Math.max(G.shake, 0.35);
   };
   // Fire mastery: the air fireball bounces off whatever it hits (up to 3 times)
@@ -1120,6 +1142,7 @@ const kd = (e: KeyboardEvent) => {
         bomb.current.pos.copy(camera.position).addScaledVector(dir, 1.5);
         bomb.current.vel.copy(dir).multiplyScalar(BULLET_SPEED);
         bomb.current.tele = null;
+        bomb.current.netId = `${myId()}-bomb-${Date.now()}`;
         // Teleport mastery: with the ability ready the bomb is a white teleport bomb
         const tpr = teleportRef.current;
         if (masteryOn("teleport") && getAbility() === "teleport" && G.abilityCd <= 0 && !tpr.active && !G.abilityLocked && !G.parryLocked) {
@@ -1153,6 +1176,14 @@ const kd = (e: KeyboardEvent) => {
         }
         G.bombCd = cfg.bombCd(G.buff > 0);
         playSfxShared("bomb_throw");
+        if (NET.online) {
+          const b = bomb.current;
+          sendNet("vfx", {
+            k: "bomb", id: b.netId, tele: b.tele ? 1 : 0,
+            x: b.pos.x, y: b.pos.y, z: b.pos.z,
+            vx: b.vel.x, vy: b.vel.y, vz: b.vel.z, life: 4,
+          });
+        }
       }
       if (e.code === SETTINGS.keys.grapple) {
         const dir = new THREE.Vector3();
@@ -1458,7 +1489,36 @@ const kd = (e: KeyboardEvent) => {
     }
     const nid = String(payload.id ?? "");
     if (k === "boom") {
-      boomFx(tmpV.set(Number(payload.x), Number(payload.y), Number(payload.z)), Number(payload.r) || 8, Number(payload.t) || 0.4, false, "bomb", String(payload.c ?? ""), !!payload.h);
+      const rc = payload.rc != null && payload.rc !== "" ? String(payload.rc) : undefined;
+      boomFx(tmpV.set(Number(payload.x), Number(payload.y), Number(payload.z)), Number(payload.r) || 8, Number(payload.t) || 0.4, false, "bomb", String(payload.c ?? ""), !!payload.h, rc);
+      return;
+    }
+    if (k === "crack") {
+      spawnSlamCrack(Number(payload.x), Number(payload.y), Number(payload.z));
+      return;
+    }
+    if (k === "padsquish") {
+      const id = String(payload.id ?? "");
+      const pad = abilityPads.find((q) => q.active && q.netId === id);
+      if (pad) pad.squish = 1;
+      return;
+    }
+    if (k === "bomb") {
+      // remote bomb projectile + saturn ring
+      const slot = remoteBombs.find((b) => b.netId === String(payload.id ?? "")) ?? remoteBombs.find((b) => !b.active);
+      if (slot) {
+        slot.active = true;
+        slot.netId = String(payload.id ?? `rb-${Date.now()}`);
+        slot.pos.set(Number(payload.x), Number(payload.y), Number(payload.z));
+        slot.vel.set(Number(payload.vx) || 0, Number(payload.vy) || 0, Number(payload.vz) || 0);
+        slot.tele = !!payload.tele;
+        slot.t = Number(payload.life) || 3;
+      }
+      return;
+    }
+    if (k === "bombend") {
+      const id = String(payload.id ?? "");
+      for (const b of remoteBombs) if (!id || b.netId === id) b.active = false;
       return;
     }
     if (k === "wall") {
@@ -1466,6 +1526,7 @@ const kd = (e: KeyboardEvent) => {
       if (!slot) return;
       slot.active = true;
       slot.netId = nid;
+      slot.grow = 0; // grow-in for remote viewers too
       slot.cx = Number(payload.cx); slot.cy = Number(payload.cy); slot.cz = Number(payload.cz);
       slot.yaw = Number(payload.yaw); slot.pitch = Number(payload.pitch);
       slot.hw = Number(payload.hw); slot.hh = Number(payload.hh); slot.hd = Number(payload.hd);
@@ -1875,6 +1936,7 @@ const kd = (e: KeyboardEvent) => {
           if (ab === "wall") {
             const slot = abilityWalls.find((w) => !w.active);
             if (slot) {
+              slot.grow = 0;
               slot.active = true;
               slot.netId = `${myId()}-w-${Date.now()}`;
               playSfx("wall_place");
@@ -2044,7 +2106,9 @@ const kd = (e: KeyboardEvent) => {
       if (Math.abs(n.y) < 0.25 && Math.abs(vy.current) < 35) vy.current = Math.max(vy.current, 45);
       grounded.current = false;
       pad.cd = 0.18;
+      pad.squish = 1; // visual bounce
       playSfx("bounce_pad");
+      if (NET.online && pad.netId) sendNet("vfx", { k: "padsquish", id: pad.netId });
     }
     // Fire lines — 5× wider/taller, no self-dmg, can hit boss if under it
     const FIRE_W = 20; // was ~4, then 8; now 5× original
@@ -2152,7 +2216,7 @@ const kd = (e: KeyboardEvent) => {
             burns.current.set(pr.id, { t: 4, lx: pr.x, ly: pr.y, lz: pr.z, acc: 0 });
             G.burnBuff = 4;
           }
-          boomFx(at, blastR, fb.m ? 3 : 0.45, true, "fire", fb.m ? "#3b82f6" : "", !!fb.m);
+          boomFx(at, blastR, fb.m ? 3 : 0.45, true, "fire", fb.m ? "#ff4444" : "#ff6a1a", !!fb.m, fb.m ? "#ef4444" : "#3b82f6");
           G.shake = Math.max(G.shake, 0.5);
         }
         fb.active = false;
@@ -2241,7 +2305,7 @@ const kd = (e: KeyboardEvent) => {
             burns.current.set(pr.id, { t: 4, lx: pr.x, ly: pr.y, lz: pr.z, acc: 0 });
             G.burnBuff = 4;
           }
-          boomFx(at, blastR, fb.m ? 3 : 0.45, true, "fire", fb.m ? "#3b82f6" : "", !!fb.m);
+          boomFx(at, blastR, fb.m ? 3 : 0.45, true, "fire", fb.m ? "#ff4444" : "#ff6a1a", !!fb.m, fb.m ? "#ef4444" : "#3b82f6");
           G.shake = Math.max(G.shake, 0.5);
           if (fb.m && fb.b + 1 < maxHits) bounceFb(fb, stepV, bn, bp);
           else fb.active = false;
@@ -2718,6 +2782,8 @@ const kd = (e: KeyboardEvent) => {
           pvpBlast(_pvpAt.copy(p).setY(p.y + 0.5), r, PVP_DMG.slam, true);
           ringsIn(p, r);
           boomFx(tmpV.copy(p).setY(p.y + 0.5), r, 0.4, true, "none");
+          spawnSlamCrack(p.x, p.y, p.z);
+          if (NET.online) sendNet("vfx", { k: "crack", x: p.x, y: p.y, z: p.z });
           G.slamCd = cfg.slamCd(q.cd);
           G.shake = Math.max(G.shake, 0.3 + tier * 0.2);
           bounce.current.t = BOUNCE_WIN;
@@ -3053,6 +3119,7 @@ const kd = (e: KeyboardEvent) => {
           }
           if (hit) {
             bm.alive = false;
+            if (NET.online && bm.netId) sendNet("vfx", { k: "bombend", id: bm.netId });
             explode(q.clone(), bm.tele ?? undefined);
             bm.tele = null;
           }
@@ -3555,6 +3622,19 @@ const kd = (e: KeyboardEvent) => {
         bmat.emissive.set(bomb.current.tele ? "#e5e7eb" : "#ff7a1a");
       }
     }
+    if (bombRingRef.current) {
+      bombRingRef.current.visible = bomb.current.alive;
+      if (bomb.current.alive) {
+        bombRingRef.current.position.copy(bomb.current.pos);
+        const s = G.bombBig > 0 ? 1.5 : 1;
+        bombRingRef.current.scale.set(s, s, s);
+        bombRingRef.current.rotation.y += dt * 2.2;
+        bombRingRef.current.rotation.x = 0.35;
+        const rm = bombRingRef.current.material as THREE.MeshStandardMaterial;
+        rm.color.set(bomb.current.tele ? "#e5e7eb" : "#ffae34");
+        rm.emissive.set(bomb.current.tele ? "#ffffff" : "#ff7a1a");
+      }
+    }
     booms.forEach((bm, i) => {
       const m = boomRefs.current[i];
       if (active || home) bm.t = Math.max(0, bm.t - dt);
@@ -3562,14 +3642,39 @@ const kd = (e: KeyboardEvent) => {
       m.visible = bm.t > 0;
       m.position.copy(bm.pos);
       if (bm.hold) {
-        // Fire mastery blast: grows in, then stays fully visible until its time is up
         m.scale.setScalar(bm.r * Math.min(1, 0.3 + ((bm.dur - bm.t) / 0.3) * 0.7));
         (m.material as THREE.MeshBasicMaterial).opacity = 0.5;
       } else {
-        m.scale.setScalar(bm.r * (1 - bm.t / 0.5 * 0.7));
-        (m.material as THREE.MeshBasicMaterial).opacity = bm.t * 1.2;
+        m.scale.setScalar(bm.r * (1 - bm.t / Math.max(0.2, bm.dur) * 0.7));
+        (m.material as THREE.MeshBasicMaterial).opacity = Math.min(1, bm.t * 1.2);
       }
       (m.material as THREE.MeshBasicMaterial).color.set(bm.col);
+      const ring = boomRingRefs.current[i];
+      if (ring) {
+        ring.visible = bm.t > 0 && bm.ring;
+        if (ring.visible) {
+          ring.position.copy(bm.pos);
+          ring.rotation.set(bm.rx, bm.ry + (bm.dur - bm.t) * 3, bm.rz);
+          const rs = bm.r * (0.55 + 0.45 * (1 - bm.t / Math.max(0.2, bm.dur)));
+          ring.scale.set(rs, rs, rs);
+          const rm = ring.material as THREE.MeshBasicMaterial;
+          rm.color.set(bm.ringCol);
+          rm.opacity = Math.min(0.95, bm.t * 1.5);
+        }
+      }
+    });
+    slamCracks.forEach((c, i) => {
+      if (c.active) c.t = Math.max(0, c.t - dt);
+      if (c.t <= 0) c.active = false;
+      const m = crackMeshRefs.current[i];
+      if (!m) return;
+      m.visible = c.active;
+      if (!c.active) return;
+      m.position.set(c.x, c.y, c.z);
+      m.rotation.set(-Math.PI / 2, 0, c.yaw);
+      const diam = TABLE_W * 3;
+      m.scale.set(diam, diam, 1);
+      (m.material as THREE.MeshBasicMaterial).opacity = Math.min(0.85, c.t / 4 * 0.9 + 0.15);
     });
     hazards.forEach((h, i) => {
       const r = hazRefs.current[i]!;
@@ -3642,9 +3747,11 @@ const kd = (e: KeyboardEvent) => {
       if (!m) return;
       m.visible = w.active;
       if (!w.active) return;
+      if (w.grow < 1) w.grow = Math.min(1, w.grow + dt * 4); // grow from nothing
+      const g = w.grow * w.grow; // ease-in
       m.position.set(w.cx, w.cy, w.cz);
       m.rotation.set(w.pitch, w.yaw, 0, "YXZ");
-      m.scale.set(w.hw * 2, w.hh * 2, w.hd * 2);
+      m.scale.set(w.hw * 2 * g, w.hh * 2 * g, w.hd * 2 * g);
       const wm = m.material as THREE.MeshStandardMaterial;
       wm.color.set(w.m ? "#c0201a" : "#96653f");
       wm.emissive.set(w.m ? "#ff1a1a" : "#000000");
@@ -3661,7 +3768,12 @@ const kd = (e: KeyboardEvent) => {
       m.position.set(pad.cx, pad.cy, pad.cz);
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
       const rad = Math.max(pad.hw, pad.hd);
-      m.scale.set(rad * 2, 1, rad * 2);
+      if (pad.squish > 0) pad.squish = Math.max(0, pad.squish - dt * 4);
+      const sq = pad.squish;
+      // bounce: flatten then recover
+      const sy = 1 - sq * 0.45;
+      const sxz = 1 + sq * 0.35;
+      m.scale.set(rad * 2 * sxz, sy, rad * 2 * sxz);
       const pm = m.material as THREE.MeshStandardMaterial;
       pm.color.set(pad.m ? "#ff2a2a" : "#3cff70");
       pm.emissive.set(pad.m ? "#a01010" : "#1a8a40");
@@ -3690,12 +3802,17 @@ const kd = (e: KeyboardEvent) => {
       if (!f.active) return;
       const mx = (f.ax + f.bx) / 2, my = (f.ay + f.by) / 2, mz = (f.az + f.bz) / 2;
       const len = Math.hypot(f.bx - f.ax, f.by - f.ay, f.bz - f.az) || 1;
-      m.position.set(mx, my, mz);
+      m.position.set(mx, Math.max(0.08, my), mz);
       m.lookAt(f.bx, f.by, f.bz);
-      m.scale.set(f.m ? 70 : 35, f.m ? 12 : 6, len); // 5× wider & taller fire line (2× more with Fire mastery)
+      // Crack-on-ground look: wide thin slab + tall eruptions via scale pulse
+      const erupt = 0.85 + 0.25 * Math.sin(performance.now() / 90 + i);
+      m.scale.set((f.m ? 55 : 28) * erupt, (f.m ? 14 : 7) * erupt, len);
       const fm = m.material as THREE.MeshStandardMaterial;
-      fm.color.set(f.m ? "#2f7bff" : "#ff6a1a");
-      fm.emissive.set(f.m ? "#0a3cff" : "#ff3a00");
+      fm.color.set(f.m ? "#3b82f6" : "#ff6a1a");
+      fm.emissive.set(f.m ? "#1d4ed8" : "#ff4500");
+      fm.emissiveIntensity = 2.2;
+      fm.transparent = true;
+      fm.opacity = 0.9;
     });
     fireballs.forEach((fb, i) => {
       const m = fireballMeshRefs.current[i];
@@ -3715,6 +3832,33 @@ const kd = (e: KeyboardEvent) => {
       if (rb.t <= 0) { rb.active = false; continue; }
       rb.pos.addScaledVector(rb.vel, dt);
     }
+    for (const rb of remoteBombs) {
+      if (!rb.active) continue;
+      rb.t -= dt;
+      if (rb.t <= 0) { rb.active = false; continue; }
+      rb.pos.addScaledVector(rb.vel, dt);
+      rb.vel.y -= 40 * dt; // light gravity so it arcs a bit like local bombs
+    }
+    remoteBombMeshRefs.current.forEach((m, i) => {
+      const rb = remoteBombs[i];
+      if (!m || !rb) return;
+      m.visible = rb.active;
+      if (!rb.active) return;
+      m.position.copy(rb.pos);
+      const mat = m.material as THREE.MeshStandardMaterial;
+      mat.color.set(rb.tele ? "#ffffff" : "#222222");
+      mat.emissive.set(rb.tele ? "#e5e7eb" : "#ff7a1a");
+      const ring = remoteBombRingRefs.current[i];
+      if (ring) {
+        ring.visible = rb.active;
+        ring.position.copy(rb.pos);
+        ring.rotation.y += dt * 2.2;
+        ring.rotation.x = 0.35;
+        const rm = ring.material as THREE.MeshStandardMaterial;
+        rm.color.set(rb.tele ? "#e5e7eb" : "#ffae34");
+        rm.emissive.set(rb.tele ? "#ffffff" : "#ff7a1a");
+      }
+    });
     remoteBulletMeshRefs.current.forEach((m, i) => {
       if (!m) return;
       const rb = remoteBullets[i];
@@ -3724,6 +3868,30 @@ const kd = (e: KeyboardEvent) => {
     if (teleportMeshRef.current) {
       const tp = teleportRef.current;
       teleportMeshRef.current.visible = !!tp.active;
+      // Orbiting rings (1 white unmastered / 3 purple mastered) — visual only
+      for (let ri = 0; ri < 3; ri++) {
+        const ring = teleportRingRefs.current[ri];
+        if (!ring) continue;
+        const show = !!tp.active && (tp.m ? true : ri === 0);
+        ring.visible = show;
+        if (!show) continue;
+        const src = tp.phase === "fly" ? tp.pos : tp.target;
+        ring.position.copy(src);
+        const base = tp.phase === "fly" ? TABLE_W * 0.55 : TABLE_W * 2 * (1 + Math.min(1, tp.chargeT / tp.chargeMax)) * 0.55;
+        const sizes = tp.m ? [base * 1.15, base * 1.55, base * 1.95] : [base * 1.4];
+        const s = sizes[ri] ?? base;
+        ring.scale.set(s, s, s);
+        // random-ish rotating axes
+        const t0 = performance.now() / 1000;
+        ring.rotation.set(
+          t0 * (1.1 + ri * 0.4) + ri,
+          t0 * (1.7 + ri * 0.25),
+          t0 * (0.9 + ri * 0.55) + ri * 0.7,
+        );
+        const rm = ring.material as THREE.MeshBasicMaterial;
+        rm.color.set(tp.m ? "#a855f7" : "#ffffff");
+        rm.opacity = tp.m ? 0.75 : 0.85;
+      }
       if (tp.active) {
         const tmat = teleportMeshRef.current.material as THREE.MeshStandardMaterial;
         tmat.color.set(tp.m ? "#ffffff" : "#a855f7");
@@ -3869,8 +4037,8 @@ const kd = (e: KeyboardEvent) => {
       ))}
       {abilityFires.map((_, i) => (
         <mesh key={`af${i}`} ref={(m) => { fireMeshRefs.current[i] = m; }} visible={false}>
-          <boxGeometry args={[1, 0.6, 1]} />
-          <meshStandardMaterial color="#ff6a1a" emissive="#ff3a00" emissiveIntensity={2} transparent opacity={0.85} />
+          <boxGeometry args={[1, 1.2, 1]} />
+          <meshStandardMaterial color="#ff6a1a" emissive="#ff4500" emissiveIntensity={2.4} transparent opacity={0.88} depthWrite={false} />
         </mesh>
       ))}
       {fireballs.map((_, i) => (
@@ -3883,6 +4051,12 @@ const kd = (e: KeyboardEvent) => {
         <mesh key={`rb${i}`} ref={(m) => { remoteBulletMeshRefs.current[i] = m; }} visible={false}>
           <sphereGeometry args={[0.25, 6, 6]} />
           <meshBasicMaterial color="#ffe9a8" />
+        </mesh>
+      ))}
+      {[0, 1, 2].map((i) => (
+        <mesh key={`tpr${i}`} ref={(m) => { teleportRingRefs.current[i] = m; }} visible={false}>
+          <torusGeometry args={[1, 0.045, 8, 40]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={0.8} depthWrite={false} />
         </mesh>
       ))}
       <mesh ref={(m) => { teleportMeshRef.current = m; }} visible={false}>
@@ -3930,10 +4104,38 @@ const kd = (e: KeyboardEvent) => {
         <sphereGeometry args={[0.8, 16, 12]} />
         <meshStandardMaterial color="#222" emissive="#ff7a1a" emissiveIntensity={1.5} />
       </mesh>
+      <mesh ref={(m) => { bombRingRef.current = m; }} visible={false}>
+        <torusGeometry args={[1.25, 0.08, 10, 32]} />
+        <meshStandardMaterial color="#ffae34" emissive="#ff7a1a" emissiveIntensity={1.2} metalness={0.4} roughness={0.3} />
+      </mesh>
+      {remoteBombs.map((_, i) => (
+        <group key={`rbomb${i}`}>
+          <mesh ref={(m) => { remoteBombMeshRefs.current[i] = m; }} visible={false}>
+            <sphereGeometry args={[0.8, 16, 12]} />
+            <meshStandardMaterial color="#222" emissive="#ff7a1a" emissiveIntensity={1.5} />
+          </mesh>
+          <mesh ref={(m) => { remoteBombRingRefs.current[i] = m; }} visible={false}>
+            <torusGeometry args={[1.25, 0.08, 10, 32]} />
+            <meshStandardMaterial color="#ffae34" emissive="#ff7a1a" emissiveIntensity={1.2} metalness={0.4} roughness={0.3} />
+          </mesh>
+        </group>
+      ))}
       {booms.map((_, i) => (
-        <mesh key={i} ref={(m) => { boomRefs.current[i] = m; }} visible={false}>
-          <sphereGeometry args={[1, 24, 16]} />
-          <meshBasicMaterial color="#ffb347" transparent opacity={0.5} depthWrite={false} />
+        <group key={i}>
+          <mesh ref={(m) => { boomRefs.current[i] = m; }} visible={false}>
+            <sphereGeometry args={[1, 24, 16]} />
+            <meshBasicMaterial color="#ffb347" transparent opacity={0.5} depthWrite={false} />
+          </mesh>
+          <mesh ref={(m) => { boomRingRefs.current[i] = m; }} visible={false}>
+            <torusGeometry args={[1, 0.06, 8, 36]} />
+            <meshBasicMaterial color="#22c55e" transparent opacity={0.8} depthWrite={false} />
+          </mesh>
+        </group>
+      ))}
+      {slamCracks.map((_, i) => (
+        <mesh key={`ck${i}`} ref={(m) => { crackMeshRefs.current[i] = m; }} visible={false} rotation-x={-Math.PI / 2}>
+          <ringGeometry args={[0.15, 0.5, 6]} />
+          <meshBasicMaterial color="#1a120c" transparent opacity={0.7} depthWrite={false} side={THREE.DoubleSide} />
         </mesh>
       ))}
       {hazards.map((_, i) => (

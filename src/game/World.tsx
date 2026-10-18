@@ -377,7 +377,7 @@ export function World() {
   })), []);
   // Air fireballs (fire ability while airborne) + remote visual bullets
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
-    active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string, m: false, b: 0,
+    active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string, m: false, b: 0, idle: 0,
   })), []);
   const remoteBullets = useMemo(() => Array.from({ length: 64 }, () => ({
     active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0,
@@ -818,8 +818,8 @@ export function World() {
     const n = new THREE.Vector3();
     if (hitN) n.copy(hitN);
     else if (q.y <= 0.3) n.set(0, 1, 0);
-    else if (q.y >= ROOM.h) n.set(0, -1, 0);
-    else if (Math.hypot(q.x, q.z) >= R - 0.5) n.set(-q.x, 0, -q.z).normalize();
+    else if (q.y >= ROOM.h - 0.8) n.set(0, -1, 0); // ceiling shell
+    else if (Math.hypot(q.x, q.z) >= R - 2.5) n.set(-q.x, 0, -q.z).normalize(); // thick cylindrical wall
     else {
       // inside a solid: the axis that frees us when undone is the face we hit; otherwise (bots, boss) go straight back
       const t2 = new THREE.Vector3();
@@ -1766,7 +1766,9 @@ const kd = (e: KeyboardEvent) => {
       G.dmgFloat.pop = Math.max(0, G.dmgFloat.pop - dt * 2.2);
     }
     // --- abilities ---
-    if (G.abilityCd > 0) {
+    // Offline pause freezes ability CDs (and later fire/boss damage). Online never freezes.
+    const offlinePaused = G.userPaused && !NET.online;
+    if (G.abilityCd > 0 && !offlinePaused) {
       G.abilityCd = Math.max(0, G.abilityCd - dt);
       if (G.abilityCd <= 0) {
         playSfx("ability_ready");
@@ -1917,14 +1919,15 @@ const kd = (e: KeyboardEvent) => {
               slot.pos.copy(cam.position).addScaledVector(look, 1.5);
               slot.m = masteryOn("fire");
               slot.vel.copy(look).multiplyScalar(BULLET_SPEED * (slot.m ? 0.5 : 1)); // Fire mastery: 2× slower fireball
-              slot.t = 5;
+              slot.t = 999; // infinite range — despawn by hits / idle explode only
               slot.traveled = 0;
               slot.b = 0;
+              slot.idle = 0;
               slot.netId = `${myId()}-fb-${Date.now()}`;
               playSfx("fire_air");
               G.abilityCharges = 0;
               G.abilityCd = 4; // air fireball CD
-              if (NET.online) sendNet("vfx", { k: "fball", m: slot.m ? 1 : 0, id: slot.netId, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z, vx: slot.vel.x, vy: slot.vel.y, vz: slot.vel.z, life: 5 });
+              if (NET.online) sendNet("vfx", { k: "fball", m: slot.m ? 1 : 0, id: slot.netId, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z, vx: slot.vel.x, vy: slot.vel.y, vz: slot.vel.z, life: 999 });
             }
           } else {
             const slot = abilityFires.find((f) => !f.active);
@@ -2043,6 +2046,7 @@ const kd = (e: KeyboardEvent) => {
     const FIRE_H = 8; // 5× taller zone
     for (const fire of abilityFires) {
       if (!fire.active) continue;
+      if (offlinePaused) continue; // offline menu freezes fire line timer + damage
       fire.t -= dt;
       if (fire.t <= 0) { fire.active = false; fire.stung.clear(); fire.tickAcc.clear(); continue; }
       // Copies of another player's fire are visual only — the caster's own client applies the damage,
@@ -2099,25 +2103,69 @@ const kd = (e: KeyboardEvent) => {
         else fire.tickAcc.set(pr.id, acc);
       }
     }
-    // Fireballs (air fire) — same flight/collision as F-bomb, 0.5× blast + burn
-    for (const fb of fireballs) {
+    // Fireballs (air fire) — infinite range; 15 dmg + burn; normal = 1 hit, mastery = 3 hits; 5s idle → explode
+    // Offline pause freezes these completely
+    if (!offlinePaused) for (const fb of fireballs) {
       if (!fb.active) continue;
-      fb.t -= dt;
-      if (fb.t <= 0 || fb.pos.y < -5) { fb.active = false; continue; }
+      fb.idle = (fb.idle ?? 0) + dt;
       // Remote copies of someone else's fireball are visual only (the caster applies damage + syncs the boom)
       const mine = fb.netId.startsWith(`${myId()}-`);
       const travel = fb.vel.length() * dt;
-      const steps = Math.max(1, Math.ceil(travel / (fb.m ? 0.75 : 1.5)));
+      const steps = Math.max(1, Math.ceil(travel / (fb.m ? 0.75 : 1.2)));
       const stepV = fb.vel.clone().multiplyScalar(dt / steps);
       const blastR = BOMB_R * 0.5;
+      const FB_DMG = 15;
+      const maxHits = fb.m ? 3 : 1;
+      // 5s with no hit → auto explode in place
+      if (fb.idle >= 5) {
+        const at = fb.pos.clone();
+        if (mine) {
+          for (let i = 0; i < tables.length; i++) {
+            const tb = tables[i]!;
+            if (!tb.alive || tb.pos.distanceTo(at) >= blastR) continue;
+            hitTable(tb, FB_DMG);
+            burns.current.set(`t${i}`, { t: 4, lx: tb.pos.x, ly: tb.pos.y, lz: tb.pos.z, acc: 0 });
+            G.burnBuff = 4;
+          }
+          for (let i = 0; i < blues.length; i++) {
+            const u = blues[i]!;
+            if (!u.alive || u.pos.distanceTo(at) >= blastR) continue;
+            hitBlue(u, FB_DMG);
+            burns.current.set(`b${i}`, { t: 4, lx: u.pos.x, ly: 0, lz: u.pos.z, acc: 0 });
+            G.burnBuff = 4;
+          }
+          if (bossLive() && b.landed && distToBossBox(at) < blastR) {
+            hitBoss(Math.max(1, Math.round(FB_DMG / DMG)));
+            burns.current.set("boss", { t: 4, lx: b.pos.x, ly: b.y, lz: b.pos.z, acc: 0 });
+            G.burnBuff = 4;
+          }
+          for (const pr of NET.peers.values()) {
+            if (!canHurtPeers || pr.dead || pr.id === myId()) continue;
+            if (tmpV.set(pr.x, pr.y, pr.z).distanceTo(at) >= blastR) continue;
+            hitPeer(pr.id, FB_DMG, true);
+            noteDmg(FB_DMG, pr.id, pr.x, pr.y + 2, pr.z);
+            burns.current.set(pr.id, { t: 4, lx: pr.x, ly: pr.y, lz: pr.z, acc: 0 });
+            G.burnBuff = 4;
+          }
+          boomFx(at, blastR, fb.m ? 3 : 0.45, true, "fire", fb.m ? "#3b82f6" : "", !!fb.m);
+          G.shake = Math.max(G.shake, 0.5);
+        }
+        fb.active = false;
+        continue;
+      }
       for (let si = 0; si < steps && fb.active; si++) {
         fb.pos.add(stepV);
         fb.traveled += stepV.length();
         const q = fb.pos;
-        let hit = q.y <= 0.3 || q.y >= ROOM.h || Math.hypot(q.x, q.z) >= R - 0.5 || inSolid(q);
+        // Thick cylindrical room wall + ceiling + floor so the ball cannot tunnel
+        const WALL_SHELL = 2.5;
+        const CEIL_SHELL = 0.8;
+        let hit = q.y <= 0.3 || q.y >= ROOM.h - CEIL_SHELL || Math.hypot(q.x, q.z) >= R - WALL_SHELL || inSolid(q);
         let wallN: THREE.Vector3 | null = null;
+        if (q.y >= ROOM.h - CEIL_SHELL) wallN = new THREE.Vector3(0, -1, 0);
+        else if (q.y <= 0.3) wallN = new THREE.Vector3(0, 1, 0);
+        else if (Math.hypot(q.x, q.z) >= R - WALL_SHELL) wallN = new THREE.Vector3(-q.x, 0, -q.z).normalize();
         if (!hit) {
-          // ability walls are solid to fireballs too (they used to slip through)
           for (const aw of abilityWalls) {
             if (!aw.active || aw.ret || !inObb(aw, q.x, q.y, q.z, 0.4)) continue;
             hit = true;
@@ -2127,7 +2175,6 @@ const kd = (e: KeyboardEvent) => {
             break;
           }
         }
-        // Everything solid stops (and, for a mastered fireball, bounces off) the ball: bots, the boss and players too
         let bn: THREE.Vector3 | null = wallN, bp: THREE.Vector3 | null = null;
         const near = (cx: number, cy: number, cz: number, rad: number) => {
           const dx = q.x - cx, dy = q.y - cy, dz = q.z - cz;
@@ -2144,62 +2191,57 @@ const kd = (e: KeyboardEvent) => {
           bossBox(_mn, _mx);
           if (q.x > _mn.x && q.x < _mx.x && q.y > _mn.y && q.y < _mx.y && q.z > _mn.z && q.z < _mx.z) {
             hit = true;
-            const pens = [q.x - _mn.x, _mx.x - q.x, q.y - _mn.y, _mx.y - q.y, q.z - _mn.z, _mx.z - q.z];
-            let bi2 = 0;
-            for (let k = 1; k < 6; k++) if (pens[k]! < pens[bi2]!) bi2 = k;
-            const nn = new THREE.Vector3();
-            nn.setComponent(bi2 >> 1, bi2 & 1 ? 1 : -1);
-            bn = nn;
-            bp = q.clone().addScaledVector(nn, pens[bi2]! + 1.5);
+            const cx = (_mn.x + _mx.x) * 0.5, cy = (_mn.y + _mx.y) * 0.5, cz = (_mn.z + _mx.z) * 0.5;
+            near(cx, cy, cz, Math.max(_mx.x - _mn.x, _mx.y - _mn.y, _mx.z - _mn.z) * 0.5);
           }
         }
         if (!hit) {
-          const ownerPid = ownerOf(fb.netId);
+          const ownerPid = fb.netId.split("-")[0] ?? "";
           for (const pr of NET.peers.values()) {
             if (pr.dead || pr.id === myId() || pr.id === ownerPid) continue;
             if (near(pr.x, pr.y + 2, pr.z, 4)) { hit = true; break; }
           }
-          if (!hit && !mine && !G.pvpDead && !G.campaignDead && near(p.x, p.y + 2, p.z, 4)) hit = true; // other people's fireballs also stop on me
+          if (!hit && !mine && !G.pvpDead && !G.campaignDead && near(p.x, p.y + 2, p.z, 4)) hit = true;
         }
         if (hit && !mine) {
-          if (fb.m && fb.b < 3) bounceFb(fb, stepV, bn, bp);
+          if (fb.m && fb.b < maxHits) { bounceFb(fb, stepV, bn, bp); fb.idle = 0; }
           else fb.active = false;
         } else if (hit) {
           const at = q.clone();
+          fb.idle = 0;
           for (let i = 0; i < tables.length; i++) {
             const tb = tables[i]!;
             if (!tb.alive || tb.pos.distanceTo(at) >= blastR) continue;
-            hitTable(tb, BOMB_DMG);
+            hitTable(tb, FB_DMG);
             burns.current.set(`t${i}`, { t: 4, lx: tb.pos.x, ly: tb.pos.y, lz: tb.pos.z, acc: 0 });
             G.burnBuff = 4;
           }
           for (let i = 0; i < blues.length; i++) {
             const u = blues[i]!;
             if (!u.alive || u.pos.distanceTo(at) >= blastR) continue;
-            hitBlue(u, BOMB_DMG);
+            hitBlue(u, FB_DMG);
             burns.current.set(`b${i}`, { t: 4, lx: u.pos.x, ly: 0, lz: u.pos.z, acc: 0 });
             G.burnBuff = 4;
           }
           if (bossLive() && b.landed && distToBossBox(at) < blastR) {
-            hitBoss(Math.round(BOMB_DMG / DMG));
+            hitBoss(Math.max(1, Math.round(FB_DMG / DMG)));
             burns.current.set("boss", { t: 4, lx: b.pos.x, ly: b.y, lz: b.pos.z, acc: 0 });
             G.burnBuff = 4;
           }
           for (const pr of NET.peers.values()) {
             if (!canHurtPeers || pr.dead || pr.id === myId()) continue;
             if (tmpV.set(pr.x, pr.y, pr.z).distanceTo(at) >= blastR) continue;
-            hitPeer(pr.id, BOMB_DMG, true);
-            noteDmg(BOMB_DMG, pr.id, pr.x, pr.y + 2, pr.z);
+            hitPeer(pr.id, FB_DMG, true);
+            noteDmg(FB_DMG, pr.id, pr.x, pr.y + 2, pr.z);
             burns.current.set(pr.id, { t: 4, lx: pr.x, ly: pr.y, lz: pr.z, acc: 0 });
             G.burnBuff = 4;
           }
-          boomFx(at, blastR, fb.m ? 3 : 0.45, true, "fire", fb.m ? "#3b82f6" : "", !!fb.m); // mastery blast lingers 3s
+          boomFx(at, blastR, fb.m ? 3 : 0.45, true, "fire", fb.m ? "#3b82f6" : "", !!fb.m);
           G.shake = Math.max(G.shake, 0.5);
-          if (fb.m && fb.b < 3) bounceFb(fb, stepV, bn, bp); // Fire mastery: bounce (up to 3×), exploding each time
+          if (fb.m && fb.b + 1 < maxHits) bounceFb(fb, stepV, bn, bp);
           else fb.active = false;
         }
       }
-      if (fb.active && fb.traveled > BOMB_R * 2.5) fb.active = false;
     }
 
     // Teleport: bullet flight → expand (2× table→4×) → blink (keep velocity) + 2s bot stun
@@ -2319,10 +2361,11 @@ const kd = (e: KeyboardEvent) => {
     }
 
     // Burn DoT: 3 dmg / 0.1s when target moves; bots burn too; +2 hit buff while any burn active
-    if (G.burnBuff > 0) {
+    if (G.burnBuff > 0 && !offlinePaused) {
       G.burnBuff = Math.max(0, G.burnBuff - dt);
     }
     for (const [id, br] of [...burns.current.entries()]) {
+      if (offlinePaused) continue;
       br.t -= dt;
       if (br.t <= 0) { burns.current.delete(id); continue; }
       if (id.startsWith("t")) {

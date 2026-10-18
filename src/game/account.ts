@@ -78,6 +78,11 @@ async function loadProfile(userId: string) {
     if (_skin) applySkin(_skin, true);
     if (_prog) hydrateProgress(_prog);
   }
+  // Fallback: localStorage progress if the profile row is missing _prog
+  try {
+    const rawLs = localStorage.getItem(`tble-prog-${userId}`);
+    if (rawLs) hydrateProgress(JSON.parse(rawLs));
+  } catch { /* ignore */ }
   // Save back right away if a guest earned something before signing in (their progress was merged above)
   persistProfileSettings(SETTINGS);
   if (data.training) Object.assign(TRAIN, data.training as unknown as TrainCfg);
@@ -86,7 +91,21 @@ async function loadProfile(userId: string) {
 function persistProfileSettings(s: Settings) {
   if (ACC.status !== "user" || !ACC.userId) return;
   const payload = profilePayload(s);
-  void supabase.from("profiles").update({ settings: payload as never, updated_at: new Date().toISOString() }).eq("id", ACC.userId);
+  // Local backup so achievements survive even if the profile update is slow/fails once
+  try { localStorage.setItem(`tble-prog-${ACC.userId}`, JSON.stringify(payload._prog ?? serializeProgress())); } catch { /* ignore */ }
+  void supabase
+    .from("profiles")
+    .update({ settings: payload as never, updated_at: new Date().toISOString() })
+    .eq("id", ACC.userId)
+    .then(({ error }) => {
+      if (error) {
+        // Retry once shortly after — race with concurrent settings writes
+        setTimeout(() => {
+          if (ACC.status !== "user" || !ACC.userId) return;
+          void supabase.from("profiles").update({ settings: profilePayload() as never, updated_at: new Date().toISOString() }).eq("id", ACC.userId);
+        }, 400);
+      }
+    });
 }
 
 let started = false;

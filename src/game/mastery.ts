@@ -130,7 +130,10 @@ function award(id: AchievementId) {
   if (ach) awardSubs.forEach((f) => f(ach));
   justUnlocked = [...justUnlocked, id];
   bump();
+  // Persist immediately (and again shortly after) so account saves can't lose a race with settings
   persister?.();
+  setTimeout(() => persister?.(), 250);
+  setTimeout(() => persister?.(), 1000);
   return true;
 }
 

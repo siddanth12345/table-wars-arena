@@ -395,7 +395,8 @@ export function World() {
   const padMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const coilMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireGroupRefs = useRef<(THREE.Group | null)[]>([]);
-  const FIRE_VFX_VER = 4; // bump to force rebuild of cached fire groups
+  const FIRE_VFX_VER = 5; // zigzag fissure segments
+  const FIRE_SEGS = 16;
   const fireballMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireParticleRefs = useRef<(THREE.Points | null)[]>([]);
   const slam = useRef({ on: false, fromY: 0, h: 0 });
@@ -3830,89 +3831,55 @@ const kd = (e: KeyboardEvent) => {
       if (!grp) return;
       grp.visible = f.active;
       if (!f.active) return;
+      // World-space zigzag: group at origin, segments placed along A→B
+      grp.position.set(0, 0, 0);
+      grp.rotation.set(0, 0, 0);
       const len = Math.hypot(f.bx - f.ax, f.by - f.ay, f.bz - f.az) || 1;
-      const mx = (f.ax + f.bx) / 2, mz = (f.az + f.bz) / 2;
-      grp.position.set(mx, 0.04, mz);
-      const dx = f.bx - f.ax, dz = f.bz - f.az;
-      grp.rotation.set(0, Math.atan2(dx, dz), 0);
-      const shimmer = 0.88 + 0.12 * Math.sin(performance.now() / 300 + i);
-      const glowCol = f.m ? "#3b82f6" : "#ff6a1a";
-      const coreCol = f.m ? "#93c5fd" : "#ffe566";
-      const w = f.m ? 2.2 : 1.7;
-      const parts = grp.userData.parts as {
-        mask?: THREE.Mesh; left?: THREE.Mesh; right?: THREE.Mesh; floor?: THREE.Mesh;
-        core?: THREE.Mesh; lipL?: THREE.Mesh; lipR?: THREE.Mesh;
-      } | undefined;
-      if (parts) {
-        // Black strip over floor = visible cut-out hole
-        if (parts.mask) {
-          parts.mask.scale.set(5.5 * w, 1, len * 1.04);
-          parts.mask.position.set(0, 0.06, 0);
-        }
-        if (parts.left) {
-          parts.left.scale.set(1.2 * w, 3.2, len);
-          parts.left.position.set(-2.0 * w, -1.6, 0);
-        }
-        if (parts.right) {
-          parts.right.scale.set(1.2 * w, 3.2, len);
-          parts.right.position.set(2.0 * w, -1.6, 0);
-        }
-        if (parts.floor) {
-          parts.floor.scale.set(4.0 * w, 0.25, len);
-          parts.floor.position.set(0, -3.2, 0);
-        }
-        if (parts.core) {
-          parts.core.scale.set(2.4 * w, 1.1, len * 0.98);
-          parts.core.position.set(0, -1.7, 0);
-          const mat = parts.core.material as THREE.MeshStandardMaterial;
-          mat.color.set(coreCol);
-          mat.emissive.set(glowCol);
-          mat.emissiveIntensity = 8 * shimmer;
-        }
-        if (parts.lipL) {
-          parts.lipL.scale.set(1.6 * w, 0.18, len);
-          parts.lipL.position.set(-3.0 * w, 0.08, 0);
-        }
-        if (parts.lipR) {
-          parts.lipR.scale.set(1.6 * w, 0.18, len);
-          parts.lipR.position.set(3.0 * w, 0.08, 0);
-        }
-      }
-      const glows = grp.userData.glows as THREE.Mesh[] | undefined;
-      if (glows) {
-        for (let gi = 0; gi < glows.length; gi++) {
-          const gm = glows[gi]!;
-          const tt = (gi + 0.5) / glows.length;
-          gm.position.set(0, -1.2, (tt - 0.5) * len * 0.96);
-          gm.scale.set(2.0 * w, 0.9, Math.max(3, len / glows.length * 1.15));
-          const mat = gm.material as THREE.MeshStandardMaterial;
-          mat.color.set(coreCol);
-          mat.emissive.set(glowCol);
-          mat.emissiveIntensity = 7 * shimmer;
-          gm.visible = true;
-        }
-      }
-      const branches = grp.userData.branches as THREE.Mesh[] | undefined;
-      if (branches) {
-        for (let bi = 0; bi < branches.length; bi++) {
-          const br = branches[bi]!;
-          const along = ((bi / branches.length) - 0.5) * len * 0.9;
-          const side = bi % 2 === 0 ? 1 : -1;
-          br.position.set(side * 3.4 * w, 0.07, along);
-          br.scale.set(1.5 + (bi % 3) * 0.5, 1, 0.8);
-          br.visible = true;
-        }
-      }
-      const lights = grp.userData.lights as THREE.PointLight[] | undefined;
-      if (lights) {
-        for (let li = 0; li < lights.length; li++) {
-          const L = lights[li]!;
-          const tt = (li + 0.5) / lights.length;
-          L.position.set(0, 0.5, (tt - 0.5) * len);
-          L.color.set(glowCol);
-          L.intensity = (f.m ? 4.5 : 3.5) * shimmer;
-          L.distance = 80;
-        }
+      const dx = (f.bx - f.ax) / len, dz = (f.bz - f.az) / len;
+      // Perpendicular on XZ for zigzag
+      const px = -dz, pz = dx;
+      const shimmer = 0.9 + 0.1 * Math.sin(performance.now() / 280 + i);
+      const glowCol = f.m ? "#3b82f6" : "#ff2a1a";
+      const coreCol = f.m ? "#93c5fd" : "#ffcc33";
+      const amp = f.m ? 4.5 : 3.2; // zigzag amplitude
+      const bedW = f.m ? 2.8 : 2.0;
+      const coreW = f.m ? 1.1 : 0.75;
+      const segs = grp.userData.segs as { bed: THREE.Mesh; core: THREE.Mesh; light: THREE.PointLight }[] | undefined;
+      if (!segs) return;
+      for (let si = 0; si < segs.length; si++) {
+        const t0 = si / segs.length;
+        const t1 = (si + 1) / segs.length;
+        const zig0 = Math.sin(t0 * Math.PI * 5) * amp;
+        const zig1 = Math.sin(t1 * Math.PI * 5) * amp;
+        const x0 = f.ax + dx * len * t0 + px * zig0;
+        const z0 = f.az + dz * len * t0 + pz * zig0;
+        const x1 = f.ax + dx * len * t1 + px * zig1;
+        const z1 = f.az + dz * len * t1 + pz * zig1;
+        const mx = (x0 + x1) * 0.5, mz = (z0 + z1) * 0.5;
+        const sdx = x1 - x0, sdz = z1 - z0;
+        const segLen = Math.hypot(sdx, sdz) || 1;
+        const yaw = Math.atan2(sdx, sdz);
+        const { bed, core, light } = segs[si]!;
+        bed.visible = true;
+        core.visible = true;
+        bed.position.set(mx, 0.05, mz);
+        bed.rotation.set(0, yaw, 0);
+        bed.scale.set(bedW, 0.12, segLen * 1.08);
+        core.position.set(mx, 0.12, mz);
+        core.rotation.set(0, yaw, 0);
+        core.scale.set(coreW, 0.1, segLen * 1.02);
+        const cm = core.material as THREE.MeshStandardMaterial;
+        cm.color.set(coreCol);
+        cm.emissive.set(glowCol);
+        cm.emissiveIntensity = 6.5 * shimmer;
+        const bm = bed.material as THREE.MeshBasicMaterial;
+        bm.color.set("#050505");
+        // Light per segment so the whole path glows, not just the middle
+        light.position.set(mx, 2.5, mz);
+        light.color.set(glowCol);
+        light.intensity = (f.m ? 3.2 : 2.6) * shimmer;
+        light.distance = 55;
+        light.visible = true;
       }
     });
     fireballs.forEach((fb, i) => {
@@ -4134,7 +4101,6 @@ const kd = (e: KeyboardEvent) => {
           ref={(g) => {
             fireGroupRefs.current[i] = g;
             if (!g) return;
-            // Rebuild when version changes (old groups kept thorns/plates forever)
             if (g.userData.vfxVer === FIRE_VFX_VER) return;
             while (g.children.length) {
               const ch = g.children[0]!;
@@ -4146,72 +4112,30 @@ const kd = (e: KeyboardEvent) => {
               else mat?.dispose?.();
             }
             g.userData.vfxVer = FIRE_VFX_VER;
-            const black = () => new THREE.MeshStandardMaterial({ color: "#030303", roughness: 1, metalness: 0 });
-            const dark = () => new THREE.MeshStandardMaterial({ color: "#1a1510", roughness: 1 });
-            // Wide floor mask — covers real floor so trench is a visible HOLE
-            const mask = new THREE.Mesh(
-              new THREE.BoxGeometry(1, 0.12, 1),
-              new THREE.MeshBasicMaterial({ color: "#000000" }),
-            );
-            mask.renderOrder = 2;
-            g.add(mask);
-            // Deep angled walls
-            const left = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), black());
-            left.rotation.z = 0.55;
-            g.add(left);
-            const right = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), black());
-            right.rotation.z = -0.55;
-            g.add(right);
-            const floor = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), black());
-            g.add(floor);
-            // Bright lava ribbon
-            const core = new THREE.Mesh(
-              new THREE.BoxGeometry(1, 1, 1),
-              new THREE.MeshStandardMaterial({
-                color: "#ffe566", emissive: "#ff5500", emissiveIntensity: 8,
-                roughness: 0.2, toneMapped: false,
-              }),
-            );
-            core.renderOrder = 3;
-            g.add(core);
-            const lipL = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), dark());
-            g.add(lipL);
-            const lipR = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), dark());
-            g.add(lipR);
-            g.userData.parts = { mask, left, right, floor, core, lipL, lipR };
-            // Many glow chunks evenly along the trench
-            const glows: THREE.Mesh[] = [];
-            for (let gi = 0; gi < 12; gi++) {
-              const gm = new THREE.Mesh(
+            // Zigzag crack = many short black beds + colored cores + per-seg lights
+            const segs: { bed: THREE.Mesh; core: THREE.Mesh; light: THREE.PointLight }[] = [];
+            for (let s = 0; s < FIRE_SEGS; s++) {
+              const bed = new THREE.Mesh(
+                new THREE.BoxGeometry(1, 1, 1),
+                new THREE.MeshBasicMaterial({ color: "#050505" }),
+              );
+              const core = new THREE.Mesh(
                 new THREE.BoxGeometry(1, 1, 1),
                 new THREE.MeshStandardMaterial({
-                  color: "#ffcc44", emissive: "#ff6a1a", emissiveIntensity: 7,
-                  roughness: 0.2, toneMapped: false,
+                  color: "#ffcc33", emissive: "#ff2a1a", emissiveIntensity: 6.5,
+                  roughness: 0.25, toneMapped: false,
                 }),
               );
-              gm.renderOrder = 3;
-              g.add(gm);
-              glows.push(gm);
+              const light = new THREE.PointLight("#ff6a1a", 2.5, 55);
+              bed.visible = false;
+              core.visible = false;
+              light.visible = false;
+              g.add(bed);
+              g.add(core);
+              g.add(light);
+              segs.push({ bed, core, light });
             }
-            g.userData.glows = glows;
-            const branches: THREE.Mesh[] = [];
-            for (let b = 0; b < 12; b++) {
-              const br = new THREE.Mesh(
-                new THREE.BoxGeometry(2.2, 0.08, 0.14),
-                new THREE.MeshBasicMaterial({ color: "#0a0a0a" }),
-              );
-              br.rotation.y = (b % 2 === 0 ? 1 : -1) * (0.35 + (b % 5) * 0.12);
-              g.add(br);
-              branches.push(br);
-            }
-            g.userData.branches = branches;
-            const lights: THREE.PointLight[] = [];
-            for (let li = 0; li < 10; li++) {
-              const L = new THREE.PointLight("#ff6a1a", 3.5, 70);
-              g.add(L);
-              lights.push(L);
-            }
-            g.userData.lights = lights;
+            g.userData.segs = segs;
           }}
           visible={false}
         />

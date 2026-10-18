@@ -119,7 +119,7 @@ function addCrown(g: THREE.Group, color: string, y0: number) {
     g.add(tip);
   }
 }
-function addDecoration(g: THREE.Group, kind: TableDecoration, color: string, top: string = "none", tablePrimary = "#4da861") {
+function addDecoration(g: THREE.Group, kind: TableDecoration, color: string, topDeco: string = "none", tablePrimary = "#4da861") {
   if (kind === "none") return;
   if (kind === "trophy") { addTrophy(g, color, 3.4); return; }
   if (kind === "crown") { addCrown(g, color, 3.4); return; }
@@ -132,8 +132,8 @@ function addDecoration(g: THREE.Group, kind: TableDecoration, color: string, top
       leg.position.set(x, 3.4 + 1.45, z);
       g.add(leg);
     }
-    if (top === "trophy") addTrophy(g, color, 3.4 + 3.4);
-    else if (top === "crown") addCrown(g, color, 3.4 + 3.4);
+    if (topDeco === "trophy") addTrophy(g, color, 3.4 + 3.4);
+    else if (topDeco === "crown") addCrown(g, color, 3.4 + 3.4);
     return;
   }
   if (kind === "plates") {
@@ -174,9 +174,9 @@ function addDecoration(g: THREE.Group, kind: TableDecoration, color: string, top
   const cake = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 0.5, 16), mat(color, { roughness: 0.6 }));
   cake.position.set(0, 3.55, 0);
   g.add(cake);
-  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 0.35, 16), mat("#fff5e6", { roughness: 0.7 }));
-  top.position.set(0, 3.95, 0);
-  g.add(top);
+  const cakeTop = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 0.35, 16), mat("#fff5e6", { roughness: 0.7 }));
+  cakeTop.position.set(0, 3.95, 0);
+  g.add(cakeTop);
   for (const x of [-0.25, 0, 0.25]) {
     const candle = new THREE.Mesh(
       new THREE.CylinderGeometry(0.04, 0.04, 0.35, 8),

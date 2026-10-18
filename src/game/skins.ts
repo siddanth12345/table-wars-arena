@@ -20,7 +20,7 @@ export const COLOR_CHART = [
 ] as const;
 
 export type EyeDesign = "boss" | "square" | "triangle";
-export type TableDecoration = "none" | "plates" | "rug" | "office" | "birthday" | "trophy" | "crown" | "stack";
+export type TableDecoration = "none" | "plates" | "rug" | "office" | "birthday" | "trophy" | "crown" | "stack" | "throne";
 /** Only used when decoration is stack — sits on the upper table. */
 export type TopDecoration = "none" | "trophy" | "crown";
 export type LegDesign = "triangle" | "conic" | "minimal" | "oneleg";
@@ -104,6 +104,7 @@ export const DECORATIONS: { id: TableDecoration; label: string; needs?: string }
   { id: "trophy", label: "Trophy", needs: "Champ" },
   { id: "crown", label: "Crown", needs: "King" },
   { id: "stack", label: "Stacked tables", needs: "TBLE" },
+  { id: "throne", label: "Ability throne", needs: "Mastery King" },
 ];
 export const TOP_DECORATIONS: { id: TopDecoration; label: string; needs?: string }[] = [
   { id: "none", label: "None" },

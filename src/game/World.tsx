@@ -14,7 +14,7 @@ import {
 } from "./state";
 import { SKIN, useSkin } from "./skins";
 import { getAbility } from "./abilities";
-import { masteryOn, onCampaignWin } from "./mastery";
+import { masteryOn, onCampaignWin, onPlayerDeath } from "./mastery";
 import { createTableBot, skinKey } from "./tableBotFactory";
 import { Room, ROOM, SOLIDS } from "./Room";
 import { tableWood } from "./textures";
@@ -507,6 +507,7 @@ export function World() {
       G.pvpDead = true;
       G.freecam = false;
       G.freecamSpeedIdx = 0;
+      onPlayerDeath(G.mode, NET.kind);
       reportDeath();
       return;
     }
@@ -521,6 +522,7 @@ export function World() {
       if (!G.reviveQueue.includes(id)) G.reviveQueue.push(id);
       const name = NET.names[id] ?? "player";
       if (!G.diedThisRun.includes(name)) G.diedThisRun.push(name);
+      onPlayerDeath(G.mode, NET.kind);
       reportDeath();
       return;
     }
@@ -546,15 +548,18 @@ export function World() {
         return;
       }
       if (G.mode === "tutorial") {
+        onPlayerDeath(G.mode, NET.kind);
         G.playerHp = cfg.maxHp();
         return;
       }
       if (G.stage !== "tables") {
         // checkpoint: back to the boss warning, parry stays compromised
+        onPlayerDeath(G.mode, NET.kind);
         Object.assign(G, { playerHp: MAX_HP, stage: "incoming", bossWarn: BOSS_WARN, bossHits: 0, bossTime: 0, respawnMsg: 2.5, stun: 0 });
         G.respawnToken++;
         return;
       }
+      onPlayerDeath(G.mode, NET.kind);
       G.phase = "lost";
       document.exitPointerLock?.();
     }

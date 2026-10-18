@@ -119,10 +119,84 @@ function addCrown(g: THREE.Group, color: string, y0: number) {
     g.add(tip);
   }
 }
+function addThrone(g: THREE.Group, color: string) {
+  const y0 = 3.4;
+  // Seat
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.35, 2.0), mat(color, { metalness: 0.35, roughness: 0.4 }));
+  seat.position.set(0, y0 + 0.55, 0.15);
+  g.add(seat);
+  // Backrest
+  const back = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.2, 0.28), mat(color, { metalness: 0.3, roughness: 0.45 }));
+  back.position.set(0, y0 + 1.75, -0.85);
+  g.add(back);
+  // Arm rests
+  for (const x of [-1.15, 1.15]) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.25, 1.6), mat(color, { metalness: 0.3, roughness: 0.4 }));
+    arm.position.set(x, y0 + 0.95, 0.1);
+    g.add(arm);
+  }
+  // Mastered WALL panels (red glowing slabs) flanking the backrest
+  for (const x of [-1.35, 1.35]) {
+    const wall = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 2.4, 1.4),
+      mat("#c41e1e", { metalness: 0.2, roughness: 0.35, emissive: "#ff2222", emissiveIntensity: 0.55 }),
+    );
+    wall.position.set(x, y0 + 1.5, -0.2);
+    g.add(wall);
+  }
+  // TRAMPOLINE model on left arm (pad + silver coil)
+  const pad = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.55, 0.12, 20),
+    mat("#22c55e", { metalness: 0.15, roughness: 0.5, emissive: "#16a34a", emissiveIntensity: 0.35 }),
+  );
+  pad.position.set(-1.15, y0 + 1.15, 0.55);
+  pad.rotation.x = -0.35;
+  g.add(pad);
+  const coil = new THREE.Mesh(
+    new THREE.TorusGeometry(0.28, 0.06, 8, 16),
+    mat("#c0c0c0", { metalness: 0.9, roughness: 0.2 }),
+  );
+  coil.position.set(-1.15, y0 + 0.95, 0.35);
+  coil.rotation.x = Math.PI / 2;
+  g.add(coil);
+  // WHITE TELEPORT BOMB on right arm
+  const bomb = new THREE.Mesh(
+    new THREE.SphereGeometry(0.42, 16, 16),
+    mat("#f5f5f5", { metalness: 0.55, roughness: 0.15, emissive: "#ffffff", emissiveIntensity: 0.45 }),
+  );
+  bomb.position.set(1.15, y0 + 1.25, 0.5);
+  g.add(bomb);
+  const bombRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.5, 0.04, 8, 24),
+    mat("#a78bfa", { metalness: 0.6, roughness: 0.2, emissive: "#7c3aed", emissiveIntensity: 0.6 }),
+  );
+  bombRing.position.copy(bomb.position);
+  bombRing.rotation.x = Math.PI / 2;
+  g.add(bombRing);
+  // Mastered FIREBALL (blue) hovering above the backrest
+  const fireball = new THREE.Mesh(
+    new THREE.SphereGeometry(0.38, 14, 14),
+    mat("#3b82f6", { metalness: 0.2, roughness: 0.25, emissive: "#2563eb", emissiveIntensity: 0.85 }),
+  );
+  fireball.position.set(0, y0 + 3.15, -0.7);
+  g.add(fireball);
+  const flame = new THREE.Mesh(
+    new THREE.ConeGeometry(0.28, 0.55, 10),
+    mat("#60a5fa", { emissive: "#3b82f6", emissiveIntensity: 1.0, transparent: true, opacity: 0.85 }),
+  );
+  flame.position.set(0, y0 + 3.55, -0.7);
+  g.add(flame);
+  // Small glow light for the throne
+  const light = new THREE.PointLight(color, 1.2, 14);
+  light.position.set(0, y0 + 2.2, 0);
+  g.add(light);
+}
+
 function addDecoration(g: THREE.Group, kind: TableDecoration, color: string, topDeco: string = "none", tablePrimary = "#4da861") {
   if (kind === "none") return;
   if (kind === "trophy") { addTrophy(g, color, 3.4); return; }
   if (kind === "crown") { addCrown(g, color, 3.4); return; }
+  if (kind === "throne") { addThrone(g, color); return; }
   if (kind === "stack") {
     const topSurf = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.35, 6.4), mat(tablePrimary, { roughness: 0.55 }));
     topSurf.position.set(0, 3.4 + 3.2, 0);

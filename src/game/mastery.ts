@@ -14,7 +14,8 @@ export type AchievementId =
   | "bricked_master" | "cant_catch_me_now" | "hot_stuff" | "now_you_see_me"
   | "great_potential" | "down_you_go" | "down_you_go_friends"
   | "speedrunner" | "faster_than_light" | "hacker"
-  | "champ" | "king" | "tble";
+  | "champ" | "king" | "tble"
+  | "get_back_up" | "mastery_king";
 
 export type Achievement = {
   id: AchievementId;
@@ -98,6 +99,16 @@ export const ACHIEVEMENTS: Achievement[] = [
     id: "tble", name: "TBLE", icon: "🟩",
     summary: "2 tables :D.",
     how: "Earn all ability masteries, Champ, King, Great Potential, both Down You Go achievements, Speedrunner, and Faster Than Light? (Hacker not required).",
+  },
+  {
+    id: "get_back_up", name: "Get Back Up", icon: "💪",
+    summary: "Get up, I SAID GET UP.",
+    how: "Die for the first time in campaign, 1v1, tutorial, or party modes (not lobby or training).",
+  },
+  {
+    id: "mastery_king", name: "Mastery King", icon: "🪑",
+    summary: "The collector.",
+    how: "Earn all four ability masteries (Wall, Trampoline, Fire, Teleport).",
   },
 ];
 
@@ -198,7 +209,28 @@ function award(id: AchievementId) {
   persister?.();
   setTimeout(() => persister?.(), 250);
   setTimeout(() => persister?.(), 1000);
+  // Mastery King when all four ability masteries are owned
+  if (id === "bricked_master" || id === "cant_catch_me_now" || id === "hot_stuff" || id === "now_you_see_me") {
+    tryAwardMasteryKing();
+  }
   return true;
+}
+
+function tryAwardMasteryKing() {
+  if (
+    progress.earned.bricked_master &&
+    progress.earned.cant_catch_me_now &&
+    progress.earned.hot_stuff &&
+    progress.earned.now_you_see_me
+  ) {
+    award("mastery_king");
+  }
+}
+
+/** First death outside lobby/training. */
+export function onPlayerDeath(mode: string, netKind: string | null | undefined) {
+  if (mode === "training" || netKind === "lobby") return;
+  award("get_back_up");
 }
 
 export function getPvpWins() { return progress.pvpWins | 0; }
@@ -275,6 +307,7 @@ export function hydrateProgress(raw: unknown) {
   if (typeof r.pvpWins === "number" && r.pvpWins >= 0) next.pvpWins = Math.floor(r.pvpWins);
   progress = next;
   bump();
+  tryAwardMasteryKing();
 }
 export function resetProgress() {
   progress = { earned: {}, off: {}, pvpWins: 0 };
@@ -287,5 +320,6 @@ export function decorationUnlocked(id: string) {
   if (id === "trophy") return hasAchievement("champ");
   if (id === "crown") return hasAchievement("king");
   if (id === "stack") return hasAchievement("tble");
+  if (id === "throne") return hasAchievement("mastery_king");
   return true;
 }

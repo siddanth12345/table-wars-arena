@@ -395,8 +395,8 @@ export function World() {
   const padMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const coilMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireGroupRefs = useRef<(THREE.Group | null)[]>([]);
-  const FIRE_VFX_VER = 6; // jagged + rocks + DNA
-  const FIRE_SEGS = 20;
+  const FIRE_VFX_VER = 7; // sharper wider mastered zigzags
+  const FIRE_SEGS = 22;
   const fireballMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireParticleRefs = useRef<(THREE.Points | null)[]>([]);
   const slam = useRef({ on: false, fromY: 0, h: 0 });
@@ -2021,6 +2021,7 @@ const kd = (e: KeyboardEvent) => {
               slot.m = masteryOn("fire");
               slot.netId = `${myId()}-f-${Date.now()}`;
               playSfx("fire_ground");
+              G.shake = Math.max(G.shake, 0.45);
               G.abilityCharges = 0;
               G.abilityCd = 5;
               if (NET.online) sendNet("vfx", { k: "fire", m: slot.m ? 1 : 0, id: slot.netId, ax: slot.ax, ay: slot.ay, az: slot.az, bx: slot.bx, by: slot.by, bz: slot.bz, life: 3 });
@@ -3839,10 +3840,10 @@ const kd = (e: KeyboardEvent) => {
       const shimmer = 0.9 + 0.1 * Math.sin(performance.now() / 280 + i);
       const glowCol = f.m ? "#3b82f6" : "#ff2a1a";
       const coreCol = f.m ? "#93c5fd" : "#ffcc33";
-      // Sharp jagged offsets (not smooth curves) — alternate hard steps
-      const jagAmp = f.m ? 5.5 : 4.2;
-      const bedW = f.m ? 2.4 : 1.8;
-      const coreW = f.m ? 0.95 : 0.65;
+      // Sharp jagged offsets — mastered: much wider + harder corners
+      const jagAmp = f.m ? 11.0 : 4.2;
+      const bedW = f.m ? 2.6 : 1.8;
+      const coreW = f.m ? 1.0 : 0.65;
       const rockH = bedW; // protrusion = thickness
       const segs = grp.userData.segs as {
         bed: THREE.Mesh; core: THREE.Mesh; light: THREE.PointLight;
@@ -3854,10 +3855,12 @@ const kd = (e: KeyboardEvent) => {
       const pts: { x: number; z: number; j: number }[] = [];
       for (let si = 0; si <= segs.length; si++) {
         const tt = si / segs.length;
-        // Sharp turns: quantize sine into steps + occasional hard flip
-        const raw = Math.sin(tt * Math.PI * 7) + 0.35 * Math.sin(tt * Math.PI * 13);
-        const stepped = Math.sign(raw) * Math.min(1, Math.abs(raw) * 1.8);
-        const j = stepped * jagAmp * (si % 3 === 0 ? 1.25 : 1);
+        // Sharp turns: hard stepped flips (mastered snaps harder / wider)
+        const freq = f.m ? 9 : 7;
+        const raw = Math.sin(tt * Math.PI * freq) + (f.m ? 0.55 : 0.35) * Math.sin(tt * Math.PI * (f.m ? 17 : 13));
+        const snap = f.m ? 3.2 : 1.8;
+        const stepped = Math.sign(raw) * Math.min(1, Math.abs(raw) * snap);
+        const j = stepped * jagAmp * (si % 2 === 0 ? 1.35 : 0.9);
         pts.push({
           x: f.ax + dx * len * tt + px * j,
           z: f.az + dz * len * tt + pz * j,
@@ -3909,10 +3912,10 @@ const kd = (e: KeyboardEvent) => {
         if (s.dnaBed && s.dnaCore) {
           if (f.m) {
             const tt0 = si / segs.length, tt1 = (si + 1) / segs.length;
-            const raw0 = Math.sin(tt0 * Math.PI * 7 + 2.2) + 0.4 * Math.sin(tt0 * Math.PI * 15);
-            const raw1 = Math.sin(tt1 * Math.PI * 7 + 2.2) + 0.4 * Math.sin(tt1 * Math.PI * 15);
-            const j0 = Math.sign(raw0) * Math.min(1, Math.abs(raw0) * 1.8) * jagAmp * 0.85;
-            const j1 = Math.sign(raw1) * Math.min(1, Math.abs(raw1) * 1.8) * jagAmp * 0.85;
+            const raw0 = Math.sin(tt0 * Math.PI * 9 + 2.2) + 0.55 * Math.sin(tt0 * Math.PI * 17);
+            const raw1 = Math.sin(tt1 * Math.PI * 9 + 2.2) + 0.55 * Math.sin(tt1 * Math.PI * 17);
+            const j0 = Math.sign(raw0) * Math.min(1, Math.abs(raw0) * 3.0) * jagAmp * 0.9;
+            const j1 = Math.sign(raw1) * Math.min(1, Math.abs(raw1) * 3.0) * jagAmp * 0.9;
             // Cross over the main strand for DNA look
             const cross = (si % 4 < 2 ? 1 : -1);
             const dx0 = f.ax + dx * len * tt0 + px * (j0 * cross);

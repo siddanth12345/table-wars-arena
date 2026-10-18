@@ -4,25 +4,31 @@ import { G } from "./state";
 
 /**
  * Achievements + ability masteries.
- *
- * Beating the campaign (offline or party) with an ability equipped earns that ability's achievement,
- * and the achievement unlocks the ability's mastery. A mastery can be switched on/off per ability.
- * Signed-in players keep their progress (it is saved with the rest of their profile settings);
- * guests keep it only until the tab is closed.
+ * Mastery achievements unlock toggleable combat masteries.
+ * Other achievements are meta / cosmetic unlocks.
+ * Signed-in: saved with profile settings (+ localStorage backup).
+ * Guests: session only.
  */
 
-export type AchievementId = "bricked_master" | "cant_catch_me_now" | "hot_stuff" | "now_you_see_me";
+export type AchievementId =
+  | "bricked_master" | "cant_catch_me_now" | "hot_stuff" | "now_you_see_me"
+  | "great_potential" | "down_you_go" | "down_you_go_friends"
+  | "speedrunner" | "faster_than_light" | "hacker"
+  | "champ" | "king" | "tble";
 
 export type Achievement = {
   id: AchievementId;
   name: string;
   icon: string;
-  ability: AbilityId;
-  /** one-line summary shown in the list */
   summary: string;
-  /** how to earn it (Details) */
   how: string;
-  masteryName: string;
+  /** Ability mastery achievements only */
+  ability?: AbilityId;
+  masteryName?: string;
+  /** Hidden until earned (Hacker) */
+  secret?: boolean;
+  /** No Details button */
+  noDetails?: boolean;
 };
 
 export const ACHIEVEMENTS: Achievement[] = [
@@ -46,9 +52,55 @@ export const ACHIEVEMENTS: Achievement[] = [
     summary: "Beat campaign mode using the Teleport ability.",
     how: "Select the Teleport ability, then beat campaign mode (defeat the boss) with Teleport equipped. Party campaign counts for every teammate who had Teleport equipped.",
   },
+  {
+    id: "great_potential", name: "Great Potential", icon: "🌱",
+    summary: "Potential table.",
+    how: "Beat the tutorial.",
+  },
+  {
+    id: "down_you_go", name: "Down You Go", icon: "⬇️",
+    summary: "And stay down.",
+    how: "Beat the boss in offline campaign (not training or tutorial).",
+  },
+  {
+    id: "down_you_go_friends", name: "Down You Go + Friends", icon: "👥",
+    summary: "And stay down + friends.",
+    how: "Beat the boss in party campaign.",
+  },
+  {
+    id: "speedrunner", name: "Speedrunner", icon: "⏱️",
+    summary: "Too fast?",
+    how: "Beat offline campaign with a victory time under 5:00 (same timer as the victory screen).",
+  },
+  {
+    id: "faster_than_light", name: "Faster Than Light?", icon: "⚡",
+    summary: "Theory of relativity means nothing to me.",
+    how: "Beat offline campaign with a victory time under 2:30.",
+  },
+  {
+    id: "hacker", name: "Close the Game, Hacker", icon: "🖤",
+    summary: "",
+    how: "Beat offline campaign in under 1:00.",
+    secret: true,
+    noDetails: true,
+  },
+  {
+    id: "champ", name: "Champ", icon: "🏆",
+    summary: "I am #1.",
+    how: "Win 5 full 1v1 matches (career). Opponent leaving only counts if you already have 1+ points.",
+  },
+  {
+    id: "king", name: "King", icon: "👑",
+    summary: "I am the honored one.",
+    how: "Win 15 full 1v1 matches (career).",
+  },
+  {
+    id: "tble", name: "TBLE", icon: "🟩",
+    summary: "2 tables :D.",
+    how: "Earn all ability masteries, Champ, King, Great Potential, both Down You Go achievements, Speedrunner, and Faster Than Light? (Hacker not required).",
+  },
 ];
 
-/** What each mastery changes — shown in the Abilities details panel and the Achievements details. */
 export const MASTERY_LINES: Record<AbilityId, string[]> = {
   wall: [
     "Walls glow red and are 1.5× bigger in every dimension.",
@@ -81,9 +133,23 @@ export function achievementFor(ability: AbilityId): Achievement {
   return ACHIEVEMENTS.find((a) => a.ability === ability)!;
 }
 
+/** Display name: secret achievements stay ??? until owned. */
+export function displayAchievementName(a: Achievement, owned: boolean) {
+  if (a.secret && !owned) return "???";
+  return a.name;
+}
+export function displayAchievementHow(a: Achievement, owned: boolean) {
+  if (a.secret && !owned) return "???";
+  return a.how;
+}
+
 // ---------------- state ----------------
-type Progress = { earned: Partial<Record<AchievementId, true>>; off: Partial<Record<AbilityId, true>> };
-let progress: Progress = { earned: {}, off: {} };
+type Progress = {
+  earned: Partial<Record<AchievementId, true>>;
+  off: Partial<Record<AbilityId, true>>;
+  pvpWins: number;
+};
+let progress: Progress = { earned: {}, off: {}, pvpWins: 0 };
 let justUnlocked: AchievementId[] = [];
 let version = 0;
 const subs = new Set<() => void>();
@@ -94,23 +160,23 @@ function bump() {
   subs.forEach((f) => f());
 }
 export function useProgress() {
-  useSyncExternalStore((f) => { subs.add(f); return () => { subs.delete(f); }; }, () => version, () => 0);
+  useSyncExternalStore((f) => { subs.add(f); return () => { subs.delete(f); }; }, () => version, () => version);
   return progress;
 }
+export function getProgress() { return progress; }
 export function setProgressPersister(fn: (() => void) | null) { persister = fn; }
 
 export const hasAchievement = (id: AchievementId) => !!progress.earned[id];
-/** The mastery has been earned (whether or not it is switched on). */
 export const hasMastery = (ab: AbilityId) => !!progress.earned[achievementFor(ab).id];
-/** The mastery is earned AND switched on — gameplay code asks this. */
+// training mastery overrides (existing)
+const trainPick: Partial<Record<AbilityId, boolean>> = {};
+export function getTrainMastery(ab: AbilityId) { return !!trainPick[ab]; }
+export function setTrainMastery(ab: AbilityId, on: boolean) { trainPick[ab] = on; bump(); }
+
 export const masteryOn = (ab: AbilityId) => {
-  // Training sandbox: whatever was picked in the training menu wins (earned or not) and is never saved
-  if (G.mode === "training" && trainPick[ab] !== undefined) return trainPick[ab]!;
+  if (G.mode === "training" && ab in trainPick) return !!trainPick[ab];
   return hasMastery(ab) && !progress.off[ab];
 };
-const trainPick: Partial<Record<AbilityId, boolean>> = {};
-/** Training menu only: use the mastered (or normal) version of an ability, even if it isn't earned. Not saved. */
-export function setTrainMastery(ab: AbilityId, on: boolean) { trainPick[ab] = on; bump(); }
 
 export function setMasteryOn(ab: AbilityId, on: boolean) {
   if (!hasMastery(ab)) return;
@@ -120,7 +186,6 @@ export function setMasteryOn(ab: AbilityId, on: boolean) {
 }
 
 const awardSubs = new Set<(a: Achievement) => void>();
-/** Called the moment an achievement is earned (drives the pop-up). */
 export function onAchievement(fn: (a: Achievement) => void) { awardSubs.add(fn); return () => { awardSubs.delete(fn); }; }
 
 function award(id: AchievementId) {
@@ -130,42 +195,97 @@ function award(id: AchievementId) {
   if (ach) awardSubs.forEach((f) => f(ach));
   justUnlocked = [...justUnlocked, id];
   bump();
-  // Persist immediately (and again shortly after) so account saves can't lose a race with settings
   persister?.();
   setTimeout(() => persister?.(), 250);
   setTimeout(() => persister?.(), 1000);
   return true;
 }
 
-/** Called when the campaign boss is beaten. Awards the achievement for the ability equipped right now. */
-export function onCampaignWin() {
-  if (G.mode !== "game") return; // campaign only (not training / tutorial / 1v1)
-  award(achievementFor(getAbility()).id);
+export function getPvpWins() { return progress.pvpWins | 0; }
+
+/** Full match win (career). Leave only counts if you already scored ≥1. */
+export function recordPvpWin(opts?: { opponentLeft?: boolean; myScore?: number }) {
+  if (opts?.opponentLeft && (opts.myScore ?? 0) < 1) return;
+  progress.pvpWins = (progress.pvpWins | 0) + 1;
+  if (progress.pvpWins >= 5) award("champ");
+  if (progress.pvpWins >= 15) award("king");
+  tryAwardTble();
+  bump();
+  persister?.();
+  setTimeout(() => persister?.(), 250);
 }
 
-/** Achievements earned during the current win screen (cleared when you leave it). */
+function tryAwardTble() {
+  const need: AchievementId[] = [
+    "bricked_master", "cant_catch_me_now", "hot_stuff", "now_you_see_me",
+    "great_potential", "down_you_go", "down_you_go_friends",
+    "speedrunner", "faster_than_light", "champ", "king",
+  ];
+  if (need.every((id) => progress.earned[id])) award("tble");
+}
+
+/** Tutorial finished. */
+export function onTutorialComplete() {
+  award("great_potential");
+  tryAwardTble();
+}
+
+/**
+ * Campaign boss beaten.
+ * Victory time = G.time (same as victory screen).
+ * Party = NET.kind === "coop" or shares party campaign.
+ */
+export function onCampaignWin(isParty = false) {
+  if (G.mode !== "game") return;
+  const ab = getAbility();
+  const masteryAch = ACHIEVEMENTS.find((a) => a.ability === ab);
+  if (masteryAch) award(masteryAch.id);
+
+  const t = G.time;
+  if (isParty) {
+    award("down_you_go_friends");
+  } else {
+    award("down_you_go");
+    // Timed achievements: offline only, victory-screen time (G.time)
+    if (t < 300) award("speedrunner");
+    if (t < 150) award("faster_than_light");
+    if (t < 60) award("hacker");
+  }
+  tryAwardTble();
+}
+
 export function getJustUnlocked() { return justUnlocked; }
 export function clearJustUnlocked() { if (justUnlocked.length) { justUnlocked = []; bump(); } }
 
-// ---------------- saving ----------------
 export function serializeProgress() {
-  return { earned: Object.keys(progress.earned), off: Object.keys(progress.off) };
+  return {
+    earned: Object.keys(progress.earned),
+    off: Object.keys(progress.off),
+    pvpWins: progress.pvpWins | 0,
+  };
 }
-/** Merge saved progress into the current one (keeps anything a guest earned before signing in). */
 export function hydrateProgress(raw: unknown) {
-  const r = raw as { earned?: unknown; off?: unknown } | null | undefined;
+  const r = raw as { earned?: unknown; off?: unknown; pvpWins?: unknown } | null | undefined;
   if (!r || typeof r !== "object") return;
   const ids = new Set<string>(ACHIEVEMENTS.map((a) => a.id));
-  const abs = new Set<string>(ACHIEVEMENTS.map((a) => a.ability));
-  const next: Progress = { earned: { ...progress.earned }, off: { ...progress.off } };
+  const abs = new Set<string>(["wall", "trampoline", "fire", "teleport"]);
+  const next: Progress = { earned: { ...progress.earned }, off: { ...progress.off }, pvpWins: progress.pvpWins | 0 };
   if (Array.isArray(r.earned)) for (const k of r.earned) if (typeof k === "string" && ids.has(k)) next.earned[k as AchievementId] = true;
   if (Array.isArray(r.off)) for (const k of r.off) if (typeof k === "string" && abs.has(k)) next.off[k as AbilityId] = true;
+  if (typeof r.pvpWins === "number" && r.pvpWins >= 0) next.pvpWins = Math.floor(r.pvpWins);
   progress = next;
   bump();
 }
-/** Forget everything (used when signing out so the next person on this tab starts clean). */
 export function resetProgress() {
-  progress = { earned: {}, off: {} };
+  progress = { earned: {}, off: {}, pvpWins: 0 };
   justUnlocked = [];
   bump();
+}
+
+/** Cosmetic unlock helpers for skins */
+export function decorationUnlocked(id: string) {
+  if (id === "trophy") return hasAchievement("champ");
+  if (id === "crown") return hasAchievement("king");
+  if (id === "stack") return hasAchievement("tble");
+  return true;
 }

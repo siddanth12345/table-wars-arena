@@ -775,7 +775,11 @@ function WinScreen() {
             <div key={a!.id} className="mb-4 rounded border-2 border-crosshair bg-crosshair/15 px-4 py-3">
               <div className="text-[10px] font-black uppercase tracking-[0.3em] text-crosshair">Achievement unlocked</div>
               <div className="text-xl font-black uppercase">{a!.icon} {a!.name}</div>
-              <div className="text-xs opacity-80">{a!.masteryName} unlocked — turn it on or off in the Abilities tab.</div>
+              {a!.masteryName ? (
+                <div className="text-xs opacity-80">{a!.masteryName} unlocked — turn it on or off in the Abilities tab.</div>
+              ) : a!.summary ? (
+                <div className="text-xs opacity-80">{a!.summary}</div>
+              ) : null}
             </div>
           ))}
           <dl className="space-y-3 text-lg">

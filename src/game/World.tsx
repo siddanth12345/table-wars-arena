@@ -618,7 +618,7 @@ export function World() {
       burst(tmpV.copy(boss.current.pos).setY(15), BOSS_S / 2, 30);
       if (G.mode === "training") { despawnBoss(); return; }
       G.phase = "won";
-      onCampaignWin();
+      onCampaignWin(NET.kind === "coop" || !!(NET.party && NET.party.members.length > 0));
       sendNet("won", {});
       document.exitPointerLock?.();
     }
@@ -1412,7 +1412,7 @@ const kd = (e: KeyboardEvent) => {
     if (q.kind === "despawn") despawnAll();
     else trainSpawn({ kind: q.kind as TrainSpawn["kind"], n: q.n, t: 0 });
   };
-  NET_HOOKS.onWon = () => { G.phase = "won"; onCampaignWin(); document.exitPointerLock?.(); };
+  NET_HOOKS.onWon = () => { G.phase = "won"; onCampaignWin(NET.kind === "coop" || !!(NET.party && NET.party.members.length > 0)); document.exitPointerLock?.(); };
   NET_HOOKS.onHit = (d, stun, stunT, extra) => {
     if (d > 0) damagePlayer(d);
     if (extra?.tp && !G.pvpDead && !G.campaignDead) pos.current.set(extra.tp[0]!, extra.tp[1]!, extra.tp[2]!);

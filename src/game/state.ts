@@ -195,6 +195,8 @@ export function goHome() {
 
 export function finishTutorial() {
   try { localStorage.setItem("tw-tutorial-done", "1"); } catch { /* ignore */ }
+  // dynamic import avoids circular dep (mastery imports G from state)
+  void import("./mastery").then((m) => m.onTutorialComplete());
   goHome();
 }
 

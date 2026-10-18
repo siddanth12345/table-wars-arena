@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { setTodOverride, type TimeOfDay } from "./settings";
 import { displayName, getAccount, lookupUsername } from "./account";
 import { G, goHome, resetGame, type Mode } from "./state";
+import { recordPvpWin } from "./mastery";
 import { SKIN, type Skin } from "./skins";
 import { onRemoteChat, clearChat } from "./chat";
 
@@ -495,6 +496,12 @@ function onOver(m: OverMsg) {
   NET.stage = "over";
   G.frozen = true;
   document.exitPointerLock?.();
+  // Career 1v1 wins — leave only counts if you already have ≥1 point
+  if (m.winner === myId()) {
+    const myScore = m.scores[myId()] ?? 0;
+    recordPvpWin({ opponentLeft: NET.opponentLeft, myScore });
+  }
+  NET.opponentLeft = false;
   bump();
   if (NET.partyMatch) later(2000, () => goHomeOnline());
 }

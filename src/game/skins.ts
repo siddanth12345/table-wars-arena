@@ -20,7 +20,9 @@ export const COLOR_CHART = [
 ] as const;
 
 export type EyeDesign = "boss" | "square" | "triangle";
-export type TableDecoration = "none" | "plates" | "rug" | "office" | "birthday";
+export type TableDecoration = "none" | "plates" | "rug" | "office" | "birthday" | "trophy" | "crown" | "stack";
+/** Only used when decoration is stack — sits on the upper table. */
+export type TopDecoration = "none" | "trophy" | "crown";
 export type LegDesign = "triangle" | "conic" | "minimal" | "oneleg";
 
 export type Skin = {
@@ -28,6 +30,8 @@ export type Skin = {
   tablePrimary: string;
   eyeDesign: EyeDesign;
   decoration: TableDecoration;
+  /** Secondary deco on the upper table when decoration is "stack" */
+  topDecoration: TopDecoration;
   decorationColor: string;
   lightColor: string;
   legDesign: LegDesign;
@@ -38,6 +42,7 @@ export const DEFAULT_SKIN: Skin = {
   tablePrimary: "#4da861",
   eyeDesign: "boss",
   decoration: "none",
+  topDecoration: "none",
   decorationColor: "#ffffff",
   lightColor: "#4da861",
   legDesign: "conic",
@@ -90,12 +95,20 @@ export const EYE_DESIGNS: { id: EyeDesign; label: string }[] = [
   { id: "triangle", label: "Triangle eyes" },
 ];
 
-export const DECORATIONS: { id: TableDecoration; label: string }[] = [
+export const DECORATIONS: { id: TableDecoration; label: string; needs?: string }[] = [
   { id: "none", label: "None" },
   { id: "plates", label: "Plates" },
   { id: "rug", label: "Table rug" },
   { id: "office", label: "Office table" },
   { id: "birthday", label: "Birthday table" },
+  { id: "trophy", label: "Trophy", needs: "Champ" },
+  { id: "crown", label: "Crown", needs: "King" },
+  { id: "stack", label: "Stacked tables", needs: "TBLE" },
+];
+export const TOP_DECORATIONS: { id: TopDecoration; label: string; needs?: string }[] = [
+  { id: "none", label: "None" },
+  { id: "trophy", label: "Trophy (top)", needs: "Champ" },
+  { id: "crown", label: "Crown (top)", needs: "King" },
 ];
 
 export const LEG_DESIGNS: { id: LegDesign; label: string }[] = [

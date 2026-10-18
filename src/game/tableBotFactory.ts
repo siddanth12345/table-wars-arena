@@ -89,8 +89,53 @@ function addLegs(g: THREE.Group, design: LegDesign, primary: string, ghost: bool
   }
 }
 
-function addDecoration(g: THREE.Group, kind: TableDecoration, color: string) {
+function addTrophy(g: THREE.Group, color: string, y0: number) {
+  // Full table height trophy on top of surface y0
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.35, 1.6, 12), mat(color, { metalness: 0.7, roughness: 0.25 }));
+  stem.position.set(0, y0 + 0.8, 0);
+  g.add(stem);
+  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.45, 0.9, 16), mat(color, { metalness: 0.65, roughness: 0.2 }));
+  cup.position.set(0, y0 + 1.9, 0);
+  g.add(cup);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.95, 0.25, 16), mat(color, { metalness: 0.5, roughness: 0.35 }));
+  base.position.set(0, y0 + 0.12, 0);
+  g.add(base);
+}
+function addCrown(g: THREE.Group, color: string, y0: number) {
+  // Half table height, glows with decoration color
+  const band = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.85, 0.9, 0.45, 16),
+    mat(color, { metalness: 0.8, roughness: 0.2, emissive: color, emissiveIntensity: 0.55 }),
+  );
+  band.position.set(0, y0 + 0.35, 0);
+  g.add(band);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const tip = new THREE.Mesh(
+      new THREE.ConeGeometry(0.18, 0.55, 8),
+      mat(color, { metalness: 0.75, roughness: 0.2, emissive: color, emissiveIntensity: 0.7 }),
+    );
+    tip.position.set(Math.cos(a) * 0.7, y0 + 0.85, Math.sin(a) * 0.7);
+    g.add(tip);
+  }
+}
+function addDecoration(g: THREE.Group, kind: TableDecoration, color: string, top: string = "none", tablePrimary = "#4da861") {
   if (kind === "none") return;
+  if (kind === "trophy") { addTrophy(g, color, 3.4); return; }
+  if (kind === "crown") { addCrown(g, color, 3.4); return; }
+  if (kind === "stack") {
+    const topSurf = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.35, 6.4), mat(tablePrimary, { roughness: 0.55 }));
+    topSurf.position.set(0, 3.4 + 3.2, 0);
+    g.add(topSurf);
+    for (const [x, z] of [[-2, -2], [2, -2], [-2, 2], [2, 2]] as [number, number][]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.28, 2.9, 8), mat(tablePrimary, { roughness: 0.6 }));
+      leg.position.set(x, 3.4 + 1.45, z);
+      g.add(leg);
+    }
+    if (top === "trophy") addTrophy(g, color, 3.4 + 3.4);
+    else if (top === "crown") addCrown(g, color, 3.4 + 3.4);
+    return;
+  }
   if (kind === "plates") {
     for (const x of [-1.2, 1.2]) {
       const mesh = new THREE.Mesh(
@@ -179,7 +224,7 @@ export function createTableBot(opts: TableBotOptions = {}): THREE.Group {
 
   addLegs(root, skin.legDesign, skin.tablePrimary, ghost);
   addEyes(root, skin.eyeDesign, skin.eyeColor, ghost);
-  addDecoration(root, skin.decoration, skin.decorationColor);
+  addDecoration(root, skin.decoration, skin.decorationColor, skin.topDecoration ?? "none", skin.tablePrimary);
 
   if (emitLight) {
     const light = new THREE.PointLight(skin.lightColor, 40 * lightIntensity, 120, 2);
@@ -218,5 +263,5 @@ export function createStageDisc(color = "#2a2430", lightColor = "#4da861"): THRE
 
 export function skinKey(skin: Partial<Skin> | undefined) {
   const s = { ...DEFAULT_SKIN, ...(skin ?? {}) };
-  return [s.eyeColor, s.tablePrimary, s.eyeDesign, s.decoration, s.decorationColor, s.lightColor, s.legDesign].join("|");
+  return [s.eyeColor, s.tablePrimary, s.eyeDesign, s.decoration, s.topDecoration ?? "none", s.decorationColor, s.lightColor, s.legDesign].join("|");
 }

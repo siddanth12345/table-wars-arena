@@ -2,9 +2,10 @@ import { useRef, useState, useEffect, useMemo } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import {
-  applySkin, useSkin, COLOR_CHART, EYE_DESIGNS, DECORATIONS, LEG_DESIGNS,
-  type Skin, type EyeDesign, type TableDecoration, type LegDesign,
+  applySkin, useSkin, COLOR_CHART, EYE_DESIGNS, DECORATIONS, TOP_DECORATIONS, LEG_DESIGNS,
+  type Skin, type EyeDesign, type TableDecoration, type TopDecoration, type LegDesign,
 } from "./skins";
+import { decorationUnlocked, useProgress } from "./mastery";
 import { createStageDisc, createTableBot, skinKey } from "./tableBotFactory";
 
 const btn = "rounded-xl border-2 border-white/20 bg-black/50 px-3 py-2 text-sm font-bold uppercase tracking-wide text-white hover:bg-white/10 transition";
@@ -101,8 +102,9 @@ function PreviewScene({ skin }: { skin: Skin }) {
 }
 
 export function SkinsPanel({ onClose }: { onClose: () => void }) {
+  useProgress();
   const live = useSkin();
-  const [draft, setDraft] = useState<Skin>(() => ({ ...live }));
+  const [draft, setDraft] = useState<Skin>(() => ({ ...live, topDecoration: live.topDecoration ?? "none" }));
   const [colorTarget, setColorTarget] = useState<"eyeColor" | "tablePrimary" | "decorationColor" | "lightColor">("tablePrimary");
 
   const set = <K extends keyof Skin>(key: K, value: Skin[K]) => setDraft((d) => ({ ...d, [key]: value }));
@@ -148,12 +150,43 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
           <div className="sm:col-span-2">
             <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Table decoration</p>
             <div className="flex flex-wrap gap-2">
-              {DECORATIONS.map((e) => (
-                <button key={e.id} type="button" className={draft.decoration === e.id ? btnOn : btn} onClick={() => set("decoration", e.id as TableDecoration)}>
-                  {e.label}
-                </button>
-              ))}
+              {DECORATIONS.map((e) => {
+                const locked = !decorationUnlocked(e.id);
+                return (
+                  <button
+                    key={e.id}
+                    type="button"
+                    disabled={locked}
+                    title={locked ? `Locked — needs ${e.needs ?? "achievement"}` : e.label}
+                    className={`${draft.decoration === e.id ? btnOn : btn} ${locked ? "opacity-40 cursor-not-allowed" : ""}`}
+                    onClick={() => { if (!locked) set("decoration", e.id as TableDecoration); }}
+                  >
+                    {locked ? `🔒 ${e.label}` : e.label}
+                  </button>
+                );
+              })}
             </div>
+            {draft.decoration === "stack" && (
+              <div className="mt-3">
+                <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Top table decoration</p>
+                <div className="flex flex-wrap gap-2">
+                  {TOP_DECORATIONS.map((e) => {
+                    const locked = !decorationUnlocked(e.id);
+                    return (
+                      <button
+                        key={e.id}
+                        type="button"
+                        disabled={locked}
+                        className={`${(draft.topDecoration ?? "none") === e.id ? btnOn : btn} ${locked ? "opacity-40" : ""}`}
+                        onClick={() => { if (!locked) set("topDecoration", e.id as TopDecoration); }}
+                      >
+                        {locked ? `🔒 ${e.label}` : e.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

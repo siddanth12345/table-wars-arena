@@ -8,6 +8,7 @@ import {
 } from "./net";
 import { useAccount, signIn, signUp, playAsGuest, signOut } from "./account";
 import { G, resetGame, lockPointer } from "./state";
+import { getPvpWins, useProgress } from "./mastery";
 import type { TimeOfDay } from "./settings";
 
 const btnMain = "pointer-events-auto rounded bg-crosshair px-6 py-3 text-base font-black uppercase text-hud-ink disabled:opacity-40";
@@ -129,6 +130,7 @@ function InviteBox({ kind, label }: { kind: "party" | "lobby"; label: string }) 
 }
 
 export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onClose: () => void }) {
+  useProgress();
   const net = useNet();
   const acc = useAccount();
   const [code, setCode] = useState("");
@@ -175,6 +177,9 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
         <button className={btnAlt} disabled={waiting || !!busy} onClick={() => (party ? void go("pvp") : void run("Finding 1v1 match…", () => queue1v1()))}>
           {party ? "1v1 with party" : "1v1"}
         </button>
+        <div className="text-center text-xs font-bold uppercase tracking-widest opacity-70">
+          1v1 career wins · <span className="text-crosshair">{getPvpWins()}</span>
+        </div>
         <button className={btnAlt} disabled={waiting || !!busy} onClick={() => (party ? void go("lobby") : void run("Creating lobby…", () => createLobby()))}>
           {party ? "Lobby with party" : "Lobby"}
         </button>

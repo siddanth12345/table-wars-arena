@@ -12,6 +12,8 @@ import { startUiSfx } from "./sfx";
 import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD, TABLE_CAP, cfg, resetGame, lockPointer, pauseGame, isMobilePlay, MAP, TUT_STEPS, ONLINE_TUT_STEPS, goHome, finishTutorial, comboBurstThreshold, comboBurstHeal, comboDecayTime, STORM_START } from "./state";
 import { SkinsPanel } from "./SkinsPanel";
 import { AbilitiesPanel } from "./AbilitiesPanel";
+import { AchievementsPanel } from "./AchievementsPanel";
+import { ACHIEVEMENTS, clearJustUnlocked, getJustUnlocked } from "./mastery";
 import { getAbility, ABILITY_LIST } from "./abilities";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
@@ -544,6 +546,7 @@ function Home() {
   const [authOpen, setAuthOpen] = useState(false);
   const [skinsOpen, setSkinsOpen] = useState(false);
   const [abilitiesOpen, setAbilitiesOpen] = useState(false);
+  const [achievementsOpen, setAchievementsOpen] = useState(false);
   const inParty = !!(NET.party && NET.party.members.length > 0);
   if (G.phase !== "home") return null;
   return (
@@ -558,6 +561,7 @@ function Home() {
           <button className={btnAlt} onClick={startTraining}>Training</button>
           <button className={btnAlt} onClick={() => setSkinsOpen(true)}>Skins</button>
           <button className={btnAlt} onClick={() => setAbilitiesOpen(true)}>Abilities</button>
+          <button className={btnAlt} onClick={() => setAchievementsOpen(true)}>Achievements</button>
           <button className={tab === "settings" ? btnMain : btnAlt} onClick={() => setTab(tab === "settings" ? "main" : "settings")}>Settings</button>
         </div>
         <AccountBadge onLogin={() => setAuthOpen(true)} />
@@ -566,6 +570,7 @@ function Home() {
       {(authOpen || acc.status === "signedOut") && <AuthPanel onClose={() => setAuthOpen(false)} />}
       {skinsOpen && <SkinsPanel onClose={() => setSkinsOpen(false)} />}
       {abilitiesOpen && <AbilitiesPanel onClose={() => setAbilitiesOpen(false)} />}
+      {achievementsOpen && <AchievementsPanel onClose={() => setAchievementsOpen(false)} />}
       {tab === "play" && <PlayMenu onCampaign={playGame} onClose={() => setTab("main")} />}
       {tab !== "main" && tab !== "play" && (
         <div className="m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">
@@ -711,7 +716,9 @@ function WinScreen() {
   useTick(200);
   const [picked, setPicked] = useState<string | null>(null);
   const [groupStats, setGroupStats] = useState(false);
+  useEffect(() => { if (G.phase !== "won") clearJustUnlocked(); });
   if (G.phase !== "won") return null;
+  const unlocked = getJustUnlocked().map((id) => ACHIEVEMENTS.find((a) => a.id === id)).filter((a) => !!a);
   const acc = G.shots ? (G.hits / G.shots) * 100 : 0;
   const m = Math.floor(G.time / 60), s = Math.floor(G.time % 60);
   const party = NET.online && (NET.kind === "coop" || (NET.party && NET.party.members.length > 0));
@@ -763,6 +770,13 @@ function WinScreen() {
               </button>
             )}
           </div>
+          {unlocked.map((a) => (
+            <div key={a!.id} className="mb-4 rounded border-2 border-crosshair bg-crosshair/15 px-4 py-3">
+              <div className="text-[10px] font-black uppercase tracking-[0.3em] text-crosshair">Achievement unlocked</div>
+              <div className="text-xl font-black uppercase">{a!.icon} {a!.name}</div>
+              <div className="text-xs opacity-80">{a!.masteryName} unlocked — turn it on or off in the Abilities tab.</div>
+            </div>
+          ))}
           <dl className="space-y-3 text-lg">
             {statsRows.map(([label, value]) => (
               <div key={label} className="grid grid-cols-[1fr_auto] items-center border-b border-hud/20 bg-hud-track px-4 py-3">

@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { applySettings, setSettingsPersister, SETTINGS, type Settings } from "./settings";
 import { applySkin, setSkinPersister, SKIN, type Skin } from "./skins";
 import { TRAIN, type TrainCfg } from "./state";
+import { hydrateProgress, resetProgress, serializeProgress, setProgressPersister } from "./mastery";
 
 export type Account = { status: "loading" | "signedOut" | "guest" | "user"; userId: string | null; username: string; email: string | null };
 
@@ -59,7 +60,12 @@ export function validatePassword(p: string): string | null {
   return null;
 }
 
-type StoredSettings = Settings & { _skin?: Skin };
+type StoredSettings = Settings & { _skin?: Skin; _prog?: unknown };
+
+/** Everything stored in the profile's settings column: settings + skin + achievement/mastery progress. */
+function profilePayload(s: Settings = SETTINGS, skin: Skin = SKIN): StoredSettings {
+  return { ...s, _skin: skin, _prog: serializeProgress() };
+}
 
 async function loadProfile(userId: string) {
   const { data } = await supabase.from("profiles").select("username, email, settings, training").eq("id", userId).maybeSingle();
@@ -67,16 +73,19 @@ async function loadProfile(userId: string) {
   set({ status: "user", userId, username: data.username, email: data.email });
   if (data.settings) {
     const raw = data.settings as unknown as StoredSettings;
-    const { _skin, ...rest } = raw;
+    const { _skin, _prog, ...rest } = raw;
     applySettings(rest as Settings, true);
     if (_skin) applySkin(_skin, true);
+    if (_prog) hydrateProgress(_prog);
   }
+  // Save back right away if a guest earned something before signing in (their progress was merged above)
+  persistProfileSettings(SETTINGS);
   if (data.training) Object.assign(TRAIN, data.training as unknown as TrainCfg);
 }
 
 function persistProfileSettings(s: Settings) {
   if (ACC.status !== "user" || !ACC.userId) return;
-  const payload: StoredSettings = { ...s, _skin: SKIN };
+  const payload = profilePayload(s);
   void supabase.from("profiles").update({ settings: payload as never, updated_at: new Date().toISOString() }).eq("id", ACC.userId);
 }
 
@@ -86,13 +95,14 @@ export async function initAccount() {
   if (started) return;
   started = true;
   setSettingsPersister((s) => persistProfileSettings(s));
+  setProgressPersister(() => persistProfileSettings(SETTINGS));
   setSkinPersister((skin) => {
     if (ACC.status !== "user" || !ACC.userId) return;
-    const payload: StoredSettings = { ...SETTINGS, _skin: skin };
+    const payload = profilePayload(SETTINGS, skin);
     void supabase.from("profiles").update({ settings: payload as never, updated_at: new Date().toISOString() }).eq("id", ACC.userId);
   });
   supabase.auth.onAuthStateChange((event, session) => {
-    if (event === "SIGNED_OUT") set({ status: "signedOut", userId: null, username: "guest", email: null });
+    if (event === "SIGNED_OUT") { set({ status: "signedOut", userId: null, username: "guest", email: null }); resetProgress(); }
     else if (event === "SIGNED_IN" && session?.user && ACC.userId !== session.user.id) setTimeout(() => void loadProfile(session.user.id), 0);
   });
   const { data } = await supabase.auth.getUser();
@@ -137,6 +147,7 @@ export function playAsGuest() {
 export async function signOut() {
   await supabase.auth.signOut();
   set({ status: "signedOut", userId: null, username: "guest", email: null });
+  resetProgress(); // the next person on this tab starts clean
 }
 
 export async function lookupUsername(name: string) {

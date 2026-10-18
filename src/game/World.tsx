@@ -14,6 +14,7 @@ import {
 } from "./state";
 import { SKIN, useSkin } from "./skins";
 import { getAbility } from "./abilities";
+import { masteryOn, onCampaignWin } from "./mastery";
 import { createTableBot, skinKey } from "./tableBotFactory";
 import { Room, ROOM, SOLIDS } from "./Room";
 import { tableWood } from "./textures";
@@ -353,8 +354,8 @@ export function World() {
   const botPool = useMemo(() => bulletPool(320), []);
   const tables = useMemo(() => Array.from({ length: TABLE_POOL }, newTable), []);
   const splinters = useMemo<Splinter[]>(() => [], []);
-  const bomb = useRef({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3() });
-  const booms = useMemo(() => Array.from({ length: 24 }, () => ({ t: 0, pos: new THREE.Vector3(), r: BOMB_R })), []);
+  const bomb = useRef({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), tele: null as THREE.Vector3 | null });
+  const booms = useMemo(() => Array.from({ length: 24 }, () => ({ t: 0, pos: new THREE.Vector3(), r: BOMB_R, col: "#ffb347" })), []);
   const hazards = useMemo<Hazard[]>(() => Array.from({ length: 8 }, () => ({ active: false, kind: "aoe", t: 0, total: 1, fx: 0, x: 0, z: 0, a0: 0 })), []);
   const blues = useMemo(() => Array.from({ length: BLUE_N }, () => ({ alive: false, pos: new THREE.Vector3(), dash: new THREE.Vector3(), hp: BLUE_HP, hitCd: 0, dashT: 8, yaw: 0 })), []);
   const blueT = useRef(6);
@@ -364,18 +365,19 @@ export function World() {
   // Ability props: walls (solid), trampolines (bounce pads), fire lines
   const abilityWalls = useMemo(() => Array.from({ length: 16 }, () => ({
     active: false, cx: 0, cy: 0, cz: 0, yaw: 0, pitch: 0, hw: 0.5, hh: 0.5, hd: 0.5, t: 0, netId: "" as string,
+    m: false, ret: false, rt: 0, hit: new Map<string, number>(),
   })), []);
   const abilityPads = useMemo(() => Array.from({ length: 12 }, () => ({
     active: false, cx: 0, cy: 0, cz: 0, yaw: 0, pitch: 0, hw: 0.5, hh: 0.5, hd: 0.5,
-    nx: 0, ny: 1, nz: 0, t: 0, cd: 0, netId: "" as string,
+    nx: 0, ny: 1, nz: 0, t: 0, cd: 0, netId: "" as string, m: false,
   })), []);
   const abilityFires = useMemo(() => Array.from({ length: 8 }, () => ({
     active: false, ax: 0, ay: 0, az: 0, bx: 0, by: 0, bz: 0, t: 0,
-    stung: new Set<string>(), tickAcc: new Map<string, number>(), netId: "" as string,
+    stung: new Set<string>(), tickAcc: new Map<string, number>(), netId: "" as string, m: false,
   })), []);
   // Air fireballs (fire ability while airborne) + remote visual bullets
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
-    active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string,
+    active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string, m: false, b: 0,
   })), []);
   const remoteBullets = useMemo(() => Array.from({ length: 64 }, () => ({
     active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0,
@@ -427,7 +429,11 @@ export function World() {
     pendingStun: new Set<string>(),
     stunIds: new Set<string>(),
     stunUntil: 0,
+    m: false,
   });
+  /** targets moved by my teleport bomb (so the ability key can rewind them) */
+  const tbMoved = useRef<{ id: string; x: number; y: number; z: number }[]>([]);
+  const tpRefresh = useRef(0);
   /** ability-applied stun timers (seconds left) for bots — real freeze */
   const abilityStun = useRef(new Map<string, number>());
   const teleportMeshRef = useRef<THREE.Mesh | null>(null);
@@ -610,6 +616,7 @@ export function World() {
       burst(tmpV.copy(boss.current.pos).setY(15), BOSS_S / 2, 30);
       if (G.mode === "training") { despawnBoss(); return; }
       G.phase = "won";
+      onCampaignWin();
       sendNet("won", {});
       document.exitPointerLock?.();
     }
@@ -686,7 +693,7 @@ export function World() {
       healthT.current = cfg.ringInterval(HEALTH_INTERVAL);
     }
   };
-  const explode = (at: THREE.Vector3) => {
+  const explode = (at: THREE.Vector3, tele?: THREE.Vector3) => {
     const buffed = G.buff > 0;
     const br = BOMB_R * (G.bombBig > 0 ? 1.5 : 1);
     G.tut.bombed = true;
@@ -696,16 +703,18 @@ export function World() {
       hitBoss((BOMB_DMG / DMG) * (buffed ? 2 : 1));
     pvpBlast(at, br, PVP_DMG.bomb);
     ringsIn(at, br);
-    boomFx(at, br);
+    if (tele) teleBlast(at, br, tele);
+    boomFx(at, br, 0.5, true, "bomb", tele ? "#ffffff" : "");
     G.shake = 0.6;
   };
-  const boomFx = (at: THREE.Vector3, r: number, dur = 0.5, sync = true, kind: "bomb" | "fire" | "none" = "bomb") => {
+  const boomFx = (at: THREE.Vector3, r: number, dur = 0.5, sync = true, kind: "bomb" | "fire" | "none" = "bomb", col = "") => {
     const bm = booms.find((x) => x.t <= 0) ?? booms[0]!;
     bm.t = dur;
+    bm.col = col || "#ffb347";
     bm.pos.copy(at);
     bm.r = r;
     if (kind !== "none") playSfx(kind === "fire" ? "fire_explode" : "bomb_explode", Math.max(0.15, 1 - at.distanceTo(camera.position) / 350));
-    if (sync && NET.online) sendNet("vfx", { k: "boom", x: at.x, y: at.y, z: at.z, r, t: dur });
+    if (sync && NET.online) sendNet("vfx", { k: "boom", x: at.x, y: at.y, z: at.z, r, t: dur, ...(col ? { c: col } : {}) });
   };
   // 1v1: damage every opponent whose (enlarged) hitbox is inside the blast
   const pvpBlast = (at: THREE.Vector3, r: number, dmg: number, stun = false) => {
@@ -717,6 +726,112 @@ export function World() {
         hitPeer(pr.id, dmg, stun);
       }
     }
+  };
+  // ---- ability mastery helpers ----
+  const ownerOf = (nid: string) => nid.replace(/-(w|p|f|fb)-\d+$/, "");
+  const inObb = (w: { cx: number; cy: number; cz: number; yaw: number; pitch: number; hw: number; hh: number; hd: number }, x: number, y: number, z: number, mg: number) => {
+    orientLocal(_la, x - w.cx, y - w.cy, z - w.cz, w.yaw, w.pitch);
+    return Math.abs(_la.x) <= w.hw + mg && Math.abs(_la.y) <= w.hh + mg && Math.abs(_la.z) <= w.hd + mg;
+  };
+  type Shove = { pull?: number[]; tp?: number[] };
+  const applyShove = (e: Shove, at: THREE.Vector3) => {
+    if (e.tp) { at.x = e.tp[0]!; at.z = e.tp[2]!; }
+    else if (e.pull) { at.x += (e.pull[0]! - at.x) * 0.6; at.z += (e.pull[2]! - at.z) * 0.6; }
+  };
+  /** move a bot: pulled toward a point or teleported. Followers ask the host to do it. */
+  const shove = (kind: "t" | "b", i: number, e: Shove) => {
+    if (isFollower()) { sendNet("ehit", { k: kind, i, dmg: 0, ...e }); return; }
+    const o = kind === "t" ? tables[i] : blues[i];
+    if (o && o.alive) applyShove(e, o.pos);
+  };
+  const meHurtable = () => G.mode === "pvp" || NET.kind === "pvp" || NET.kind === "lobby";
+  /** Teleport bomb: everything in the blast (never me) is sent to the crosshair spot and stunned 0.5s. */
+  const teleBlast = (at: THREE.Vector3, r: number, dest: THREE.Vector3) => {
+    const moved: { id: string; x: number; y: number; z: number }[] = [];
+    const to = [dest.x, Math.max(0, dest.y), dest.z];
+    for (let i = 0; i < tables.length; i++) {
+      const t = tables[i]!;
+      if (!t.alive || t.pos.distanceTo(at) >= r) continue;
+      moved.push({ id: `t${i}`, x: t.pos.x, y: t.pos.y, z: t.pos.z });
+      shove("t", i, { tp: to });
+      abilityStun.current.set(`t${i}`, 0.5);
+    }
+    for (let i = 0; i < blues.length; i++) {
+      const u = blues[i]!;
+      if (!u.alive || u.pos.distanceTo(at) >= r) continue;
+      moved.push({ id: `b${i}`, x: u.pos.x, y: u.pos.y, z: u.pos.z });
+      shove("b", i, { tp: to });
+      abilityStun.current.set(`b${i}`, 0.5);
+    }
+    if (meHurtable()) {
+      for (const pr of NET.peers.values()) {
+        if (pr.dead || pr.id === myId()) continue;
+        if (tmpV.set(pr.x, pr.y + PVP_CENTER_Y, pr.z).distanceTo(at) >= r + PVP_HITBOX) continue;
+        moved.push({ id: pr.id, x: pr.x, y: pr.y, z: pr.z });
+        hitPeer(pr.id, 0, true, 0.5, { tp: to });
+      }
+    }
+    tbMoved.current = moved;
+    if (moved.length) playSfxShared("teleport_success");
+  };
+  /** Trampoline mastery: a pad bursts when reset — 5 damage, survivors are pulled to the middle. Never hurts me. */
+  const springBlast = (pad: { cx: number; cy: number; cz: number }) => {
+    const at = new THREE.Vector3(pad.cx, pad.cy, pad.cz);
+    const r = TABLE_W * 3.5;
+    const c = [at.x, at.y, at.z];
+    for (let i = 0; i < tables.length; i++) {
+      const tb = tables[i]!;
+      if (!tb.alive || at.distanceTo(tmpV.set(tb.pos.x, tb.pos.y + 2 * tb.s, tb.pos.z)) >= r + 3 * tb.s) continue;
+      hitTable(tb, 5);
+      if (tb.alive) shove("t", i, { pull: c });
+    }
+    for (let i = 0; i < blues.length; i++) {
+      const u = blues[i]!;
+      if (!u.alive || at.distanceTo(tmpV.set(u.pos.x, 2, u.pos.z)) >= r + 4) continue;
+      hitBlue(u, 5);
+      if (u.alive) shove("b", i, { pull: c });
+    }
+    if (bossLive() && boss.current.landed && distToBossBox(at) < r) hitBoss(Math.max(1, Math.round(5 / DMG)));
+    if (meHurtable()) {
+      for (const pr of NET.peers.values()) {
+        if (pr.dead || pr.id === myId()) continue;
+        if (at.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) >= r + 4) continue;
+        hitPeer(pr.id, 5, false, undefined, { pull: c });
+        noteDmg(5, pr.id, pr.x, pr.y + 2, pr.z);
+      }
+    }
+    boomFx(at, r, 0.5, true, "bomb", "#ff2a2a");
+    G.shake = Math.max(G.shake, 0.35);
+  };
+  // Fire mastery: the air fireball bounces off whatever it hits (up to 3 times)
+  const bounceFb = (fb: { pos: THREE.Vector3; vel: THREE.Vector3; t: number; traveled: number; b: number }, stepV: THREE.Vector3) => {
+    const q = fb.pos;
+    const n = new THREE.Vector3();
+    if (q.y <= 0.3) n.set(0, 1, 0);
+    else if (q.y >= ROOM.h) n.set(0, -1, 0);
+    else if (Math.hypot(q.x, q.z) >= R - 0.5) n.set(-q.x, 0, -q.z).normalize();
+    else {
+      // inside a solid: the axis that frees us when undone is the face we hit; otherwise (bots, boss) go straight back
+      const t2 = new THREE.Vector3();
+      const axes = (["x", "y", "z"] as const).slice().sort((a, b2) => Math.abs(stepV[b2]) - Math.abs(stepV[a]));
+      let found = false;
+      if (inSolid(q)) {
+        for (const ax of axes) {
+          t2.copy(q); t2[ax] -= stepV[ax];
+          if (!inSolid(t2)) { n.set(0, 0, 0); n[ax] = stepV[ax] > 0 ? -1 : 1; found = true; break; }
+        }
+      }
+      if (!found) n.copy(fb.vel).normalize().negate();
+    }
+    const d = fb.vel.dot(n);
+    if (d < 0) fb.vel.addScaledVector(n, -2 * d);
+    else fb.vel.addScaledVector(n, 0.5 * fb.vel.length());
+    fb.vel.setLength(BULLET_SPEED);
+    q.addScaledVector(n, 1.5);
+    fb.b++;
+    fb.traveled = 0;
+    fb.t = Math.max(fb.t, 3);
+    stepV.copy(fb.vel).multiplyScalar(stepV.length() / (fb.vel.length() || 1));
   };
   // healing ring / party shard: heal, or (when full) reset the bomb cooldown. Returns true if consumed.
   const revivePlayer = (id: string) => {
@@ -985,6 +1100,31 @@ const kd = (e: KeyboardEvent) => {
         bomb.current.alive = true;
         bomb.current.pos.copy(camera.position).addScaledVector(dir, 1.5);
         bomb.current.vel.copy(dir).multiplyScalar(BULLET_SPEED);
+        bomb.current.tele = null;
+        // Teleport mastery: with the ability ready the bomb is a white teleport bomb
+        const tpr = teleportRef.current;
+        if (masteryOn("teleport") && getAbility() === "teleport" && G.abilityCd <= 0 && !tpr.active && !G.abilityLocked && !G.parryLocked) {
+          const maxR = cfg.grapple(GRAPPLE_MAX) * 3.5;
+          let hitPt: THREE.Vector3 | null = null;
+          if (staticRef.current) {
+            const rc = new THREE.Raycaster(camera.position.clone(), dir, 0.5, maxR);
+            const hh = rc.intersectObject(staticRef.current, true)[0];
+            if (hh) hitPt = hh.point.clone();
+          }
+          if (!hitPt) {
+            hitPt = camera.position.clone().addScaledVector(dir, maxR);
+            if (dir.y < -0.05) {
+              const tHit = -camera.position.y / dir.y;
+              if (tHit > 0.5 && tHit < maxR) hitPt = camera.position.clone().addScaledVector(dir, tHit);
+            }
+          }
+          hitPt.addScaledVector(dir, -PLAYER_R * 2);
+          bomb.current.tele = hitPt;
+          G.abilityCd = 3;
+          G.abilityCharges = 0;
+          tpr.canRewind = false;
+          tbMoved.current = [];
+        }
         G.bombCd = cfg.bombCd(G.buff > 0);
         playSfxShared("bomb_throw");
       }
@@ -1008,7 +1148,7 @@ const kd = (e: KeyboardEvent) => {
         const origin = camera.position;
         for (let i = 0; i < abilityWalls.length; i++) {
           const w = abilityWalls[i]!;
-          if (!w.active) continue;
+          if (!w.active || w.ret) continue;
           // Sample along ray for OBB hit
           for (let s = 0.5; s <= maxG; s += 1.5) {
             const pt = origin.clone().addScaledVector(dir, s);
@@ -1236,17 +1376,33 @@ const kd = (e: KeyboardEvent) => {
 
   NET_HOOKS.onEnts = (snap) => { snapRef.current = snap; };
   NET_HOOKS.onEhit = (h) => {
-    if (h.k === "t") { const t = tables[h.i]; if (t) hitTable(t, h.dmg); }
-    else if (h.k === "b") { const u = blues[h.i]; if (u) hitBlue(u, h.dmg); }
-    else hitBoss(h.dmg);
+    const mv = h.pull || h.tp ? { pull: h.pull, tp: h.tp } : null;
+    if (h.dmg > 0 || !mv) {
+      if (h.k === "t") { const t = tables[h.i]; if (t) hitTable(t, h.dmg); }
+      else if (h.k === "b") { const u = blues[h.i]; if (u) hitBlue(u, h.dmg); }
+      else hitBoss(h.dmg);
+    }
+    if (mv && (h.k === "t" || h.k === "b")) {
+      const o = h.k === "t" ? tables[h.i] : blues[h.i];
+      if (o?.alive) applyShove(mv, o.pos);
+    }
   };
   NET_HOOKS.onEspawn = (q) => {
     if (q.kind === "despawn") despawnAll();
     else trainSpawn({ kind: q.kind as TrainSpawn["kind"], n: q.n, t: 0 });
   };
-  NET_HOOKS.onWon = () => { G.phase = "won"; document.exitPointerLock?.(); };
-  NET_HOOKS.onHit = (d, stun, stunT) => {
+  NET_HOOKS.onWon = () => { G.phase = "won"; onCampaignWin(); document.exitPointerLock?.(); };
+  NET_HOOKS.onHit = (d, stun, stunT, extra) => {
     if (d > 0) damagePlayer(d);
+    if (extra?.tp && !G.pvpDead && !G.campaignDead) pos.current.set(extra.tp[0]!, extra.tp[1]!, extra.tp[2]!);
+    if (extra?.pull && !G.pvpDead && !G.campaignDead && G.playerHp > 0) {
+      const dx = extra.pull[0]! - pos.current.x, dy = extra.pull[1]! - pos.current.y, dz = extra.pull[2]! - pos.current.z;
+      const l = Math.hypot(dx, dy, dz) || 1;
+      const sp = Math.min(90, 25 + l * 3);
+      hv.current.set((dx / l) * sp, 0, (dz / l) * sp);
+      vy.current = Math.max(10, (dy / l) * sp);
+      grounded.current = false;
+    }
     if (stun && !G.pvpDead) G.stun = Math.max(G.stun, stunT ?? STUN_TIME);
   };
   // Gain for a sound that happened at (x,y,z): full volume up close, fading with distance
@@ -1269,7 +1425,7 @@ const kd = (e: KeyboardEvent) => {
     }
     const nid = String(payload.id ?? "");
     if (k === "boom") {
-      boomFx(tmpV.set(Number(payload.x), Number(payload.y), Number(payload.z)), Number(payload.r) || 8, Number(payload.t) || 0.4, false);
+      boomFx(tmpV.set(Number(payload.x), Number(payload.y), Number(payload.z)), Number(payload.r) || 8, Number(payload.t) || 0.4, false, "bomb", String(payload.c ?? ""));
       return;
     }
     if (k === "wall") {
@@ -1281,6 +1437,7 @@ const kd = (e: KeyboardEvent) => {
       slot.yaw = Number(payload.yaw); slot.pitch = Number(payload.pitch);
       slot.hw = Number(payload.hw); slot.hh = Number(payload.hh); slot.hd = Number(payload.hd);
       slot.t = Number(payload.life) || 2;
+      slot.m = !!payload.m; slot.ret = false; slot.rt = 0; slot.hit.clear();
       playSfx("wall_place", nearGain(slot.cx, slot.cy, slot.cz));
       return;
     }
@@ -1295,6 +1452,7 @@ const kd = (e: KeyboardEvent) => {
       slot.nx = Number(payload.nx); slot.ny = Number(payload.ny); slot.nz = Number(payload.nz);
       slot.t = Number(payload.life) || 9999;
       slot.cd = 0;
+      slot.m = !!payload.m;
       playSfx("spring_place", nearGain(slot.cx, slot.cy, slot.cz));
       return;
     }
@@ -1313,6 +1471,7 @@ const kd = (e: KeyboardEvent) => {
       slot.ax = Number(payload.ax); slot.ay = Number(payload.ay); slot.az = Number(payload.az);
       slot.bx = Number(payload.bx); slot.by = Number(payload.by); slot.bz = Number(payload.bz);
       slot.t = Number(payload.life) || 3;
+      slot.m = !!payload.m;
       slot.stung.clear(); slot.tickAcc.clear();
       playSfx("fire_ground", nearGain((slot.ax + slot.bx) / 2, (slot.ay + slot.by) / 2, (slot.az + slot.bz) / 2));
       return;
@@ -1326,6 +1485,8 @@ const kd = (e: KeyboardEvent) => {
       slot.vel.set(Number(payload.vx), Number(payload.vy), Number(payload.vz));
       slot.t = Number(payload.life) || 5;
       slot.traveled = 0;
+      slot.m = !!payload.m;
+      slot.b = 0;
       playSfx("fire_air", nearGain(slot.pos.x, slot.pos.y, slot.pos.z));
       return;
     }
@@ -1344,7 +1505,9 @@ const kd = (e: KeyboardEvent) => {
         tp.chargeMax = Number(payload.cm) || 0.7;
         // mark as remote visual so we don't teleport local player
         (tp as { remote?: boolean }).remote = true;
+        tp.m = !!payload.m;
       } else if ((tp as { remote?: boolean }).remote) {
+        tp.m = !!payload.m;
         tp.phase = payload.phase === "expand" ? "expand" : "fly";
         tp.pos.set(Number(payload.x), Number(payload.y), Number(payload.z));
         tp.target.copy(tp.pos);
@@ -1599,6 +1762,16 @@ const kd = (e: KeyboardEvent) => {
           // keep velocity on rewind too
           tp.rewindUsed = true;
           tp.canRewind = false;
+        } else if (G.abilityCd > 0 && tbMoved.current.length) {
+          // Teleport mastery: send everything my teleport bomb moved back to where it was
+          for (const mv of tbMoved.current) {
+            const to = [mv.x, mv.y, mv.z];
+            if (mv.id.startsWith("t")) shove("t", +mv.id.slice(1), { tp: to });
+            else if (mv.id.startsWith("b") && mv.id !== "boss") shove("b", +mv.id.slice(1), { tp: to });
+            else if (meHurtable()) hitPeer(mv.id, 0, false, undefined, { tp: to });
+          }
+          tbMoved.current = [];
+          playSfxShared("teleport_success");
         } else if (G.abilityCd <= 0 && !tp.active) {
           const look = new THREE.Vector3();
           cam.getWorldDirection(look);
@@ -1628,13 +1801,17 @@ const kd = (e: KeyboardEvent) => {
             tp.pendingStun.clear();
             tp.canRewind = false;
             tp.rewindUsed = false;
+            tp.m = masteryOn("teleport");
+            tbMoved.current = [];
           }
         }
       } else if (ab === "trampoline" && !G.abilityLocked && !G.parryLocked && G.abilityCd <= 0 && G.abilityCharges <= 0) {
         // Reset trampolines: start cooldown and delete all placed pads
+        const sm = masteryOn("trampoline");
+        if (sm) for (const pad of abilityPads) if (pad.active && pad.m && pad.netId.startsWith(`${myId()}-`)) springBlast(pad);
         for (const pad of abilityPads) pad.active = false;
         playSfx("spring_reset");
-        G.abilityCd = 5;
+        G.abilityCd = sm ? 3.5 : 5;
         G.abilityCharges = 0;
         if (NET.online) sendNet("vfx", { k: "padclear", owner: myId() });
       } else {
@@ -1648,9 +1825,11 @@ const kd = (e: KeyboardEvent) => {
           const pitch = euler.x; // look down = negative in YXZ? three.js YXZ: pitch is x
           const look = new THREE.Vector3();
           cam.getWorldDirection(look);
-          const thick = TABLE_W * 0.5;
-          const halfW = BOSS_H * 0.5;
-          const halfH = BOSS_H * 0.5 * 1.6; // 1.6× taller walls
+          const wallM = ab === "wall" && masteryOn("wall");
+          const ws = wallM ? 1.5 : 1; // Wall mastery: 1.5× bigger in every dimension
+          const thick = TABLE_W * 0.5 * ws;
+          const halfW = BOSS_H * 0.5 * ws;
+          const halfH = BOSS_H * 0.5 * 1.6 * ws; // 1.6× taller walls
           const dist = (PLAYER_R + thick + 2) * 5;
           const place = cam.position.clone().addScaledVector(look, dist);
           if (ab === "wall") {
@@ -1663,9 +1842,10 @@ const kd = (e: KeyboardEvent) => {
               slot.yaw = yaw; slot.pitch = pitch;
               slot.hw = halfW; slot.hh = halfH; slot.hd = thick;
               slot.t = 2;
+              slot.m = wallM; slot.ret = false; slot.rt = 0; slot.hit.clear();
               G.abilityCharges--;
               if (G.abilityCharges <= 0) G.abilityCd = 3;
-              if (NET.online) sendNet("vfx", { k: "wall", id: slot.netId, cx: slot.cx, cy: slot.cy, cz: slot.cz, yaw: slot.yaw, pitch: slot.pitch, hw: slot.hw, hh: slot.hh, hd: slot.hd, life: 2 });
+              if (NET.online) sendNet("vfx", { k: "wall", m: wallM ? 1 : 0, id: slot.netId, cx: slot.cx, cy: slot.cy, cz: slot.cz, yaw: slot.yaw, pitch: slot.pitch, hw: slot.hw, hh: slot.hh, hd: slot.hd, life: 2 });
             }
           } else {
             const slot = abilityPads.find((pad) => !pad.active);
@@ -1685,10 +1865,11 @@ const kd = (e: KeyboardEvent) => {
               slot.nx = look.x; slot.ny = look.y; slot.nz = look.z;
               slot.t = 9999;
               slot.cd = 0;
+              slot.m = masteryOn("trampoline");
               slot.netId = `${myId()}-p-${Date.now()}`;
               playSfx("spring_place");
               G.abilityCharges--;
-              if (NET.online) sendNet("vfx", { k: "pad", id: slot.netId, cx: slot.cx, cy: slot.cy, cz: slot.cz, yaw: slot.yaw, pitch: slot.pitch, hw: slot.hw, hh: slot.hh, hd: slot.hd, nx: slot.nx, ny: slot.ny, nz: slot.nz, life: 9999 });
+              if (NET.online) sendNet("vfx", { k: "pad", m: slot.m ? 1 : 0, id: slot.netId, cx: slot.cx, cy: slot.cy, cz: slot.cz, yaw: slot.yaw, pitch: slot.pitch, hw: slot.hw, hh: slot.hh, hd: slot.hd, nx: slot.nx, ny: slot.ny, nz: slot.nz, life: 9999 });
               // After all 3 placed: wait for player to Reset Trampolines (ability key again)
             }
           }
@@ -1704,11 +1885,13 @@ const kd = (e: KeyboardEvent) => {
               slot.vel.copy(look).multiplyScalar(BULLET_SPEED);
               slot.t = 5;
               slot.traveled = 0;
+              slot.m = masteryOn("fire");
+              slot.b = 0;
               slot.netId = `${myId()}-fb-${Date.now()}`;
               playSfx("fire_air");
               G.abilityCharges = 0;
               G.abilityCd = 4; // air fireball CD
-              if (NET.online) sendNet("vfx", { k: "fball", id: slot.netId, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z, vx: slot.vel.x, vy: slot.vel.y, vz: slot.vel.z, life: 5 });
+              if (NET.online) sendNet("vfx", { k: "fball", m: slot.m ? 1 : 0, id: slot.netId, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z, vx: slot.vel.x, vy: slot.vel.y, vz: slot.vel.z, life: 5 });
             }
           } else {
             const slot = abilityFires.find((f) => !f.active);
@@ -1722,11 +1905,12 @@ const kd = (e: KeyboardEvent) => {
               slot.t = 3;
               slot.stung.clear();
               slot.tickAcc.clear();
+              slot.m = masteryOn("fire");
               slot.netId = `${myId()}-f-${Date.now()}`;
               playSfx("fire_ground");
               G.abilityCharges = 0;
               G.abilityCd = 5;
-              if (NET.online) sendNet("vfx", { k: "fire", id: slot.netId, ax: slot.ax, ay: slot.ay, az: slot.az, bx: slot.bx, by: slot.by, bz: slot.bz, life: 3 });
+              if (NET.online) sendNet("vfx", { k: "fire", m: slot.m ? 1 : 0, id: slot.netId, ax: slot.ax, ay: slot.ay, az: slot.az, bx: slot.bx, by: slot.by, bz: slot.bz, life: 3 });
             }
           }
         }
@@ -1736,11 +1920,61 @@ const kd = (e: KeyboardEvent) => {
       abilityReq.current = false;
     }
     // lifetime + oriented wall collision + pad bounce + fire line + fireballs + burns
+    // Players only hurt each other in 1v1s and lobbies — never in party campaign / party training
+    const canHurtPeers = G.mode === "pvp" || NET.kind === "pvp" || NET.kind === "lobby";
     for (const w of abilityWalls) {
       if (!w.active) continue;
-      w.t -= dt;
-      if (w.t <= 0) { w.active = false; continue; }
-      pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R);
+      const wMine = w.netId.startsWith(`${myId()}-`);
+      if (!w.ret) {
+        w.t -= dt;
+        if (w.t <= 0) {
+          if (w.m) { w.ret = true; w.rt = 8; w.hit.clear(); } // Wall mastery: it flies back to its owner instead of vanishing
+          else { w.active = false; continue; }
+        }
+      }
+      if (w.ret) {
+        w.rt -= dt;
+        let tx = 0, ty = 0, tz = 0, have = false;
+        if (wMine) { tx = p.x; ty = p.y + EYE * 0.5; tz = p.z; have = true; }
+        else {
+          const ow = NET.peers.get(ownerOf(w.netId));
+          if (ow && !ow.dead) { tx = ow.x; ty = ow.y + EYE * 0.5; tz = ow.z; have = true; }
+        }
+        if (!have || w.rt <= 0 || inObb(w, tx, ty, tz, PLAYER_R + 1)) { w.active = false; continue; }
+        const dx = tx - w.cx, dy = ty - w.cy, dz = tz - w.cz;
+        const dl = Math.hypot(dx, dy, dz) || 1;
+        const st = Math.min(dl, 110 * dt);
+        w.cx += (dx / dl) * st; w.cy += (dy / dl) * st; w.cz += (dz / dl) * st;
+      }
+      // Wall mastery: 10 damage every 0.7s to enemies touching it. Only the owner applies it, and never to the owner.
+      if (w.m && wMine) {
+        for (const [k, v] of [...w.hit.entries()]) { if (v - dt <= 0) w.hit.delete(k); else w.hit.set(k, v - dt); }
+        const touch = (id: string, x: number, y: number, z: number, mg: number) => {
+          if (w.hit.has(id) || !inObb(w, x, y, z, mg)) return false;
+          w.hit.set(id, 0.7);
+          return true;
+        };
+        for (let i = 0; i < tables.length; i++) {
+          const tb = tables[i]!;
+          if (tb.alive && touch(`t${i}`, tb.pos.x, tb.pos.y + 2 * tb.s, tb.pos.z, 3 * tb.s)) hitTable(tb, 10);
+        }
+        for (let i = 0; i < blues.length; i++) {
+          const u = blues[i]!;
+          if (u.alive && touch(`b${i}`, u.pos.x, 2, u.pos.z, 4)) hitBlue(u, 10);
+        }
+        if (bossLive() && b.landed) {
+          bossBox(_mn, _mx);
+          const cx2 = Math.max(_mn.x, Math.min(_mx.x, w.cx)), cy2 = Math.max(_mn.y, Math.min(_mx.y, w.cy)), cz2 = Math.max(_mn.z, Math.min(_mx.z, w.cz));
+          if (touch("boss", cx2, cy2, cz2, 1)) hitBoss(Math.max(1, Math.round(10 / DMG)));
+        }
+        if (canHurtPeers) {
+          for (const pr of NET.peers.values()) {
+            if (pr.dead || pr.id === myId()) continue;
+            if (touch(pr.id, pr.x, pr.y + 2, pr.z, 4)) { hitPeer(pr.id, 10, false); noteDmg(10, pr.id, pr.x, pr.y + 2, pr.z); }
+          }
+        }
+      }
+      if (!w.ret) pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R);
     }
     for (const pad of abilityPads) {
       if (!pad.active) continue;
@@ -1765,8 +1999,6 @@ const kd = (e: KeyboardEvent) => {
     // Fire lines — 5× wider/taller, no self-dmg, can hit boss if under it
     const FIRE_W = 20; // was ~4, then 8; now 5× original
     const FIRE_H = 8; // 5× taller zone
-    // Players only hurt each other in 1v1s and lobbies — never in party campaign / party training
-    const canHurtPeers = G.mode === "pvp" || NET.kind === "pvp" || NET.kind === "lobby";
     for (const fire of abilityFires) {
       if (!fire.active) continue;
       fire.t -= dt;
@@ -1774,6 +2006,7 @@ const kd = (e: KeyboardEvent) => {
       // Copies of another player's fire are visual only — the caster's own client applies the damage,
       // so you never get burned by your own fire (and nobody is hit twice).
       if (!fire.netId.startsWith(`${myId()}-`)) continue;
+      const fw = fire.m ? FIRE_W * 2 : FIRE_W; // Fire mastery: 2× bigger line
       const segLen = Math.hypot(fire.bx - fire.ax, fire.by - fire.ay, fire.bz - fire.az) || 1;
       const nearSeg3 = (x: number, y: number, z: number) => {
         const dx = fire.bx - fire.ax, dy = fire.by - fire.ay, dz = fire.bz - fire.az;
@@ -1784,7 +2017,7 @@ const kd = (e: KeyboardEvent) => {
       };
       for (let i = 0; i < tables.length; i++) {
         const tb = tables[i]!;
-        if (!tb.alive || nearSeg3(tb.pos.x, tb.pos.y + 2, tb.pos.z) >= FIRE_W + 3 * tb.s) continue;
+        if (!tb.alive || nearSeg3(tb.pos.x, tb.pos.y + 2, tb.pos.z) >= fw + 3 * tb.s) continue;
         const id = `t${i}`;
         if (!fire.stung.has(id)) { fire.stung.add(id); hitTable(tb, 10); }
         const acc = (fire.tickAcc.get(id) ?? 0) + dt;
@@ -1793,7 +2026,7 @@ const kd = (e: KeyboardEvent) => {
       }
       for (let i = 0; i < blues.length; i++) {
         const u = blues[i]!;
-        if (!u.alive || nearSeg3(u.pos.x, 2, u.pos.z) >= FIRE_W) continue;
+        if (!u.alive || nearSeg3(u.pos.x, 2, u.pos.z) >= fw) continue;
         const id = `b${i}`;
         if (!fire.stung.has(id)) { fire.stung.add(id); hitBlue(u, 10); }
         const acc = (fire.tickAcc.get(id) ?? 0) + dt;
@@ -1803,7 +2036,7 @@ const kd = (e: KeyboardEvent) => {
       // Boss: if fire is under / through boss volume
       if (bossLive() && b.landed) {
         const bx = b.pos.x, by = b.y + 20, bz = b.pos.z;
-        if (nearSeg3(bx, by, bz) < FIRE_W + 3 * BOSS_S || nearSeg3(bx, 5, bz) < FIRE_W + 3 * BOSS_S) {
+        if (nearSeg3(bx, by, bz) < fw + 3 * BOSS_S || nearSeg3(bx, 5, bz) < fw + 3 * BOSS_S) {
           const id = "boss";
           if (!fire.stung.has(id)) { fire.stung.add(id); hitBoss(2); }
           const acc = (fire.tickAcc.get(id) ?? 0) + dt;
@@ -1813,7 +2046,7 @@ const kd = (e: KeyboardEvent) => {
       }
       for (const pr of NET.peers.values()) {
         if (!canHurtPeers || pr.dead || pr.id === myId()) continue;
-        if (nearSeg3(pr.x, pr.y + 2, pr.z) >= FIRE_W) continue;
+        if (nearSeg3(pr.x, pr.y + 2, pr.z) >= fw) continue;
         if (!fire.stung.has(pr.id)) {
           fire.stung.add(pr.id);
           hitPeer(pr.id, 10, true);
@@ -1852,7 +2085,8 @@ const kd = (e: KeyboardEvent) => {
           }
         }
         if (hit && !mine) {
-          fb.active = false;
+          if (fb.m && fb.b < 3) bounceFb(fb, stepV);
+          else fb.active = false;
         } else if (hit) {
           const at = q.clone();
           for (let i = 0; i < tables.length; i++) {
@@ -1882,9 +2116,10 @@ const kd = (e: KeyboardEvent) => {
             burns.current.set(pr.id, { t: 4, lx: pr.x, ly: pr.y, lz: pr.z, acc: 0 });
             G.burnBuff = 4;
           }
-          boomFx(at, blastR, 0.45, true, "fire");
+          boomFx(at, blastR, 0.45, true, "fire", fb.m ? "#3b82f6" : "");
           G.shake = Math.max(G.shake, 0.5);
-          fb.active = false;
+          if (fb.m && fb.b < 3) bounceFb(fb, stepV); // Fire mastery: bounce (up to 3×), exploding each time
+          else fb.active = false;
         }
       }
       if (fb.active && fb.traveled > BOMB_R * 2.5) fb.active = false;
@@ -1899,6 +2134,18 @@ const kd = (e: KeyboardEvent) => {
         const n = left - dt;
         if (n <= 0) abilityStun.current.delete(id);
         else abilityStun.current.set(id, n);
+      }
+      if (G.abilityCd <= 0) tbMoved.current = []; // the teleport-bomb rewind window ends with the 3s cooldown
+      // Teleport mastery: anything the ball touched stays frozen until 3s after the teleport lands
+      if (tp.m && tp.active && !tpRemote && tp.pendingStun.size) {
+        tpRefresh.current -= dt;
+        const doPeers = tpRefresh.current <= 0;
+        if (doPeers) tpRefresh.current = 0.3;
+        for (const id of tp.pendingStun) {
+          if (id === "boss") b.lockT = Math.max(b.lockT, 0.4);
+          else if (id.startsWith("t") || id.startsWith("b")) abilityStun.current.set(id, Math.max(abilityStun.current.get(id) ?? 0, 0.4));
+          else if (doPeers) hitPeer(id, 0, true, 0.6);
+        }
       }
       const markStun = (id: string) => {
         tp.pendingStun.add(id);
@@ -1972,24 +2219,25 @@ const kd = (e: KeyboardEvent) => {
             G.abilityCharges = 0;
             tp.canRewind = true;
             tp.rewindUsed = false;
-            // 2s stun after successful teleport for everyone marked
+            // 2s stun after successful teleport for everyone marked (3s with Teleport mastery)
+            const stT = tp.m ? 3 : 2;
             for (const id of tp.pendingStun) {
-              abilityStun.current.set(id, 2);
-              if (id === "boss") b.lockT = Math.max(b.lockT, 2);
-              else if (!id.startsWith("t") && !id.startsWith("b")) hitPeer(id, 0, true, 2);
+              abilityStun.current.set(id, stT);
+              if (id === "boss") b.lockT = Math.max(b.lockT, stT);
+              else if (!id.startsWith("t") && !id.startsWith("b")) hitPeer(id, 0, true, stT);
             }
             tp.stunIds = new Set(tp.pendingStun);
-            tp.stunUntil = 2;
+            tp.stunUntil = stT;
             tp.pendingStun.clear();
             G.shake = Math.max(G.shake, 0.3);
-            if (NET.online) sendNet("vfx", { k: "tp", phase: "done", x: p.x, y: p.y, z: p.z, ct: 0, cm: 0.7 });
+            if (NET.online) sendNet("vfx", { k: "tp", phase: "done", m: tp.m ? 1 : 0, x: p.x, y: p.y, z: p.z, ct: 0, cm: 0.7 });
           }
         }
       }
       if (tp.active && !tpRemote && NET.online && performance.now() - lastTpVfx.current > 80) {
         lastTpVfx.current = performance.now();
         const src = tp.phase === "fly" ? tp.pos : tp.target;
-        sendNet("vfx", { k: "tp", phase: tp.phase, x: src.x, y: src.y, z: src.z, ct: tp.chargeT, cm: tp.chargeMax });
+        sendNet("vfx", { k: "tp", phase: tp.phase, m: tp.m ? 1 : 0, x: src.x, y: src.y, z: src.z, ct: tp.chargeT, cm: tp.chargeMax });
       }
     }
 
@@ -2224,7 +2472,7 @@ const kd = (e: KeyboardEvent) => {
       // --- grapple spring swing ---
       if (G.grappling) {
         // If anchored wall/pad despawned, release like letting go
-        if (grappleOnWall.current >= 0 && !abilityWalls[grappleOnWall.current]?.active) {
+        if (grappleOnWall.current >= 0 && (!abilityWalls[grappleOnWall.current]?.active || abilityWalls[grappleOnWall.current]!.ret)) {
           G.grappling = false; grappleOnWall.current = -1; grappleOnPad.current = -1;
         } else if (grappleOnPad.current >= 0 && !abilityPads[grappleOnPad.current]?.active) {
           G.grappling = false; grappleOnWall.current = -1; grappleOnPad.current = -1;
@@ -2299,7 +2547,7 @@ const kd = (e: KeyboardEvent) => {
         }
         for (const s of SOLIDS) if (p.y < s.y1 - STEP && p.y + BODY_H > s.y0) pushOut(p, s, PLAYER_R);
         for (const w of abilityWalls) {
-          if (!w.active) continue;
+          if (!w.active || w.ret) continue;
           const before = p.clone();
           if (pushOutOriented(p, w.cx, w.cy, w.cz, w.yaw, w.pitch, w.hw, w.hh, w.hd, PLAYER_R * 1.15)) {
             // Kill velocity into the wall so high-speed substeps can't tunnel
@@ -2676,7 +2924,8 @@ const kd = (e: KeyboardEvent) => {
           }
           if (hit) {
             bm.alive = false;
-            explode(q.clone());
+            explode(q.clone(), bm.tele ?? undefined);
+            bm.tele = null;
           }
         }
       }
@@ -3171,6 +3420,11 @@ const kd = (e: KeyboardEvent) => {
       bombMesh.current.visible = bomb.current.alive;
       bombMesh.current.position.copy(bomb.current.pos);
       bombMesh.current.scale.setScalar(G.bombBig > 0 ? 1.5 : 1);
+      {
+        const bmat = bombMesh.current.material as THREE.MeshStandardMaterial;
+        bmat.color.set(bomb.current.tele ? "#ffffff" : "#222222");
+        bmat.emissive.set(bomb.current.tele ? "#e5e7eb" : "#ff7a1a");
+      }
     }
     booms.forEach((bm, i) => {
       const m = boomRefs.current[i];
@@ -3180,6 +3434,7 @@ const kd = (e: KeyboardEvent) => {
       m.position.copy(bm.pos);
       m.scale.setScalar(bm.r * (1 - bm.t / 0.5 * 0.7));
       (m.material as THREE.MeshBasicMaterial).opacity = bm.t * 1.2;
+      (m.material as THREE.MeshBasicMaterial).color.set(bm.col);
     });
     hazards.forEach((h, i) => {
       const r = hazRefs.current[i]!;
@@ -3255,6 +3510,10 @@ const kd = (e: KeyboardEvent) => {
       m.position.set(w.cx, w.cy, w.cz);
       m.rotation.set(w.pitch, w.yaw, 0, "YXZ");
       m.scale.set(w.hw * 2, w.hh * 2, w.hd * 2);
+      const wm = m.material as THREE.MeshStandardMaterial;
+      wm.color.set(w.m ? "#c0201a" : "#96653f");
+      wm.emissive.set(w.m ? "#ff1a1a" : "#000000");
+      wm.emissiveIntensity = w.m ? 1.4 : 0;
     });
     abilityPads.forEach((pad, i) => {
       const m = padMeshRefs.current[i];
@@ -3268,6 +3527,14 @@ const kd = (e: KeyboardEvent) => {
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
       const rad = Math.max(pad.hw, pad.hd);
       m.scale.set(rad * 2, 1, rad * 2);
+      const pm = m.material as THREE.MeshStandardMaterial;
+      pm.color.set(pad.m ? "#ff2a2a" : "#3cff70");
+      pm.emissive.set(pad.m ? "#a01010" : "#1a8a40");
+      if (coil) {
+        const cm = coil.material as THREE.MeshStandardMaterial;
+        cm.color.set(pad.m ? "#ffc830" : "#c0c7d1");
+        cm.emissive.set(pad.m ? "#a67c00" : "#8a929c");
+      }
       // Silver coil on the BACK of the pad (opposite launch), length ~1.5× wall thickness
       if (coil) {
         const wallThick = TABLE_W; // full wall thickness
@@ -3290,13 +3557,21 @@ const kd = (e: KeyboardEvent) => {
       const len = Math.hypot(f.bx - f.ax, f.by - f.ay, f.bz - f.az) || 1;
       m.position.set(mx, my, mz);
       m.lookAt(f.bx, f.by, f.bz);
-      m.scale.set(35, 6, len); // 5× wider & taller fire line
+      m.scale.set(f.m ? 70 : 35, f.m ? 12 : 6, len); // 5× wider & taller fire line (2× more with Fire mastery)
+      const fm = m.material as THREE.MeshStandardMaterial;
+      fm.color.set(f.m ? "#2f7bff" : "#ff6a1a");
+      fm.emissive.set(f.m ? "#0a3cff" : "#ff3a00");
     });
     fireballs.forEach((fb, i) => {
       const m = fireballMeshRefs.current[i];
       if (!m) return;
       m.visible = fb.active;
-      if (fb.active) m.position.copy(fb.pos);
+      if (fb.active) {
+        m.position.copy(fb.pos);
+        const fmat = m.material as THREE.MeshStandardMaterial;
+        fmat.color.set(fb.m ? "#2f7bff" : "#ff1a00");
+        fmat.emissive.set(fb.m ? "#1d4ed8" : "#cc0000");
+      }
     });
     // Remote bullets visual only
     for (const rb of remoteBullets) {
@@ -3315,6 +3590,9 @@ const kd = (e: KeyboardEvent) => {
       const tp = teleportRef.current;
       teleportMeshRef.current.visible = !!tp.active;
       if (tp.active) {
+        const tmat = teleportMeshRef.current.material as THREE.MeshStandardMaterial;
+        tmat.color.set(tp.m ? "#ffffff" : "#a855f7");
+        tmat.emissive.set(tp.m ? "#e5e7eb" : "#7c3aed");
         if (tp.phase === "fly") {
           teleportMeshRef.current.position.copy(tp.pos);
           teleportMeshRef.current.scale.setScalar(TABLE_W * 2 * 0.35); // visible projectile, 2× baseline
@@ -3386,15 +3664,15 @@ const kd = (e: KeyboardEvent) => {
     });
     // Ability props emit table-strength light
     const aPts: { x: number; y: number; z: number; c: string }[] = [];
-    for (const w of abilityWalls) if (w.active) aPts.push({ x: w.cx, y: w.cy, z: w.cz, c: "#c4a574" });
-    for (const pad of abilityPads) if (pad.active) aPts.push({ x: pad.cx, y: pad.cy, z: pad.cz, c: "#3cff70" });
-    for (const f of abilityFires) if (f.active) aPts.push({ x: (f.ax + f.bx) / 2, y: ((f.ay + f.by) / 2) + 1, z: (f.az + f.bz) / 2, c: "#ff6a1a" });
-    for (const fb of fireballs) if (fb.active) aPts.push({ x: fb.pos.x, y: fb.pos.y, z: fb.pos.z, c: "#ff1a00" });
+    for (const w of abilityWalls) if (w.active) aPts.push({ x: w.cx, y: w.cy, z: w.cz, c: w.m ? "#ff2a2a" : "#c4a574" });
+    for (const pad of abilityPads) if (pad.active) aPts.push({ x: pad.cx, y: pad.cy, z: pad.cz, c: pad.m ? "#ff2a2a" : "#3cff70" });
+    for (const f of abilityFires) if (f.active) aPts.push({ x: (f.ax + f.bx) / 2, y: ((f.ay + f.by) / 2) + 1, z: (f.az + f.bz) / 2, c: f.m ? "#3b82f6" : "#ff6a1a" });
+    for (const fb of fireballs) if (fb.active) aPts.push({ x: fb.pos.x, y: fb.pos.y, z: fb.pos.z, c: fb.m ? "#3b82f6" : "#ff1a00" });
     {
       const tp = teleportRef.current;
       if (tp.active) {
         const src = tp.phase === "fly" ? tp.pos : tp.target;
-        aPts.push({ x: src.x, y: src.y, z: src.z, c: "#a855f7" });
+        aPts.push({ x: src.x, y: src.y, z: src.z, c: tp.m ? "#ffffff" : "#a855f7" });
       }
     }
     abilityLightRefs.current.forEach((l, i) => {

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ABILITY_LIST, setAbility, useAbility, type AbilityId } from "./abilities";
+import { MASTERY_LINES, achievementFor, hasMastery, masteryOn, setMasteryOn, useProgress } from "./mastery";
 
 const btn = "rounded-xl border-2 border-white/20 bg-black/50 px-3 py-2 text-sm font-bold uppercase tracking-wide text-white hover:bg-white/10 transition";
 const btnOn = "rounded-xl border-2 border-crosshair bg-crosshair/20 px-3 py-2 text-sm font-bold uppercase tracking-wide text-crosshair";
@@ -33,10 +34,10 @@ const DETAILS: Record<AbilityId, { summary: string; lines: string[] }> = {
   fire: {
     summary: "Ground fire line or aerial fireball (bomb-like) with burn.",
     lines: [
-      "On the ground: V fires a wide, tall fire line (4s cooldown). Direct hit does 15 damage.",
+      "On the ground: V fires a wide, tall fire line (5s cooldown). Direct hit does 10 damage.",
       "Line does not hurt you. Ticks while enemies stay inside; leaving slows them.",
       "Boss can be hit if the line is under it.",
-      "In the air: V throws a FIREBALL that behaves like the F bomb (same flight/collision), but 0.5× blast size (3s cooldown).",
+      "In the air: V throws a FIREBALL that behaves like the F bomb (same flight/collision), but 0.5× blast size (4s cooldown).",
       "Fireball applies BURN: 3 dmg / 0.1s while the target moves, for 4 seconds.",
       "While burn is active, your hits deal +2 bonus damage.",
       "Campaign boss (after parry lock): Fire is disabled.",
@@ -57,6 +58,7 @@ const DETAILS: Record<AbilityId, { summary: string; lines: string[] }> = {
 
 export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
   const selected = useAbility();
+  useProgress(); // re-render when a mastery is earned or toggled
   const [detail, setDetail] = useState<AbilityId | null>(null);
   const d = detail ? DETAILS[detail] : null;
   const def = detail ? ABILITY_LIST.find((a) => a.id === detail) : null;
@@ -94,6 +96,25 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                     <button type="button" className={btn} onClick={() => setDetail(a.id)}>
                       Details
                     </button>
+                    {hasMastery(a.id) ? (
+                      <button
+                        type="button"
+                        className={masteryOn(a.id) ? btnOn : btn}
+                        onClick={() => setMasteryOn(a.id, !masteryOn(a.id))}
+                        title="Turn this ability's mastery on or off"
+                      >
+                        Mastery: {masteryOn(a.id) ? "On" : "Off"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`${btn} cursor-not-allowed opacity-40`}
+                        onClick={() => setDetail(a.id)}
+                        title={`Earn "${achievementFor(a.id).name}" to unlock`}
+                      >
+                        Mastery 🔒
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -115,6 +136,24 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                     <li key={line} className="border-l-2 border-crosshair/40 pl-2">{line}</li>
                   ))}
                 </ul>
+                <div className="mt-5 border-t border-white/10 pt-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-crosshair">
+                    {achievementFor(detail).masteryName} · {hasMastery(detail) ? (masteryOn(detail) ? "ON" : "OFF") : "LOCKED"}
+                  </div>
+                  {!hasMastery(detail) && (
+                    <p className="mt-1 text-[11px] opacity-70">Unlock it with the “{achievementFor(detail).name}” achievement: beat campaign mode using this ability.</p>
+                  )}
+                  <ul className="mt-2 space-y-2 text-xs leading-relaxed opacity-80">
+                    {MASTERY_LINES[detail].map((line) => (
+                      <li key={line} className="border-l-2 border-crosshair/40 pl-2">{line}</li>
+                    ))}
+                  </ul>
+                  {hasMastery(detail) && (
+                    <button type="button" className={`mt-3 w-full ${masteryOn(detail) ? btnOn : btn}`} onClick={() => setMasteryOn(detail, !masteryOn(detail))}>
+                      Mastery: {masteryOn(detail) ? "On" : "Off"}
+                    </button>
+                  )}
+                </div>
                 <button
                   type="button"
                   className={`mt-4 w-full ${selected === detail ? btnOn : btn}`}

@@ -12,7 +12,7 @@ const S = 10;
 const WS = 15; // window scale: 1.5x the original panes
 const WY = 144; // window centre height (keeps sills above the outside ground)
 
-export type Solid = { x: number; z: number; hw: number; hd: number; y0: number; y1: number; yaw?: number; c?: string };
+export type Solid = { x: number; z: number; hw: number; hd: number; y0: number; y1: number; yaw?: number; c?: string; couch?: boolean };
 
 export const WINDOW_ANGLES = [0.6, 2.0, 2.55, 3.1, 3.65, 4.2, 5.3];
 
@@ -48,11 +48,11 @@ const windowFrameSolids: Solid[] = WINDOW_ANGLES.flatMap((angle) => {
 
 // Collidable, standable, grappleable solids (world units)
 export const SOLIDS: Solid[] = [
-  // sofas (seat + back)
-  { x: 0, z: 170, hw: 50, hd: 20, y0: 0, y1: 23 },
-  { x: 0, z: 186, hw: 50, hd: 5, y0: 0, y1: 46 },
-  { x: -240, z: 0, hw: 20, hd: 50, y0: 0, y1: 23 },
-  { x: -256, z: 0, hw: 5, hd: 50, y0: 0, y1: 46 },
+  // sofas (seat + back) — seat marked couch for slam bounce
+  { x: 0, z: 170, hw: 50, hd: 20, y0: 0, y1: 23, couch: true },
+  { x: 0, z: 186, hw: 50, hd: 5, y0: 0, y1: 46, couch: true },
+  { x: -240, z: 0, hw: 20, hd: 50, y0: 0, y1: 23, couch: true },
+  { x: -256, z: 0, hw: 5, hd: 50, y0: 0, y1: 46, couch: true },
   // tv stand + tv
   { x: 0, z: -205, hw: 60, hd: 12.5, y0: 0, y1: 24 },
   { x: 0, z: -212, hw: 50, hd: 2, y0: 24, y1: 77 },

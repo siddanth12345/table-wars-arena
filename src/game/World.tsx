@@ -394,7 +394,8 @@ export function World() {
   const wallMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const padMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const coilMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
-  const fireMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const fireGroupRefs = useRef<(THREE.Group | null)[]>([]);
+  const FIRE_PLATES = 14; // jagged plates along the fissure
   const fireballMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
   const fireParticleRefs = useRef<(THREE.Points | null)[]>([]);
   const slam = useRef({ on: false, fromY: 0, h: 0 });
@@ -459,8 +460,8 @@ export function World() {
   const boomRingRefs = useRef<(THREE.Mesh | null)[]>([]);
   const bombRingRef = useRef<THREE.Mesh | null>(null);
   const teleportRingRefs = useRef<(THREE.Mesh | null)[]>([]);
-  const slamCracks = useMemo(() => Array.from({ length: 10 }, () => ({ active: false, x: 0, y: 0, z: 0, t: 0, yaw: 0 })), []);
-  const crackMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const slamCracks = useMemo(() => Array.from({ length: 10 }, () => ({ active: false, x: 0, y: 0, z: 0, t: 0, yaw: 0, dark: false })), []);
+  const crackGroupRefs = useRef<(THREE.Group | null)[]>([]);
   const hazRefs = useRef<({ disc: THREE.Mesh | null; sector: THREE.Mesh | null; sword: THREE.Group | null })[]>(
     Array.from({ length: 8 }, () => ({ disc: null, sector: null, sword: null })),
   );
@@ -740,12 +741,13 @@ export function World() {
     if (kind !== "none") playSfx(kind === "fire" ? "fire_explode" : "bomb_explode", Math.max(0.15, 1 - at.distanceTo(camera.position) / 350));
     if (sync && NET.online) sendNet("vfx", { k: "boom", x: at.x, y: at.y, z: at.z, r, t: dur, ...(col ? { c: col } : {}), ...(hold ? { h: 1 } : {}), ...(ringCol ? { rc: ringCol } : {}) });
   };
-  const spawnSlamCrack = (x: number, y: number, z: number) => {
+  const spawnSlamCrack = (x: number, y: number, z: number, dark = false) => {
     const c = slamCracks.find((q) => !q.active) ?? slamCracks[0]!;
     c.active = true;
-    c.x = x; c.y = y + 0.05; c.z = z;
+    c.x = x; c.y = y + 0.04; c.z = z;
     c.t = 4;
     c.yaw = Math.random() * Math.PI * 2;
+    c.dark = dark;
   };
   // 1v1: damage every opponent whose (enlarged) hitbox is inside the blast
   const pvpBlast = (at: THREE.Vector3, r: number, dmg: number, stun = false) => {
@@ -1494,7 +1496,7 @@ const kd = (e: KeyboardEvent) => {
       return;
     }
     if (k === "crack") {
-      spawnSlamCrack(Number(payload.x), Number(payload.y), Number(payload.z));
+      spawnSlamCrack(Number(payload.x), Number(payload.y), Number(payload.z), !!payload.dark);
       return;
     }
     if (k === "padsquish") {
@@ -2782,8 +2784,27 @@ const kd = (e: KeyboardEvent) => {
           pvpBlast(_pvpAt.copy(p).setY(p.y + 0.5), r, PVP_DMG.slam, true);
           ringsIn(p, r);
           boomFx(tmpV.copy(p).setY(p.y + 0.5), r, 0.4, true, "none");
-          spawnSlamCrack(p.x, p.y, p.z);
-          if (NET.online) sendNet("vfx", { k: "crack", x: p.x, y: p.y, z: p.z });
+          // Surface under feet: couch → bounce, no crack; raised solid → dark crack; floor → normal crack
+          {
+            let couch = false;
+            let solidY = 0;
+            let onSolid = false;
+            for (const s of SOLIDS) {
+              if (p.y > s.y1 + 0.35 || p.y < s.y1 - 1.2) continue;
+              if (!overlapXZ(p, s, PLAYER_R * 0.7)) continue;
+              if (s.couch) { couch = true; break; }
+              if (s.y1 > 0.5) { onSolid = true; solidY = s.y1; }
+            }
+            if (couch) {
+              // Soft furniture: bounce up, no crack
+              vy.current = Math.max(vy.current, JUMP_V * 1.15);
+              grounded.current = false;
+            } else {
+              const cy = onSolid ? solidY : 0;
+              spawnSlamCrack(p.x, cy, p.z, onSolid);
+              if (NET.online) sendNet("vfx", { k: "crack", x: p.x, y: cy, z: p.z, dark: onSolid ? 1 : 0 });
+            }
+          }
           G.slamCd = cfg.slamCd(q.cd);
           G.shake = Math.max(G.shake, 0.3 + tier * 0.2);
           bounce.current.t = BOUNCE_WIN;
@@ -3626,13 +3647,15 @@ const kd = (e: KeyboardEvent) => {
       bombRingRef.current.visible = bomb.current.alive;
       if (bomb.current.alive) {
         bombRingRef.current.position.copy(bomb.current.pos);
-        const s = G.bombBig > 0 ? 1.5 : 1;
+        const s = (G.bombBig > 0 ? 1.7 : 1.15);
         bombRingRef.current.scale.set(s, s, s);
-        bombRingRef.current.rotation.y += dt * 2.2;
-        bombRingRef.current.rotation.x = 0.35;
+        bombRingRef.current.rotation.y += dt * 2.8;
+        bombRingRef.current.rotation.x = 0.4;
         const rm = bombRingRef.current.material as THREE.MeshStandardMaterial;
-        rm.color.set(bomb.current.tele ? "#e5e7eb" : "#ffae34");
-        rm.emissive.set(bomb.current.tele ? "#ffffff" : "#ff7a1a");
+        // Normal/F bomb: bright red saturn ring; teleport bomb stays white
+        rm.color.set(bomb.current.tele ? "#f8fafc" : "#ff1a1a");
+        rm.emissive.set(bomb.current.tele ? "#ffffff" : "#ff0000");
+        rm.emissiveIntensity = bomb.current.tele ? 1.2 : 2.4;
       }
     }
     booms.forEach((bm, i) => {
@@ -3666,15 +3689,24 @@ const kd = (e: KeyboardEvent) => {
     slamCracks.forEach((c, i) => {
       if (c.active) c.t = Math.max(0, c.t - dt);
       if (c.t <= 0) c.active = false;
-      const m = crackMeshRefs.current[i];
-      if (!m) return;
-      m.visible = c.active;
+      const g = crackGroupRefs.current[i];
+      if (!g) return;
+      g.visible = c.active;
       if (!c.active) return;
-      m.position.set(c.x, c.y, c.z);
-      m.rotation.set(-Math.PI / 2, 0, c.yaw);
-      const diam = TABLE_W * 3;
-      m.scale.set(diam, diam, 1);
-      (m.material as THREE.MeshBasicMaterial).opacity = Math.min(0.85, c.t / 4 * 0.9 + 0.15);
+      g.position.set(c.x, c.y, c.z);
+      g.rotation.y = c.yaw;
+      const diam = TABLE_W * 1.5;
+      g.scale.setScalar(diam);
+      const fade = Math.min(0.9, c.t / 4 * 0.85 + 0.2);
+      g.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const mat = mesh.material as THREE.MeshBasicMaterial;
+        if (mat?.opacity != null) {
+          mat.opacity = fade;
+          mat.color.set(c.dark ? "#0a0a0a" : "#1a120c");
+        }
+      });
     });
     hazards.forEach((h, i) => {
       const r = hazRefs.current[i]!;
@@ -3796,23 +3828,57 @@ const kd = (e: KeyboardEvent) => {
       }
     });
     abilityFires.forEach((f, i) => {
-      const m = fireMeshRefs.current[i];
-      if (!m) return;
-      m.visible = f.active;
+      const grp = fireGroupRefs.current[i];
+      if (!grp) return;
+      grp.visible = f.active;
       if (!f.active) return;
-      const mx = (f.ax + f.bx) / 2, my = (f.ay + f.by) / 2, mz = (f.az + f.bz) / 2;
       const len = Math.hypot(f.bx - f.ax, f.by - f.ay, f.bz - f.az) || 1;
-      m.position.set(mx, Math.max(0.08, my), mz);
-      m.lookAt(f.bx, f.by, f.bz);
-      // Crack-on-ground look: wide thin slab + tall eruptions via scale pulse
-      const erupt = 0.85 + 0.25 * Math.sin(performance.now() / 90 + i);
-      m.scale.set((f.m ? 55 : 28) * erupt, (f.m ? 14 : 7) * erupt, len);
-      const fm = m.material as THREE.MeshStandardMaterial;
-      fm.color.set(f.m ? "#3b82f6" : "#ff6a1a");
-      fm.emissive.set(f.m ? "#1d4ed8" : "#ff4500");
-      fm.emissiveIntensity = 2.2;
-      fm.transparent = true;
-      fm.opacity = 0.9;
+      const mx = (f.ax + f.bx) / 2, mz = (f.az + f.bz) / 2;
+      const my = Math.max(0.06, (f.ay + f.by) / 2);
+      grp.position.set(mx, my, mz);
+      // orient group so local +Z is along the fissure
+      const dx = f.bx - f.ax, dz = f.bz - f.az;
+      grp.rotation.set(0, Math.atan2(dx, dz), 0);
+      // Subtle lava/fire color shimmer (no size pulse)
+      const shimmer = 0.92 + 0.08 * Math.sin(performance.now() / 280 + i * 1.7);
+      const coreCol = f.m ? "#60a5fa" : "#ffcc33";
+      const plateCol = f.m ? "#1e3a8a" : "#c2410c";
+      const glowCol = f.m ? "#3b82f6" : "#ff6a1a";
+      grp.children.forEach((ch, ci) => {
+        const mesh = ch as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        if (ci === 0) {
+          // glowing core ribbon along full length (flat to the ground)
+          mesh.scale.set(f.m ? 2.8 : 1.9, 0.1, len);
+          mat.color.set(coreCol);
+          mat.emissive.set(glowCol);
+          mat.emissiveIntensity = 3.2 * shimmer;
+        } else {
+          // jagged plates distributed along full fissure length
+          const pi = ci - 1;
+          const side = pi % 2 === 0 ? 1 : -1;
+          const along = (pi / FIRE_PLATES - 0.5) * len;
+          const out = (f.m ? 2.4 : 1.5) * (1.0 + (pi % 3) * 0.25);
+          mesh.position.set(side * out, 0.03, along);
+          mesh.scale.set(f.m ? 1.35 : 1, 1, f.m ? 1.2 : 1);
+          mat.color.set(plateCol);
+          mat.emissive.set(glowCol);
+          mat.emissiveIntensity = 1.15 * shimmer;
+        }
+      });
+      // Point lights along the crack (shared light sources)
+      const lights = grp.userData.lights as THREE.PointLight[] | undefined;
+      if (lights) {
+        for (let li = 0; li < lights.length; li++) {
+          const L = lights[li]!;
+          const t = (li + 0.5) / lights.length;
+          L.position.set(0, 1.2, (t - 0.5) * len);
+          L.color.set(glowCol);
+          L.intensity = (f.m ? 2.4 : 2.0) * shimmer;
+          L.distance = 40;
+        }
+      }
     });
     fireballs.forEach((fb, i) => {
       const m = fireballMeshRefs.current[i];
@@ -3855,8 +3921,10 @@ const kd = (e: KeyboardEvent) => {
         ring.rotation.y += dt * 2.2;
         ring.rotation.x = 0.35;
         const rm = ring.material as THREE.MeshStandardMaterial;
-        rm.color.set(rb.tele ? "#e5e7eb" : "#ffae34");
-        rm.emissive.set(rb.tele ? "#ffffff" : "#ff7a1a");
+        rm.color.set(rb.tele ? "#f8fafc" : "#ff1a1a");
+        rm.emissive.set(rb.tele ? "#ffffff" : "#ff0000");
+        rm.emissiveIntensity = rb.tele ? 1.2 : 2.4;
+        ring.scale.setScalar(1.15);
       }
     });
     remoteBulletMeshRefs.current.forEach((m, i) => {
@@ -4036,10 +4104,43 @@ const kd = (e: KeyboardEvent) => {
         </group>
       ))}
       {abilityFires.map((_, i) => (
-        <mesh key={`af${i}`} ref={(m) => { fireMeshRefs.current[i] = m; }} visible={false}>
-          <boxGeometry args={[1, 1.2, 1]} />
-          <meshStandardMaterial color="#ff6a1a" emissive="#ff4500" emissiveIntensity={2.4} transparent opacity={0.88} depthWrite={false} />
-        </mesh>
+        <group
+          key={`af${i}`}
+          ref={(g) => {
+            fireGroupRefs.current[i] = g;
+            if (g && !g.userData.built) {
+              g.userData.built = true;
+              // core
+              const core = new THREE.Mesh(
+                new THREE.BoxGeometry(1, 1, 1),
+                new THREE.MeshStandardMaterial({ color: "#ffcc33", emissive: "#ff6a1a", emissiveIntensity: 3, transparent: true, opacity: 0.95, depthWrite: false }),
+              );
+              g.add(core);
+              // jagged plates along both sides (image-like fissure)
+              for (let p = 0; p < FIRE_PLATES; p++) {
+                const side = p % 2 === 0 ? 1 : -1;
+                const along = (p / FIRE_PLATES - 0.5);
+                const plate = new THREE.Mesh(
+                  new THREE.BoxGeometry(1.4 + (p % 3) * 0.5, 0.08, 0.55 + (p % 4) * 0.15),
+                  new THREE.MeshStandardMaterial({ color: "#c2410c", emissive: "#ff4500", emissiveIntensity: 1.2, roughness: 0.85 }),
+                );
+                plate.position.set(side * (1.1 + (p % 3) * 0.35), 0.02, along * 0.92);
+                plate.rotation.y = side * (0.15 + (p % 5) * 0.08);
+                plate.rotation.z = side * 0.12;
+                g.add(plate);
+              }
+              // lights along the fissure
+              const lights: THREE.PointLight[] = [];
+              for (let li = 0; li < 4; li++) {
+                const L = new THREE.PointLight("#ff6a1a", 2, 40);
+                g.add(L);
+                lights.push(L);
+              }
+              g.userData.lights = lights;
+            }
+          }}
+          visible={false}
+        />
       ))}
       {fireballs.map((_, i) => (
         <mesh key={`fb${i}`} ref={(m) => { fireballMeshRefs.current[i] = m; }} visible={false}>
@@ -4105,8 +4206,8 @@ const kd = (e: KeyboardEvent) => {
         <meshStandardMaterial color="#222" emissive="#ff7a1a" emissiveIntensity={1.5} />
       </mesh>
       <mesh ref={(m) => { bombRingRef.current = m; }} visible={false}>
-        <torusGeometry args={[1.25, 0.08, 10, 32]} />
-        <meshStandardMaterial color="#ffae34" emissive="#ff7a1a" emissiveIntensity={1.2} metalness={0.4} roughness={0.3} />
+        <torusGeometry args={[1.45, 0.12, 12, 40]} />
+        <meshStandardMaterial color="#ff1a1a" emissive="#ff0000" emissiveIntensity={2.4} metalness={0.35} roughness={0.25} />
       </mesh>
       {remoteBombs.map((_, i) => (
         <group key={`rbomb${i}`}>
@@ -4115,8 +4216,8 @@ const kd = (e: KeyboardEvent) => {
             <meshStandardMaterial color="#222" emissive="#ff7a1a" emissiveIntensity={1.5} />
           </mesh>
           <mesh ref={(m) => { remoteBombRingRefs.current[i] = m; }} visible={false}>
-            <torusGeometry args={[1.25, 0.08, 10, 32]} />
-            <meshStandardMaterial color="#ffae34" emissive="#ff7a1a" emissiveIntensity={1.2} metalness={0.4} roughness={0.3} />
+            <torusGeometry args={[1.45, 0.12, 12, 40]} />
+            <meshStandardMaterial color="#ff1a1a" emissive="#ff0000" emissiveIntensity={2.4} metalness={0.35} roughness={0.25} />
           </mesh>
         </group>
       ))}
@@ -4133,10 +4234,44 @@ const kd = (e: KeyboardEvent) => {
         </group>
       ))}
       {slamCracks.map((_, i) => (
-        <mesh key={`ck${i}`} ref={(m) => { crackMeshRefs.current[i] = m; }} visible={false} rotation-x={-Math.PI / 2}>
-          <ringGeometry args={[0.15, 0.5, 6]} />
-          <meshBasicMaterial color="#1a120c" transparent opacity={0.7} depthWrite={false} side={THREE.DoubleSide} />
-        </mesh>
+        <group
+          key={`ck${i}`}
+          ref={(g) => {
+            crackGroupRefs.current[i] = g;
+            if (g && !g.userData.built) {
+              g.userData.built = true;
+              // spiderweb: radial spokes + short connectors
+              const mat = () => new THREE.MeshBasicMaterial({ color: "#1a120c", transparent: true, opacity: 0.75, depthWrite: false });
+              for (let s = 0; s < 14; s++) {
+                const a = (s / 14) * Math.PI * 2;
+                const len = 0.35 + (s % 3) * 0.12;
+                const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.02, len), mat());
+                spoke.position.set(Math.sin(a) * len * 0.5, 0.01, Math.cos(a) * len * 0.5);
+                spoke.rotation.y = a;
+                g.add(spoke);
+              }
+              for (let r = 0; r < 3; r++) {
+                const rad = 0.18 + r * 0.14;
+                for (let s = 0; s < 10; s++) {
+                  const a0 = (s / 10) * Math.PI * 2;
+                  const a1 = ((s + 1) / 10) * Math.PI * 2;
+                  const mx = (Math.sin(a0) + Math.sin(a1)) * 0.5 * rad;
+                  const mz = (Math.cos(a0) + Math.cos(a1)) * 0.5 * rad;
+                  const seg = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.015, rad * 0.55), mat());
+                  seg.position.set(mx, 0.012, mz);
+                  seg.rotation.y = (a0 + a1) / 2;
+                  g.add(seg);
+                }
+              }
+              // center broken hole
+              const hole = new THREE.Mesh(new THREE.CircleGeometry(0.08, 7), mat());
+              hole.rotation.x = -Math.PI / 2;
+              hole.position.y = 0.008;
+              g.add(hole);
+            }
+          }}
+          visible={false}
+        />
       ))}
       {hazards.map((_, i) => (
         <group key={i}>

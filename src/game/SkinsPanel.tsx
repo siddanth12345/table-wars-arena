@@ -10,10 +10,12 @@ import { createStageDisc, createTableBot, skinKey } from "./tableBotFactory";
 
 const btn = "rounded-xl border-2 border-white/20 bg-black/50 px-3 py-2 text-sm font-bold uppercase tracking-wide text-white hover:bg-white/10 transition";
 const btnOn = "rounded-xl border-2 border-crosshair bg-crosshair/20 px-3 py-2 text-sm font-bold uppercase tracking-wide text-crosshair";
+const btnLocked = "rounded-xl border-2 border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm font-bold uppercase tracking-wide text-amber-200/90 hover:bg-amber-500/20 transition";
+const btnLockedOn = "rounded-xl border-2 border-amber-400 bg-amber-500/25 px-3 py-2 text-sm font-bold uppercase tracking-wide text-amber-100";
 
 function ColorChart({ value, onPick }: { value: string; onPick: (c: string) => void }) {
   return (
-    <div className="grid max-h-48 grid-cols-12 gap-1 overflow-y-auto rounded-lg border border-white/10 bg-black/40 p-2">
+    <div className="grid max-h-40 grid-cols-12 gap-1 overflow-y-auto rounded-lg border border-white/10 bg-black/40 p-2">
       {COLOR_CHART.map((c) => (
         <button
           key={c}
@@ -67,7 +69,7 @@ function OrbitDrag({ yawRef }: { yawRef: React.MutableRefObject<number> }) {
 function PreviewScene({ skin }: { skin: Skin }) {
   const yawRef = useRef(0);
   const key = skinKey(skin);
-  const bot = useMemo(() => createTableBot({ skin, scale: 0.85, emitLight: true, lightIntensity: 1.2 }), [key]);
+  const bot = useMemo(() => createTableBot({ skin, scale: 1.05, emitLight: true, lightIntensity: 1.4 }), [key]);
   const stage = useMemo(() => createStageDisc("#2a2430", skin.lightColor), [skin.lightColor]);
   const root = useRef<THREE.Group>(null);
 
@@ -90,10 +92,10 @@ function PreviewScene({ skin }: { skin: Skin }) {
 
   return (
     <>
-      <ambientLight intensity={0.35} />
-      <directionalLight position={[6, 12, 4]} intensity={1.4} castShadow />
+      <ambientLight intensity={0.4} />
+      <directionalLight position={[6, 12, 4]} intensity={1.5} castShadow />
       <OrbitDrag yawRef={yawRef} />
-      <group ref={root}>
+      <group ref={root} position={[0, -0.4, 0]}>
         <primitive object={stage} />
         <primitive object={bot} />
       </group>
@@ -106,114 +108,170 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
   const live = useSkin();
   const [draft, setDraft] = useState<Skin>(() => ({ ...live, topDecoration: live.topDecoration ?? "none" }));
   const [colorTarget, setColorTarget] = useState<"eyeColor" | "tablePrimary" | "decorationColor" | "lightColor">("tablePrimary");
+  const [saveHint, setSaveHint] = useState("");
 
-  const set = <K extends keyof Skin>(key: K, value: Skin[K]) => setDraft((d) => ({ ...d, [key]: value }));
+  const set = <K extends keyof Skin>(key: K, value: Skin[K]) => {
+    setDraft((d) => ({ ...d, [key]: value }));
+    setSaveHint("");
+  };
+
+  // Locked deco selected for preview only — block save until cleared
+  const decoLocked = !decorationUnlocked(draft.decoration);
+  const topLocked = draft.decoration === "stack" && !decorationUnlocked(draft.topDecoration ?? "none");
+  const canSave = !decoLocked && !topLocked;
+
+  const trySave = () => {
+    if (!canSave) {
+      setSaveHint("Unlock that decoration (or pick an unlocked one) before saving.");
+      return;
+    }
+    applySkin(draft);
+    onClose();
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col gap-4 overflow-y-auto rounded-2xl border border-white/15 bg-[#120e18]/95 p-6 text-white shadow-2xl">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-black uppercase tracking-wider">Skins</h2>
-          <button type="button" className={btn} onClick={onClose}>Close</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm sm:p-4">
+      <div className="flex h-[min(92vh,920px)] w-full max-w-6xl overflow-hidden rounded-2xl border border-white/15 bg-[#120e18] text-white shadow-2xl">
+        {/* LEFT — editor */}
+        <div className="flex w-full max-w-md flex-col border-r border-white/10 sm:w-[42%] sm:max-w-none">
+          <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+            <h2 className="text-2xl font-black uppercase tracking-wider">Skins</h2>
+          </div>
+          <div className="flex-1 space-y-5 overflow-y-auto p-5">
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Eye design</p>
+              <div className="flex flex-wrap gap-2">
+                {EYE_DESIGNS.map((e) => (
+                  <button key={e.id} type="button" className={draft.eyeDesign === e.id ? btnOn : btn} onClick={() => set("eyeDesign", e.id as EyeDesign)}>
+                    {e.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Leg design</p>
+              <div className="flex flex-wrap gap-2">
+                {LEG_DESIGNS.map((e) => (
+                  <button key={e.id} type="button" className={draft.legDesign === e.id ? btnOn : btn} onClick={() => set("legDesign", e.id as LegDesign)}>
+                    {e.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Table decoration</p>
+              <div className="flex flex-wrap gap-2">
+                {DECORATIONS.map((e) => {
+                  const locked = !decorationUnlocked(e.id);
+                  const selected = draft.decoration === e.id;
+                  const cls = locked
+                    ? (selected ? btnLockedOn : btnLocked)
+                    : (selected ? btnOn : btn);
+                  return (
+                    <button
+                      key={e.id}
+                      type="button"
+                      title={locked ? `Preview only — needs ${e.needs ?? "achievement"} to save` : e.label}
+                      className={cls}
+                      onClick={() => set("decoration", e.id as TableDecoration)}
+                    >
+                      {locked ? `🔒 ${e.label}` : e.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {draft.decoration === "stack" && (
+                <div className="mt-3">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Top table decoration</p>
+                  <div className="flex flex-wrap gap-2">
+                    {TOP_DECORATIONS.map((e) => {
+                      const locked = !decorationUnlocked(e.id);
+                      const selected = (draft.topDecoration ?? "none") === e.id;
+                      const cls = locked
+                        ? (selected ? btnLockedOn : btnLocked)
+                        : (selected ? btnOn : btn);
+                      return (
+                        <button
+                          key={e.id}
+                          type="button"
+                          title={locked ? `Preview only — needs ${e.needs ?? "achievement"}` : e.label}
+                          className={cls}
+                          onClick={() => set("topDecoration", e.id as TopDecoration)}
+                        >
+                          {locked ? `🔒 ${e.label}` : e.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {(decoLocked || topLocked) && (
+                <p className="mt-2 text-[11px] leading-relaxed text-amber-200/90">
+                  Locked decoration is only a preview. Earn the achievement to save it.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Color</p>
+              <div className="mb-2 flex flex-wrap gap-2">
+                {(
+                  [
+                    ["eyeColor", "Eye color"],
+                    ["tablePrimary", "Table primary"],
+                    ["decorationColor", "Decoration color"],
+                    ["lightColor", "Table light"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button key={k} type="button" className={colorTarget === k ? btnOn : btn} onClick={() => setColorTarget(k)}>
+                    <span className="mr-2 inline-block h-3 w-3 rounded-sm border border-white/40" style={{ background: draft[k] }} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <ColorChart value={draft[colorTarget]} onPick={(c) => set(colorTarget, c)} />
+            </div>
+          </div>
+
+          <div className="border-t border-white/10 px-5 py-4">
+            {saveHint && <p className="mb-2 text-xs text-amber-300">{saveHint}</p>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" className={btn} onClick={() => { setDraft({ ...live, topDecoration: live.topDecoration ?? "none" }); setSaveHint(""); }}>
+                Reset draft
+              </button>
+              <button
+                type="button"
+                className={canSave ? btnOn : `${btn} opacity-50 cursor-not-allowed`}
+                onClick={trySave}
+                title={canSave ? "Save skin" : "Cannot save while a locked decoration is selected"}
+              >
+                Save skin
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className="relative h-64 w-full overflow-hidden rounded-2xl border border-white/10 bg-[#0a0612]">
-          <Canvas shadows camera={{ position: [7, 6, 9], fov: 40 }} style={{ width: "100%", height: "100%", cursor: "grab" }}>
+        {/* RIGHT — large live 3D preview */}
+        <div className="relative hidden min-w-0 flex-1 flex-col bg-[#0a0612] sm:flex">
+          <div className="absolute right-3 top-3 z-10">
+            <button type="button" className={btn} onClick={onClose}>Close</button>
+          </div>
+          <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-full border border-white/10 bg-black/50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white/70">
+            Drag to rotate · Live 3D preview
+          </div>
+          <Canvas
+            className="h-full w-full flex-1"
+            camera={{ position: [0, 5.5, 11], fov: 38 }}
+            gl={{ antialias: true }}
+          >
             <PreviewScene skin={draft} />
           </Canvas>
-          <p className="pointer-events-none absolute bottom-2 left-3 text-[10px] font-bold uppercase tracking-widest text-white/50">
-            Drag to rotate · live 3D preview
-          </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Eye design</p>
-            <div className="flex flex-wrap gap-2">
-              {EYE_DESIGNS.map((e) => (
-                <button key={e.id} type="button" className={draft.eyeDesign === e.id ? btnOn : btn} onClick={() => set("eyeDesign", e.id as EyeDesign)}>
-                  {e.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Leg design</p>
-            <div className="flex flex-wrap gap-2">
-              {LEG_DESIGNS.map((e) => (
-                <button key={e.id} type="button" className={draft.legDesign === e.id ? btnOn : btn} onClick={() => set("legDesign", e.id as LegDesign)}>
-                  {e.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="sm:col-span-2">
-            <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Table decoration</p>
-            <div className="flex flex-wrap gap-2">
-              {DECORATIONS.map((e) => {
-                const locked = !decorationUnlocked(e.id);
-                return (
-                  <button
-                    key={e.id}
-                    type="button"
-                    disabled={locked}
-                    title={locked ? `Locked — needs ${e.needs ?? "achievement"}` : e.label}
-                    className={`${draft.decoration === e.id ? btnOn : btn} ${locked ? "opacity-40 cursor-not-allowed" : ""}`}
-                    onClick={() => { if (!locked) set("decoration", e.id as TableDecoration); }}
-                  >
-                    {locked ? `🔒 ${e.label}` : e.label}
-                  </button>
-                );
-              })}
-            </div>
-            {draft.decoration === "stack" && (
-              <div className="mt-3">
-                <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Top table decoration</p>
-                <div className="flex flex-wrap gap-2">
-                  {TOP_DECORATIONS.map((e) => {
-                    const locked = !decorationUnlocked(e.id);
-                    return (
-                      <button
-                        key={e.id}
-                        type="button"
-                        disabled={locked}
-                        className={`${(draft.topDecoration ?? "none") === e.id ? btnOn : btn} ${locked ? "opacity-40" : ""}`}
-                        onClick={() => { if (!locked) set("topDecoration", e.id as TopDecoration); }}
-                      >
-                        {locked ? `🔒 ${e.label}` : e.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div>
-          <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Color</p>
-          <div className="mb-2 flex flex-wrap gap-2">
-            {(
-              [
-                ["eyeColor", "Eye color"],
-                ["tablePrimary", "Table primary"],
-                ["decorationColor", "Decoration color"],
-                ["lightColor", "Table light"],
-              ] as const
-            ).map(([k, label]) => (
-              <button key={k} type="button" className={colorTarget === k ? btnOn : btn} onClick={() => setColorTarget(k)}>
-                <span className="mr-2 inline-block h-3 w-3 rounded-sm border border-white/40" style={{ background: draft[k] }} />
-                {label}
-              </button>
-            ))}
-          </div>
-          <ColorChart value={draft[colorTarget]} onPick={(c) => set(colorTarget, c)} />
-        </div>
-
-        <div className="flex justify-end gap-2">
-          <button type="button" className={btn} onClick={() => setDraft({ ...live })}>Reset draft</button>
-          <button type="button" className={btnOn} onClick={() => { applySkin(draft); onClose(); }}>Save skin</button>
-        </div>
+        {/* Mobile: close + compact preview under editor if needed */}
+        <button type="button" className={`${btn} absolute right-4 top-4 z-20 sm:hidden`} onClick={onClose}>Close</button>
       </div>
     </div>
   );

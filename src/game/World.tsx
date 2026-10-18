@@ -355,7 +355,7 @@ export function World() {
   const tables = useMemo(() => Array.from({ length: TABLE_POOL }, newTable), []);
   const splinters = useMemo<Splinter[]>(() => [], []);
   const bomb = useRef({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), tele: null as THREE.Vector3 | null });
-  const booms = useMemo(() => Array.from({ length: 24 }, () => ({ t: 0, pos: new THREE.Vector3(), r: BOMB_R, col: "#ffb347" })), []);
+  const booms = useMemo(() => Array.from({ length: 24 }, () => ({ t: 0, pos: new THREE.Vector3(), r: BOMB_R, col: "#ffb347", dur: 0.5, hold: false })), []);
   const hazards = useMemo<Hazard[]>(() => Array.from({ length: 8 }, () => ({ active: false, kind: "aoe", t: 0, total: 1, fx: 0, x: 0, z: 0, a0: 0 })), []);
   const blues = useMemo(() => Array.from({ length: BLUE_N }, () => ({ alive: false, pos: new THREE.Vector3(), dash: new THREE.Vector3(), hp: BLUE_HP, hitCd: 0, dashT: 8, yaw: 0 })), []);
   const blueT = useRef(6);
@@ -708,14 +708,16 @@ export function World() {
     boomFx(at, br, 0.5, true, "bomb", tele ? "#ffffff" : "");
     G.shake = 0.6;
   };
-  const boomFx = (at: THREE.Vector3, r: number, dur = 0.5, sync = true, kind: "bomb" | "fire" | "none" = "bomb", col = "") => {
+  const boomFx = (at: THREE.Vector3, r: number, dur = 0.5, sync = true, kind: "bomb" | "fire" | "none" = "bomb", col = "", hold = false) => {
     const bm = booms.find((x) => x.t <= 0) ?? booms[0]!;
     bm.t = dur;
+    bm.dur = dur;
+    bm.hold = hold;
     bm.col = col || "#ffb347";
     bm.pos.copy(at);
     bm.r = r;
     if (kind !== "none") playSfx(kind === "fire" ? "fire_explode" : "bomb_explode", Math.max(0.15, 1 - at.distanceTo(camera.position) / 350));
-    if (sync && NET.online) sendNet("vfx", { k: "boom", x: at.x, y: at.y, z: at.z, r, t: dur, ...(col ? { c: col } : {}) });
+    if (sync && NET.online) sendNet("vfx", { k: "boom", x: at.x, y: at.y, z: at.z, r, t: dur, ...(col ? { c: col } : {}), ...(hold ? { h: 1 } : {}) });
   };
   // 1v1: damage every opponent whose (enlarged) hitbox is inside the blast
   const pvpBlast = (at: THREE.Vector3, r: number, dmg: number, stun = false) => {
@@ -805,10 +807,11 @@ export function World() {
     G.shake = Math.max(G.shake, 0.35);
   };
   // Fire mastery: the air fireball bounces off whatever it hits (up to 3 times)
-  const bounceFb = (fb: { pos: THREE.Vector3; vel: THREE.Vector3; t: number; traveled: number; b: number }, stepV: THREE.Vector3) => {
+  const bounceFb = (fb: { pos: THREE.Vector3; vel: THREE.Vector3; t: number; traveled: number; b: number }, stepV: THREE.Vector3, wallN?: THREE.Vector3 | null) => {
     const q = fb.pos;
     const n = new THREE.Vector3();
-    if (q.y <= 0.3) n.set(0, 1, 0);
+    if (wallN) n.copy(wallN);
+    else if (q.y <= 0.3) n.set(0, 1, 0);
     else if (q.y >= ROOM.h) n.set(0, -1, 0);
     else if (Math.hypot(q.x, q.z) >= R - 0.5) n.set(-q.x, 0, -q.z).normalize();
     else {
@@ -824,10 +827,11 @@ export function World() {
       }
       if (!found) n.copy(fb.vel).normalize().negate();
     }
+    const spd0 = fb.vel.length();
     const d = fb.vel.dot(n);
     if (d < 0) fb.vel.addScaledVector(n, -2 * d);
     else fb.vel.addScaledVector(n, 0.5 * fb.vel.length());
-    fb.vel.setLength(BULLET_SPEED);
+    fb.vel.setLength(spd0);
     q.addScaledVector(n, 1.5);
     fb.b++;
     fb.traveled = 0;
@@ -1105,21 +1109,28 @@ const kd = (e: KeyboardEvent) => {
         // Teleport mastery: with the ability ready the bomb is a white teleport bomb
         const tpr = teleportRef.current;
         if (masteryOn("teleport") && getAbility() === "teleport" && G.abilityCd <= 0 && !tpr.active && !G.abilityLocked && !G.parryLocked) {
-          const maxR = cfg.grapple(GRAPPLE_MAX) * 3.5;
-          let hitPt: THREE.Vector3 | null = null;
+          // Crosshair spot, but never farther than 2 table lengths from you and never inside something solid
+          const reach = TABLE_W * 2;
+          const back = PLAYER_R * 2;
+          let dist = reach;
           if (staticRef.current) {
-            const rc = new THREE.Raycaster(camera.position.clone(), dir, 0.5, maxR);
+            const rc = new THREE.Raycaster(camera.position.clone(), dir, 0.5, reach + back);
             const hh = rc.intersectObject(staticRef.current, true)[0];
-            if (hh) hitPt = hh.point.clone();
+            if (hh) dist = Math.min(dist, hh.distance - back);
           }
-          if (!hitPt) {
-            hitPt = camera.position.clone().addScaledVector(dir, maxR);
-            if (dir.y < -0.05) {
-              const tHit = -camera.position.y / dir.y;
-              if (tHit > 0.5 && tHit < maxR) hitPt = camera.position.clone().addScaledVector(dir, tHit);
-            }
+          if (dir.y < -0.05) {
+            const tHit = -camera.position.y / dir.y;
+            if (tHit > 0 && tHit - back < dist) dist = tHit - back;
           }
-          hitPt.addScaledVector(dir, -PLAYER_R * 2);
+          for (let s = 1; s <= dist; s += 0.5) {
+            const sx = camera.position.x + dir.x * s, sy = camera.position.y + dir.y * s, sz = camera.position.z + dir.z * s;
+            if (abilityWalls.some((aw) => aw.active && !aw.ret && inObb(aw, sx, sy, sz, back))) { dist = Math.max(0.5, s - 0.5); break; }
+          }
+          dist = Math.max(0.5, dist);
+          const hitPt = camera.position.clone().addScaledVector(dir, dist);
+          const rr = Math.hypot(hitPt.x, hitPt.z);
+          if (rr > R - 3) { hitPt.x *= (R - 3) / rr; hitPt.z *= (R - 3) / rr; }
+          hitPt.y = Math.max(0, hitPt.y - EYE); // feet position
           bomb.current.tele = hitPt;
           G.abilityCd = 3;
           G.abilityCharges = 0;
@@ -1426,7 +1437,7 @@ const kd = (e: KeyboardEvent) => {
     }
     const nid = String(payload.id ?? "");
     if (k === "boom") {
-      boomFx(tmpV.set(Number(payload.x), Number(payload.y), Number(payload.z)), Number(payload.r) || 8, Number(payload.t) || 0.4, false, "bomb", String(payload.c ?? ""));
+      boomFx(tmpV.set(Number(payload.x), Number(payload.y), Number(payload.z)), Number(payload.r) || 8, Number(payload.t) || 0.4, false, "bomb", String(payload.c ?? ""), !!payload.h);
       return;
     }
     if (k === "wall") {
@@ -1842,11 +1853,11 @@ const kd = (e: KeyboardEvent) => {
               slot.cx = place.x; slot.cy = place.y; slot.cz = place.z;
               slot.yaw = yaw; slot.pitch = pitch;
               slot.hw = halfW; slot.hh = halfH; slot.hd = thick;
-              slot.t = 2;
+              slot.t = wallM ? 3 : 2; // Wall mastery lasts 1s longer
               slot.m = wallM; slot.ret = false; slot.rt = 0; slot.hit.clear();
               G.abilityCharges--;
               if (G.abilityCharges <= 0) G.abilityCd = 3;
-              if (NET.online) sendNet("vfx", { k: "wall", m: wallM ? 1 : 0, id: slot.netId, cx: slot.cx, cy: slot.cy, cz: slot.cz, yaw: slot.yaw, pitch: slot.pitch, hw: slot.hw, hh: slot.hh, hd: slot.hd, life: 2 });
+              if (NET.online) sendNet("vfx", { k: "wall", m: wallM ? 1 : 0, id: slot.netId, cx: slot.cx, cy: slot.cy, cz: slot.cz, yaw: slot.yaw, pitch: slot.pitch, hw: slot.hw, hh: slot.hh, hd: slot.hd, life: slot.t });
             }
           } else {
             const slot = abilityPads.find((pad) => !pad.active);
@@ -1883,10 +1894,10 @@ const kd = (e: KeyboardEvent) => {
             if (slot) {
               slot.active = true;
               slot.pos.copy(cam.position).addScaledVector(look, 1.5);
-              slot.vel.copy(look).multiplyScalar(BULLET_SPEED);
+              slot.m = masteryOn("fire");
+              slot.vel.copy(look).multiplyScalar(BULLET_SPEED * (slot.m ? 0.5 : 1)); // Fire mastery: 2× slower fireball
               slot.t = 5;
               slot.traveled = 0;
-              slot.m = masteryOn("fire");
               slot.b = 0;
               slot.netId = `${myId()}-fb-${Date.now()}`;
               playSfx("fire_air");
@@ -1897,9 +1908,15 @@ const kd = (e: KeyboardEvent) => {
           } else {
             const slot = abilityFires.find((f) => !f.active);
             if (slot) {
-              const dist = cfg.grapple(GRAPPLE_MAX) * 2;
-              const start = p.clone().addScaledVector(look, 2);
-              const end = p.clone().addScaledVector(look, dist);
+              const fm = masteryOn("fire");
+              const dist = cfg.grapple(GRAPPLE_MAX) * 2 * (fm ? 2 : 1); // Fire mastery: 2× longer
+              // always parallel to the ground, whatever the pitch of the camera
+              const flat = new THREE.Vector3(look.x, 0, look.z);
+              if (flat.lengthSq() < 1e-6) flat.set(0, 0, -1);
+              flat.normalize();
+              const start = p.clone().addScaledVector(flat, 2);
+              const end = p.clone().addScaledVector(flat, dist);
+              start.y = end.y = Math.max(0.2, p.y);
               slot.active = true;
               slot.ax = start.x; slot.ay = Math.max(0.2, start.y); slot.az = start.z;
               slot.bx = end.x; slot.by = Math.max(0.2, end.y); slot.bz = end.z;
@@ -1929,7 +1946,7 @@ const kd = (e: KeyboardEvent) => {
       if (!w.ret) {
         w.t -= dt;
         if (w.t <= 0) {
-          if (w.m) { w.ret = true; w.rt = 8; w.hit.clear(); } // Wall mastery: it flies back to its owner instead of vanishing
+          if (w.m) { w.ret = true; w.rt = 9; w.hit.clear(); } // Wall mastery: it flies back to its owner instead of vanishing
           else { w.active = false; continue; }
         }
       }
@@ -1944,7 +1961,10 @@ const kd = (e: KeyboardEvent) => {
         if (!have || w.rt <= 0 || inObb(w, tx, ty, tz, PLAYER_R + 1)) { w.active = false; continue; }
         const dx = tx - w.cx, dy = ty - w.cy, dz = tz - w.cz;
         const dl = Math.hypot(dx, dy, dz) || 1;
-        const st = Math.min(dl, 110 * dt);
+        const st = Math.min(dl, 450 * dt);
+        // face the biggest side (local Z) toward the target while flying
+        w.yaw = Math.atan2(dx, dz);
+        w.pitch = -Math.asin(Math.max(-1, Math.min(1, dy / dl)));
         w.cx += (dx / dl) * st; w.cy += (dy / dl) * st; w.cz += (dz / dl) * st;
       }
       // Wall mastery: 10 damage every 0.7s to enemies touching it. Only the owner applies it, and never to the owner.
@@ -2066,7 +2086,7 @@ const kd = (e: KeyboardEvent) => {
       // Remote copies of someone else's fireball are visual only (the caster applies damage + syncs the boom)
       const mine = fb.netId.startsWith(`${myId()}-`);
       const travel = fb.vel.length() * dt;
-      const steps = Math.max(1, Math.ceil(travel / 1.5));
+      const steps = Math.max(1, Math.ceil(travel / (fb.m ? 0.75 : 1.5)));
       const stepV = fb.vel.clone().multiplyScalar(dt / steps);
       const blastR = BOMB_R * 0.5;
       for (let si = 0; si < steps && fb.active; si++) {
@@ -2074,6 +2094,18 @@ const kd = (e: KeyboardEvent) => {
         fb.traveled += stepV.length();
         const q = fb.pos;
         let hit = q.y <= 0.3 || q.y >= ROOM.h || Math.hypot(q.x, q.z) >= R - 0.5 || inSolid(q);
+        let wallN: THREE.Vector3 | null = null;
+        if (!hit) {
+          // ability walls are solid to fireballs too (they used to slip through)
+          for (const aw of abilityWalls) {
+            if (!aw.active || aw.ret || !inObb(aw, q.x, q.y, q.z, 0.4)) continue;
+            hit = true;
+            const cp = Math.cos(aw.pitch);
+            const zAx = new THREE.Vector3(cp * Math.sin(aw.yaw), -Math.sin(aw.pitch), cp * Math.cos(aw.yaw));
+            wallN = zAx.multiplyScalar(zAx.dot(stepV) > 0 ? -1 : 1);
+            break;
+          }
+        }
         if (!hit) hit = tables.some((tb) => tb.alive && q.distanceTo(tmpV.copy(tb.pos).setY(tb.pos.y + 2.6 * tb.s)) < 3.4 * tb.s);
         if (!hit && bossLive()) {
           bossBox(_mn, _mx);
@@ -2086,7 +2118,7 @@ const kd = (e: KeyboardEvent) => {
           }
         }
         if (hit && !mine) {
-          if (fb.m && fb.b < 3) bounceFb(fb, stepV);
+          if (fb.m && fb.b < 3) bounceFb(fb, stepV, wallN);
           else fb.active = false;
         } else if (hit) {
           const at = q.clone();
@@ -2117,9 +2149,9 @@ const kd = (e: KeyboardEvent) => {
             burns.current.set(pr.id, { t: 4, lx: pr.x, ly: pr.y, lz: pr.z, acc: 0 });
             G.burnBuff = 4;
           }
-          boomFx(at, blastR, 0.45, true, "fire", fb.m ? "#3b82f6" : "");
+          boomFx(at, blastR, fb.m ? 3 : 0.45, true, "fire", fb.m ? "#3b82f6" : "", !!fb.m); // mastery blast lingers 3s
           G.shake = Math.max(G.shake, 0.5);
-          if (fb.m && fb.b < 3) bounceFb(fb, stepV); // Fire mastery: bounce (up to 3×), exploding each time
+          if (fb.m && fb.b < 3) bounceFb(fb, stepV, wallN); // Fire mastery: bounce (up to 3×), exploding each time
           else fb.active = false;
         }
       }
@@ -3433,8 +3465,14 @@ const kd = (e: KeyboardEvent) => {
       if (!m) return;
       m.visible = bm.t > 0;
       m.position.copy(bm.pos);
-      m.scale.setScalar(bm.r * (1 - bm.t / 0.5 * 0.7));
-      (m.material as THREE.MeshBasicMaterial).opacity = bm.t * 1.2;
+      if (bm.hold) {
+        // Fire mastery blast: grows in, then stays fully visible until its time is up
+        m.scale.setScalar(bm.r * Math.min(1, 0.3 + ((bm.dur - bm.t) / 0.3) * 0.7));
+        (m.material as THREE.MeshBasicMaterial).opacity = 0.5;
+      } else {
+        m.scale.setScalar(bm.r * (1 - bm.t / 0.5 * 0.7));
+        (m.material as THREE.MeshBasicMaterial).opacity = bm.t * 1.2;
+      }
       (m.material as THREE.MeshBasicMaterial).color.set(bm.col);
     });
     hazards.forEach((h, i) => {

@@ -119,9 +119,15 @@ export function setMasteryOn(ab: AbilityId, on: boolean) {
   persister?.();
 }
 
+const awardSubs = new Set<(a: Achievement) => void>();
+/** Called the moment an achievement is earned (drives the pop-up). */
+export function onAchievement(fn: (a: Achievement) => void) { awardSubs.add(fn); return () => { awardSubs.delete(fn); }; }
+
 function award(id: AchievementId) {
   if (progress.earned[id]) return false;
   progress.earned[id] = true;
+  const ach = ACHIEVEMENTS.find((a) => a.id === id);
+  if (ach) awardSubs.forEach((f) => f(ach));
   justUnlocked = [...justUnlocked, id];
   bump();
   persister?.();

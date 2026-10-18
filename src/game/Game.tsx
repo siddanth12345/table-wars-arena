@@ -13,6 +13,7 @@ import { G, MAG, MAX_HP, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, DASH_CD, BOMB_CD
 import { SkinsPanel } from "./SkinsPanel";
 import { AbilitiesPanel } from "./AbilitiesPanel";
 import { AchievementsPanel } from "./AchievementsPanel";
+import { AchievementToast } from "./AchievementToast";
 import { ACHIEVEMENTS, clearJustUnlocked, getJustUnlocked } from "./mastery";
 import { getAbility, ABILITY_LIST } from "./abilities";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
@@ -862,6 +863,7 @@ export function Game() {
             <MobileLookLayer />
           </div>
           <HUD />
+          <AchievementToast />
           <Menu />
           <TrainingMenu />
           <Home />

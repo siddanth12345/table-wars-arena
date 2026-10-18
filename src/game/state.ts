@@ -335,7 +335,7 @@ export const MAP = { px: 0, pz: 0, yaw: 0, boss: null as null | { x: number; z: 
 export type TrainSpawn = { kind: "brown" | "blue" | "boss"; n: number; t: number };
 export const TRAIN_DEFAULTS = {
   ringsPer10: 2, bossHp: BOSS_HITS, bossCd: 1.5, maxHp: MAX_HP, parryCd: PARRY_CD, dashCd: DASH_CD, bombCd: BOMB_CD,
-  wallrunCd: 1, airJumps: AIR_JUMPS, airDashes: AIR_DASHES, slamCd: 1, grappleM: 8.5,
+  wallrunCd: 1, airJumps: AIR_JUMPS, airDashes: AIR_DASHES, slamCd: 1, grappleM: 8.5, brownHp: TABLE_HP, blueHp: 10,
 };
 export type TrainCfg = typeof TRAIN_DEFAULTS;
 /** Applied training values (changed only when the training menu is closed with Close/Enter). */

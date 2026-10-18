@@ -87,7 +87,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 type Bullet = { pos: THREE.Vector3; prev: THREE.Vector3; vel: THREE.Vector3; life: number; alive: boolean; dmg: number };
 type Table = {
-  alive: boolean; pos: THREE.Vector3; vy: number; hp: number; target: THREE.Vector3; shootT: number;
+  alive: boolean; pos: THREE.Vector3; vy: number; hp: number; maxHp: number; target: THREE.Vector3; shootT: number;
   jumpT: number; jumpsLeft: number; dashT: number; dash: THREE.Vector3; bob: number; s: number; yaw: number; summoned: boolean; passive: boolean;
 };
 type Splinter = { pos: THREE.Vector3; vel: THREE.Vector3; rot: THREE.Euler; spin: THREE.Vector3; life: number; size: number };
@@ -282,7 +282,7 @@ const HIDE = new THREE.Matrix4().makeScale(0, 0, 0);
 
 function newTable(): Table {
   return {
-    alive: false, pos: new THREE.Vector3(), vy: 0, hp: TABLE_HP, target: new THREE.Vector3(), shootT: 1,
+    alive: false, pos: new THREE.Vector3(), vy: 0, hp: TABLE_HP, maxHp: TABLE_HP, target: new THREE.Vector3(), shootT: 1,
     jumpT: 2, jumpsLeft: 0, dashT: 3, dash: new THREE.Vector3(), bob: 0, s: TABLE_S, yaw: 0, summoned: false, passive: false,
   };
 }
@@ -474,7 +474,8 @@ export function World() {
     Object.assign(t, newTable());
     t.alive = true;
     t.summoned = summoned;
-    if (summoned) t.hp = SUMMON_HP;
+    if (summoned) { t.hp = SUMMON_HP; t.maxHp = SUMMON_HP; }
+    else if (G.mode === "training") { t.hp = TRAIN.brownHp; t.maxHp = TRAIN.brownHp; } // training: adjustable brown health
     t.pos.copy(at ?? randomFloor(pos.current));
     t.target.copy(randomFloor(t.pos));
     t.shootT = 1 + Math.random();
@@ -483,7 +484,7 @@ export function World() {
   const spawnBlue = (at: THREE.Vector3) => {
     const u = blues.find((x) => !x.alive);
     if (!u) return;
-    Object.assign(u, { alive: true, hp: BLUE_HP, hitCd: 0, dashT: 6 + Math.random() * 8 });
+    Object.assign(u, { alive: true, hp: G.mode === "training" ? TRAIN.blueHp : BLUE_HP, hitCd: 0, dashT: 6 + Math.random() * 8 });
     u.pos.copy(at).setY(0);
     clampCircle(u.pos, 3 * TABLE_S);
     u.dash.set(0, 0, 0);
@@ -2673,7 +2674,7 @@ const kd = (e: KeyboardEvent) => {
         if (!t.alive || follower) continue;
         if ((abilityStun.current.get(`t${ti}`) ?? 0) > 0) continue; // teleport/ability stun
         const bp = t.pos;
-        const speed = (5 + (1 - t.hp / (t.summoned ? SUMMON_HP : TABLE_HP)) * 9) * 4;
+        const speed = (5 + (1 - t.hp / t.maxHp) * 9) * 4;
         const toT = tmpV.copy(t.target).sub(bp).setY(0);
         if (toT.length() < 4) t.target.copy(randomFloor(bp));
         else bp.addScaledVector(toT.normalize(), speed * dt);
@@ -2697,7 +2698,7 @@ const kd = (e: KeyboardEvent) => {
         t.vy -= GRAVITY * dt;
         bp.y = Math.max(0, bp.y + t.vy * dt);
         if (bp.y <= 0 && t.vy < 0) t.vy = 0;
-        const target = TABLE_S * (0.55 + 0.45 * (t.hp / TABLE_HP));
+        const target = TABLE_S * (0.55 + 0.45 * Math.min(1, t.hp / t.maxHp));
         t.s = THREE.MathUtils.lerp(t.s, target, 1 - Math.exp(-8 * dt));
         for (const s of SOLIDS) if (s.y0 < 5 && bp.y < s.y1) pushOut(bp, s, 3 * t.s);
         clampCircle(bp, 3 * t.s);
@@ -2790,7 +2791,7 @@ const kd = (e: KeyboardEvent) => {
             for (let k = 0; k < 2; k++) {
               const u = blues.find((x) => !x.alive);
               if (!u) break;
-              Object.assign(u, { alive: true, hp: BLUE_HP, hitCd: 0, dashT: 6 + Math.random() * 8 });
+              Object.assign(u, { alive: true, hp: G.mode === "training" ? TRAIN.blueHp : BLUE_HP, hitCd: 0, dashT: 6 + Math.random() * 8 });
               const a = Math.random() * Math.PI * 2;
               u.pos.set(b.pos.x + Math.cos(a) * (BOSS_S * 4), 0, b.pos.z + Math.sin(a) * (BOSS_S * 4));
               clampCircle(u.pos, 3 * TABLE_S);

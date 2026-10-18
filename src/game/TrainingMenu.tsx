@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { saveTraining } from "./account";
 import { LobbyInvite } from "./OnlineUI";
+import { ABILITY_LIST, getAbility, setAbility, useAbility } from "./abilities";
+import { hasMastery, masteryOn, setMasteryOn, useProgress } from "./mastery";
 import { G, TRAIN, TRAIN_CMD, TRAIN_DEFAULTS, TRAIN_Q, lockPointer, type TrainCfg, type TrainSpawn } from "./state";
 
 function useTick(ms: number) {
@@ -41,6 +43,50 @@ function NumBox({ label, value, min, max, onChange }: { label: string; value: nu
 
 const btn = "rounded px-6 py-3 font-black uppercase";
 
+/** Pick the ability and whether to use its mastered version (mastery must be earned). */
+function AbilityTab() {
+  useProgress();
+  const cur = useAbility();
+  const choose = (id: (typeof ABILITY_LIST)[number]["id"], mastered: boolean) => {
+    if (getAbility() !== id) {
+      setAbility(id);
+      G.abilityCd = 0;
+      G.abilityCharges = id === "wall" ? 6 : id === "trampoline" ? 3 : 1;
+    }
+    if (hasMastery(id)) setMasteryOn(id, mastered);
+  };
+  return (
+    <div className="space-y-3">
+      <p className="text-xs uppercase tracking-widest opacity-70">Changes apply instantly. Mastered versions unlock by earning their achievement.</p>
+      {ABILITY_LIST.map((a) => {
+        const has = hasMastery(a.id);
+        const on = cur === a.id && masteryOn(a.id);
+        const base = cur === a.id && !on;
+        return (
+          <div key={a.id} className="flex items-center gap-4 rounded border-2 border-hud/30 p-3">
+            <div className="text-3xl">{a.icon}</div>
+            <div className="min-w-0 flex-1">
+              <div className="text-lg font-black uppercase">{a.name}</div>
+              <div className="text-xs opacity-70">{a.desc}</div>
+            </div>
+            <button className={`${btn} border-2 py-2 ${base ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"}`} onClick={() => choose(a.id, false)}>
+              Normal
+            </button>
+            <button
+              disabled={!has}
+              title={has ? "" : "Earn this ability's achievement to unlock"}
+              className={`${btn} border-2 py-2 ${on ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"} ${has ? "" : "cursor-not-allowed opacity-40"}`}
+              onClick={() => choose(a.id, true)}
+            >
+              {has ? "Mastered" : "Mastered 🔒"}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Training sandbox menu: opened with Enter, changes only take effect on Close (or Enter again). */
 export function TrainingMenu() {
   useTick(150);
@@ -50,10 +96,11 @@ export function TrainingMenu() {
   const [browns, setBrowns] = useState(1);
   const [blues, setBlues] = useState(1);
   const [delay, setDelay] = useState(0);
+  const [tab, setTab] = useState<"settings" | "abilities">("settings");
 
   // fresh draft every time the menu opens
   useEffect(() => {
-    if (open) { setDraft({ ...TRAIN }); setQueue([]); }
+    if (open) { setDraft({ ...TRAIN }); setQueue([]); setTab("settings"); }
   }, [open]);
 
   const close = (apply: boolean) => {
@@ -100,9 +147,25 @@ export function TrainingMenu() {
           <span className="text-xs uppercase tracking-widest opacity-70">Enter = close &amp; apply</span>
         </div>
 
-        <div className="grid gap-8 md:grid-cols-2">
+        <div className="mb-5 flex gap-2">
+          {(["settings", "abilities"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`${btn} border-2 py-2 ${tab === t ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"}`}
+            >
+              {t === "settings" ? "Settings" : "Abilities"}
+            </button>
+          ))}
+        </div>
+
+        {tab === "abilities" && <AbilityTab />}
+
+        <div className={`grid gap-8 md:grid-cols-2 ${tab === "abilities" ? "hidden" : ""}`}>
           <section>
             <h3 className="mb-2 text-lg font-black uppercase tracking-widest text-crosshair">Spawn</h3>
+            <Slider label="Brown health" value={draft.brownHp} min={5} max={50} step={1} onChange={set("brownHp")} />
+            <Slider label="Blue health" value={draft.blueHp} min={5} max={50} step={1} onChange={set("blueHp")} />
             <Slider label="Spawn after" value={delay} min={0} max={30} step={1} unit="s" onChange={setDelay} />
             <div className="mt-3 flex flex-wrap items-end gap-3">
               <NumBox label="Brown tables" value={browns} min={1} max={40} onChange={setBrowns} />

@@ -787,33 +787,67 @@ export function World() {
   };
   const meHurtable = () => G.mode === "pvp" || NET.kind === "pvp" || NET.kind === "lobby";
   /** Teleport bomb: everything in the blast (never me) is sent to the crosshair spot and stunned 2s. */
-  const teleBlast = (at: THREE.Vector3, r: number, dest: THREE.Vector3) => {
-    const moved: { id: string; x: number; y: number; z: number }[] = [];
-    const to = [dest.x, Math.max(0, dest.y), dest.z];
+  /** White teleport bomb: swap with whoever is in the blast.
+   *  - 1 target: you take their spot, they take yours
+   *  - many targets: they all go to your spot; you go to the average of theirs
+   */
+  const teleBlast = (at: THREE.Vector3, r: number, _dest?: THREE.Vector3) => {
+    const my = pos.current;
+    const myFrom = { x: my.x, y: my.y, z: my.z };
+    type Hit = { id: string; x: number; y: number; z: number; kind: "t" | "b" | "p"; i?: number };
+    const hits: Hit[] = [];
     for (let i = 0; i < tables.length; i++) {
-      const t = tables[i]!;
-      if (!t.alive || t.pos.distanceTo(at) >= r) continue;
-      moved.push({ id: `t${i}`, x: t.pos.x, y: t.pos.y, z: t.pos.z });
-      shove("t", i, { tp: to });
-      abilityStun.current.set(`t${i}`, 2);
+      const tb = tables[i]!;
+      if (!tb.alive || tb.pos.distanceTo(at) >= r) continue;
+      hits.push({ id: `t${i}`, x: tb.pos.x, y: tb.pos.y, z: tb.pos.z, kind: "t", i });
     }
     for (let i = 0; i < blues.length; i++) {
       const u = blues[i]!;
       if (!u.alive || u.pos.distanceTo(at) >= r) continue;
-      moved.push({ id: `b${i}`, x: u.pos.x, y: u.pos.y, z: u.pos.z });
-      shove("b", i, { tp: to });
-      abilityStun.current.set(`b${i}`, 2);
+      hits.push({ id: `b${i}`, x: u.pos.x, y: u.pos.y, z: u.pos.z, kind: "b", i });
     }
     if (meHurtable()) {
       for (const pr of NET.peers.values()) {
         if (pr.dead || pr.id === myId()) continue;
         if (tmpV.set(pr.x, pr.y + PVP_CENTER_Y, pr.z).distanceTo(at) >= r + PVP_HITBOX) continue;
-        moved.push({ id: pr.id, x: pr.x, y: pr.y, z: pr.z });
-        hitPeer(pr.id, 0, true, 2, { tp: to });
+        hits.push({ id: pr.id, x: pr.x, y: pr.y, z: pr.z, kind: "p" });
       }
     }
+    if (!hits.length) {
+      tbMoved.current = [];
+      return;
+    }
+    // Average / middle of everyone caught (single target ⇒ that position)
+    let sx = 0, sy = 0, sz = 0;
+    for (const h of hits) { sx += h.x; sy += h.y; sz += h.z; }
+    const n = hits.length;
+    const mid = [sx / n, Math.max(0, sy / n), sz / n] as [number, number, number];
+    // Everyone caught → your old position
+    const myTo = [myFrom.x, Math.max(0, myFrom.y), myFrom.z] as [number, number, number];
+    const moved: { id: string; x: number; y: number; z: number }[] = [];
+    for (const h of hits) {
+      moved.push({ id: h.id, x: h.x, y: h.y, z: h.z });
+      if (h.kind === "t" && h.i != null) {
+        shove("t", h.i, { tp: myTo });
+        abilityStun.current.set(h.id, 2);
+      } else if (h.kind === "b" && h.i != null) {
+        shove("b", h.i, { tp: myTo });
+        abilityStun.current.set(h.id, 2);
+      } else if (h.kind === "p") {
+        hitPeer(h.id, 0, true, 2, { tp: myTo });
+      }
+    }
+    // You → middle of caught targets (or the one target's spot)
+    moved.push({ id: "me", x: myFrom.x, y: myFrom.y, z: myFrom.z });
+    my.set(mid[0], mid[1], mid[2]);
+    // Soft clamp to arena
+    const rr = Math.hypot(my.x, my.z);
+    if (rr > R - 3) { my.x *= (R - 3) / rr; my.z *= (R - 3) / rr; }
+    my.y = Math.max(0, my.y);
+    grounded.current = false;
     tbMoved.current = moved;
-    if (moved.length) playSfxShared("teleport_success");
+    playSfxShared("teleport_success");
+    G.shake = Math.max(G.shake, 0.25);
   };
   /** Trampoline mastery: a pad bursts when reset — 5 damage, survivors are slammed to the ground and stunned 2s. Never hurts me. */
   const springBlast = (pad: { cx: number; cy: number; cz: number }) => {
@@ -1871,7 +1905,10 @@ const kd = (e: KeyboardEvent) => {
           // Teleport mastery: send everything my teleport bomb moved back to where it was
           for (const mv of tbMoved.current) {
             const to = [mv.x, mv.y, mv.z];
-            if (mv.id.startsWith("t")) shove("t", +mv.id.slice(1), { tp: to });
+            if (mv.id === "me") {
+              pos.current.set(mv.x, mv.y, mv.z);
+              grounded.current = false;
+            } else if (mv.id.startsWith("t")) shove("t", +mv.id.slice(1), { tp: to });
             else if (mv.id.startsWith("b") && mv.id !== "boss") shove("b", +mv.id.slice(1), { tp: to });
             else if (meHurtable()) hitPeer(mv.id, 0, false, undefined, { tp: to });
           }

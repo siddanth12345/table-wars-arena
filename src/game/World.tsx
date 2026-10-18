@@ -755,7 +755,7 @@ export function World() {
     if (o && o.alive) applyShove(e, o, `${kind}${i}`);
   };
   const meHurtable = () => G.mode === "pvp" || NET.kind === "pvp" || NET.kind === "lobby";
-  /** Teleport bomb: everything in the blast (never me) is sent to the crosshair spot and stunned 0.5s. */
+  /** Teleport bomb: everything in the blast (never me) is sent to the crosshair spot and stunned 2s. */
   const teleBlast = (at: THREE.Vector3, r: number, dest: THREE.Vector3) => {
     const moved: { id: string; x: number; y: number; z: number }[] = [];
     const to = [dest.x, Math.max(0, dest.y), dest.z];
@@ -764,21 +764,21 @@ export function World() {
       if (!t.alive || t.pos.distanceTo(at) >= r) continue;
       moved.push({ id: `t${i}`, x: t.pos.x, y: t.pos.y, z: t.pos.z });
       shove("t", i, { tp: to });
-      abilityStun.current.set(`t${i}`, 0.5);
+      abilityStun.current.set(`t${i}`, 2);
     }
     for (let i = 0; i < blues.length; i++) {
       const u = blues[i]!;
       if (!u.alive || u.pos.distanceTo(at) >= r) continue;
       moved.push({ id: `b${i}`, x: u.pos.x, y: u.pos.y, z: u.pos.z });
       shove("b", i, { tp: to });
-      abilityStun.current.set(`b${i}`, 0.5);
+      abilityStun.current.set(`b${i}`, 2);
     }
     if (meHurtable()) {
       for (const pr of NET.peers.values()) {
         if (pr.dead || pr.id === myId()) continue;
         if (tmpV.set(pr.x, pr.y + PVP_CENTER_Y, pr.z).distanceTo(at) >= r + PVP_HITBOX) continue;
         moved.push({ id: pr.id, x: pr.x, y: pr.y, z: pr.z });
-        hitPeer(pr.id, 0, true, 0.5, { tp: to });
+        hitPeer(pr.id, 0, true, 2, { tp: to });
       }
     }
     tbMoved.current = moved;
@@ -813,10 +813,10 @@ export function World() {
     G.shake = Math.max(G.shake, 0.35);
   };
   // Fire mastery: the air fireball bounces off whatever it hits (up to 3 times)
-  const bounceFb = (fb: { pos: THREE.Vector3; vel: THREE.Vector3; t: number; traveled: number; b: number }, stepV: THREE.Vector3, wallN?: THREE.Vector3 | null) => {
+  const bounceFb = (fb: { pos: THREE.Vector3; vel: THREE.Vector3; t: number; traveled: number; b: number }, stepV: THREE.Vector3, hitN?: THREE.Vector3 | null, place?: THREE.Vector3 | null) => {
     const q = fb.pos;
     const n = new THREE.Vector3();
-    if (wallN) n.copy(wallN);
+    if (hitN) n.copy(hitN);
     else if (q.y <= 0.3) n.set(0, 1, 0);
     else if (q.y >= ROOM.h) n.set(0, -1, 0);
     else if (Math.hypot(q.x, q.z) >= R - 0.5) n.set(-q.x, 0, -q.z).normalize();
@@ -838,11 +838,14 @@ export function World() {
     if (d < 0) fb.vel.addScaledVector(n, -2 * d);
     else fb.vel.addScaledVector(n, 0.5 * fb.vel.length());
     fb.vel.setLength(spd0);
-    q.addScaledVector(n, 1.5);
+    // move out of whatever was hit so the next step can't hit it again (that used to burn all bounces at once)
+    if (place) q.copy(place);
+    else { q.sub(stepV); q.addScaledVector(n, 0.4); }
     fb.b++;
     fb.traveled = 0;
     fb.t = Math.max(fb.t, 3);
-    stepV.copy(fb.vel).multiplyScalar(stepV.length() / (fb.vel.length() || 1));
+    const sl = stepV.length();
+    stepV.copy(fb.vel).setLength(sl); // keep the per-step distance (it used to jump a whole second of travel)
   };
   // healing ring / party shard: heal, or (when full) reset the bomb cooldown. Returns true if consumed.
   const revivePlayer = (id: string) => {
@@ -2124,19 +2127,42 @@ const kd = (e: KeyboardEvent) => {
             break;
           }
         }
-        if (!hit) hit = tables.some((tb) => tb.alive && q.distanceTo(tmpV.copy(tb.pos).setY(tb.pos.y + 2.6 * tb.s)) < 3.4 * tb.s);
+        // Everything solid stops (and, for a mastered fireball, bounces off) the ball: bots, the boss and players too
+        let bn: THREE.Vector3 | null = wallN, bp: THREE.Vector3 | null = null;
+        const near = (cx: number, cy: number, cz: number, rad: number) => {
+          const dx = q.x - cx, dy = q.y - cy, dz = q.z - cz;
+          if (dx * dx + dy * dy + dz * dz >= rad * rad) return false;
+          bn = new THREE.Vector3(dx, dy, dz);
+          if (bn.lengthSq() < 1e-6) bn.copy(stepV).negate();
+          bn.normalize();
+          bp = new THREE.Vector3(cx, cy, cz).addScaledVector(bn, rad + 1.5);
+          return true;
+        };
+        if (!hit) for (const tb of tables) if (tb.alive && near(tb.pos.x, tb.pos.y + 2.6 * tb.s, tb.pos.z, 3.4 * tb.s)) { hit = true; break; }
+        if (!hit) for (const u of blues) if (u.alive && near(u.pos.x, 2.2, u.pos.z, 4.5)) { hit = true; break; }
         if (!hit && bossLive()) {
           bossBox(_mn, _mx);
-          hit = q.x > _mn.x && q.x < _mx.x && q.y > _mn.y && q.y < _mx.y && q.z > _mn.z && q.z < _mx.z;
-        }
-        if (!hit && mine && canHurtPeers) {
-          for (const pr of NET.peers.values()) {
-            if (pr.dead || pr.id === myId()) continue;
-            if (q.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) < 4) { hit = true; break; }
+          if (q.x > _mn.x && q.x < _mx.x && q.y > _mn.y && q.y < _mx.y && q.z > _mn.z && q.z < _mx.z) {
+            hit = true;
+            const pens = [q.x - _mn.x, _mx.x - q.x, q.y - _mn.y, _mx.y - q.y, q.z - _mn.z, _mx.z - q.z];
+            let bi2 = 0;
+            for (let k = 1; k < 6; k++) if (pens[k]! < pens[bi2]!) bi2 = k;
+            const nn = new THREE.Vector3();
+            nn.setComponent(bi2 >> 1, bi2 & 1 ? 1 : -1);
+            bn = nn;
+            bp = q.clone().addScaledVector(nn, pens[bi2]! + 1.5);
           }
         }
+        if (!hit) {
+          const ownerPid = ownerOf(fb.netId);
+          for (const pr of NET.peers.values()) {
+            if (pr.dead || pr.id === myId() || pr.id === ownerPid) continue;
+            if (near(pr.x, pr.y + 2, pr.z, 4)) { hit = true; break; }
+          }
+          if (!hit && !mine && !G.pvpDead && !G.campaignDead && near(p.x, p.y + 2, p.z, 4)) hit = true; // other people's fireballs also stop on me
+        }
         if (hit && !mine) {
-          if (fb.m && fb.b < 3) bounceFb(fb, stepV, wallN);
+          if (fb.m && fb.b < 3) bounceFb(fb, stepV, bn, bp);
           else fb.active = false;
         } else if (hit) {
           const at = q.clone();
@@ -2169,7 +2195,7 @@ const kd = (e: KeyboardEvent) => {
           }
           boomFx(at, blastR, fb.m ? 3 : 0.45, true, "fire", fb.m ? "#3b82f6" : "", !!fb.m); // mastery blast lingers 3s
           G.shake = Math.max(G.shake, 0.5);
-          if (fb.m && fb.b < 3) bounceFb(fb, stepV, wallN); // Fire mastery: bounce (up to 3×), exploding each time
+          if (fb.m && fb.b < 3) bounceFb(fb, stepV, bn, bp); // Fire mastery: bounce (up to 3×), exploding each time
           else fb.active = false;
         }
       }
@@ -2605,10 +2631,14 @@ const kd = (e: KeyboardEvent) => {
             const push = tmpV.subVectors(p, before);
             if (push.lengthSq() > 1e-8) {
               push.normalize();
-              const into = hv.current.dot(push);
-              if (into < 0) hv.current.addScaledVector(push, -into);
-              const intoY = vy.current * push.y;
-              if (intoY < 0) vy.current -= intoY;
+              // remove only the velocity heading INTO the wall (all three axes together). The old per-axis version
+              // doubled the upward speed when you hit the underside of a wall — that was the big bounce.
+              const into = hv.current.x * push.x + vy.current * push.y + hv.current.z * push.z;
+              if (into < 0) {
+                hv.current.x -= into * push.x;
+                hv.current.z -= into * push.z;
+                vy.current -= into * push.y;
+              }
             }
           }
         }

@@ -71,7 +71,7 @@ export const MASTERY_LINES: Record<AbilityId, string[]> = {
   teleport: [
     "Teleport balls are white.",
     "Anything the ball touches stays stunned from the moment it touches the growing circle until 3 seconds after you teleport.",
-    "TELEPORT BOMB: while Teleport is ready, your bomb is white and teleports everything in its blast to where your crosshair was pointing when you threw it, stunning them 0.5s. The ability then cools down for 3s (the bomb's own cooldown is normal).",
+    "TELEPORT BOMB: while Teleport is ready, your bomb is white and teleports everything in its blast to where your crosshair was pointing when you threw it, stunning them 2s. The ability then cools down for 3s (the bomb's own cooldown is normal).",
     "Press the ability key during that 3s to rewind whatever your teleport bomb moved. (A normal teleport still only rewinds you.)",
     "Bomb thrown while the ability is cooling down (or mid-teleport) is a normal bomb. Normal damage either way.",
   ],

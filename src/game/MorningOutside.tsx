@@ -116,18 +116,27 @@ function GrassTufts() {
 const SKY = {
   day: { color: "#8fc4ee", emissive: "#bcdcf7", ei: 0.55, orb: "#ffffff", r: 52 },
   evening: { color: "#d96c32", emissive: "#a94320", ei: 0.28, orb: "#fff0ad", r: 52 },
-  night: { color: "#0b1430", emissive: "#050a1c", ei: 0.4, orb: "#e8eeff", r: 38 },
+  // Solid black night — no blue-grey cylinder lid seams
+  night: { color: "#000000", emissive: "#000000", ei: 0, orb: "#e8eeff", r: 28 },
 };
 
 export function MorningOutside({ roomRadius }: { roomRadius: number }) {
   const sky = SKY[useSettings().timeOfDay];
   return (
     <group>
-      <mesh position={[0, 520, 0]}>
-        <cylinderGeometry args={[2400, 2400, 1100, 64, 1, true]} />
-        <meshStandardMaterial color={sky.color} emissive={sky.emissive} emissiveIntensity={sky.ei} side={THREE.BackSide} roughness={1} fog={false} />
+      {/* Closed sphere skybox (was an open cylinder — top/bottom showed grey) */}
+      <mesh position={[0, 200, 0]}>
+        <sphereGeometry args={[3200, 48, 32]} />
+        <meshBasicMaterial color={sky.color} side={THREE.BackSide} fog={false} depthWrite={false} />
       </mesh>
-      <mesh position={[-475, 650, -1830]}>
+      {/* Soft fill so day/evening still read a bit luminous without opening a hole */}
+      {sky.ei > 0 && (
+        <mesh position={[0, 200, 0]}>
+          <sphereGeometry args={[3180, 32, 24]} />
+          <meshStandardMaterial color={sky.color} emissive={sky.emissive} emissiveIntensity={sky.ei * 0.35} side={THREE.BackSide} roughness={1} fog={false} depthWrite={false} />
+        </mesh>
+      )}
+      <mesh position={[-475, 650, -1830]} visible={sky.r > 5}>
         <sphereGeometry args={[sky.r, 20, 12]} />
         <meshBasicMaterial color={sky.orb} fog={false} />
       </mesh>

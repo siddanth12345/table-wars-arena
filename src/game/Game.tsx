@@ -25,8 +25,8 @@ import { NET, opponentId } from "./net";
 import { useAccount } from "./account";
 
 const LIGHT = {
-  day: { hemiSky: "#000000", hemiGround: "#8a8f94", hemi: 0.55, amb: 0.28, ambC: "#f2f7ff", sun: 6.5, sunC: "#f6f9ff", bg: "#000000", fog: "#000000", lf: "#eef5ff", lf2: "#b9cde0", lfI: 0.9 },
-  evening: { hemiSky: "#000000", hemiGround: "#24120e", hemi: 0.14, amb: 0.06, ambC: "#ffd0a0", sun: 5.8, sunC: "#ff8b3d", bg: "#000000", fog: "#000000", lf: "#ffb15f", lf2: "#8f4a45", lfI: 0.5 },
+  day: { hemiSky: "#e6f1ff", hemiGround: "#8a8f94", hemi: 0.75, amb: 0.3, ambC: "#f2f7ff", sun: 6.5, sunC: "#f6f9ff", bg: "#8fc4ee", fog: "#a8cce8", lf: "#eef5ff", lf2: "#b9cde0", lfI: 0.9 },
+  evening: { hemiSky: "#ffb36b", hemiGround: "#24120e", hemi: 0.18, amb: 0.06, ambC: "#ffd0a0", sun: 5.8, sunC: "#ff8b3d", bg: "#d96c32", fog: "#b85b32", lf: "#ffb15f", lf2: "#8f4a45", lfI: 0.5 },
   night: { hemiSky: "#000000", hemiGround: "#05060c", hemi: 0.04, amb: 0.02, ambC: "#8fa2d8", sun: 3.2, sunC: "#a9bcff", bg: "#000000", fog: "#000000", lf: "#6f84c4", lf2: "#1c2448", lfI: 0.12 },
 };
 

@@ -30,8 +30,14 @@ function ColorChart({ value, onPick }: { value: string; onPick: (c: string) => v
   );
 }
 
-function OrbitDrag({ yawRef }: { yawRef: React.MutableRefObject<number> }) {
-  const { gl } = useThree();
+function OrbitDrag({
+  yawRef,
+  distRef,
+}: {
+  yawRef: React.MutableRefObject<number>;
+  distRef: React.MutableRefObject<number>;
+}) {
+  const { gl, camera } = useThree();
   const dragging = useRef(false);
   const lastX = useRef(0);
 
@@ -51,23 +57,40 @@ function OrbitDrag({ yawRef }: { yawRef: React.MutableRefObject<number> }) {
       dragging.current = false;
       try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     };
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault();
+      // Scroll up = zoom in, scroll down = zoom out
+      const next = distRef.current + e.deltaY * 0.012;
+      distRef.current = Math.min(22, Math.max(4.5, next));
+    };
     el.addEventListener("pointerdown", down);
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", up);
+    el.addEventListener("wheel", wheel, { passive: false });
     return () => {
       el.removeEventListener("pointerdown", down);
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
+      el.removeEventListener("wheel", wheel);
     };
-  }, [gl, yawRef]);
+  }, [gl, yawRef, distRef]);
+
+  useFrame(() => {
+    // Keep camera looking at the stage center while distance changes
+    const d = distRef.current;
+    const elev = 0.45; // slight top-down
+    camera.position.set(0, d * elev, d);
+    camera.lookAt(0, 1.2, 0);
+  });
 
   return null;
 }
 
 function PreviewScene({ skin }: { skin: Skin }) {
   const yawRef = useRef(0);
+  const distRef = useRef(11);
   const key = skinKey(skin);
   const bot = useMemo(() => createTableBot({ skin, scale: 1.05, emitLight: true, lightIntensity: 1.4 }), [key]);
   const stage = useMemo(() => createStageDisc("#2a2430", skin.lightColor), [skin.lightColor]);
@@ -94,7 +117,7 @@ function PreviewScene({ skin }: { skin: Skin }) {
     <>
       <ambientLight intensity={0.4} />
       <directionalLight position={[6, 12, 4]} intensity={1.5} castShadow />
-      <OrbitDrag yawRef={yawRef} />
+      <OrbitDrag yawRef={yawRef} distRef={distRef} />
       <group ref={root} position={[0, -0.4, 0]}>
         <primitive object={stage} />
         <primitive object={bot} />
@@ -259,7 +282,7 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
             <button type="button" className={btn} onClick={onClose}>Close</button>
           </div>
           <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-full border border-white/10 bg-black/50 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white/70">
-            Drag to rotate · Live 3D preview
+            Drag to rotate · Scroll to zoom · Live 3D preview
           </div>
           <Canvas
             className="h-full w-full flex-1"

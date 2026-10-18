@@ -91,8 +91,8 @@ export const NET_HOOKS = {
 };
 export type EntSnap = { t: number[]; b: number[]; boss: number[] | null; stage: string; bh: number; bm: number; s: number[] };
 /** Ability-mastery extras on a hit: teleport the victim, or pull them toward a point. */
-export type HitExtra = { tp?: number[]; pull?: number[] };
-export type EHit = { k: "t" | "b" | "boss"; i: number; dmg: number; tp?: number[]; pull?: number[] };
+export type HitExtra = { tp?: number[]; pull?: number[]; slam?: number };
+export type EHit = { k: "t" | "b" | "boss"; i: number; dmg: number; tp?: number[]; pull?: number[]; slam?: number };
 
 /** Followers in shared-enemy rooms show the host's enemies instead of simulating their own. */
 export const sharesEnemies = () => NET.online && (NET.kind === "coop" || NET.kind === "lobby");
@@ -151,7 +151,7 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
   });
   ch.on("broadcast", { event: "hit" }, ({ payload }) => {
     if (payload.to !== id) return;
-    if (NET.kind === "pvp" ? NET.stage === "playing" : true) NET_HOOKS.onHit(payload.dmg as number, !!payload.stun, payload.stunT as number | undefined, { tp: payload.tp as number[] | undefined, pull: payload.pull as number[] | undefined });
+    if (NET.kind === "pvp" ? NET.stage === "playing" : true) NET_HOOKS.onHit(payload.dmg as number, !!payload.stun, payload.stunT as number | undefined, { tp: payload.tp as number[] | undefined, pull: payload.pull as number[] | undefined, slam: payload.slam as number | undefined });
   });
   ch.on("broadcast", { event: "vfx" }, ({ payload }) => {
     NET_HOOKS.onVfx(payload as Record<string, unknown>);
@@ -305,7 +305,7 @@ export function hitPeer(to: string, dmg: number, stun = false, stunT?: number, e
   // No friendly fire in party modes (kind "coop" = party campaign / party training); only 1v1 and lobbies let players hurt each other.
   const ok = NET.kind === "pvp" ? NET.stage === "playing" : NET.kind === "lobby";
   if (!ok) return;
-  send("hit", { to, dmg, stun, ...(stunT != null ? { stunT } : {}), ...(extra?.tp ? { tp: extra.tp } : {}), ...(extra?.pull ? { pull: extra.pull } : {}) });
+  send("hit", { to, dmg, stun, ...(stunT != null ? { stunT } : {}), ...(extra?.tp ? { tp: extra.tp } : {}), ...(extra?.pull ? { pull: extra.pull } : {}), ...(extra?.slam ? { slam: extra.slam } : {}) });
 }
 /** Host enemies hurting another player in a shared-enemy room. */
 export function enemyHitPeer(to: string, dmg: number) {

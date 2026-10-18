@@ -58,7 +58,7 @@ export const MASTERY_LINES: Record<AbilityId, string[]> = {
   ],
   trampoline: [
     "Pads turn red with a gold coil.",
-    "Resetting your trampolines makes every pad EXPLODE: 5 damage, and anything hurt is pulled toward the middle of the blast (if it survives).",
+    "Resetting your trampolines makes every pad EXPLODE in a huge blast: 5 damage, and anything that survives is slammed straight down (all other motion cancelled) and stunned for 2s once it hits the ground.",
     "Trampoline cooldown is 1.5s shorter (3.5s).",
     "Never hurts you or your teammates.",
   ],

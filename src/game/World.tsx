@@ -434,6 +434,7 @@ export function World() {
   /** targets moved by my teleport bomb (so the ability key can rewind them) */
   const tbMoved = useRef<{ id: string; x: number; y: number; z: number }[]>([]);
   const tpRefresh = useRef(0);
+  const slamStun = useRef({ dur: 0, exp: 0 });
   /** ability-applied stun timers (seconds left) for bots — real freeze */
   const abilityStun = useRef(new Map<string, number>());
   const teleportMeshRef = useRef<THREE.Mesh | null>(null);
@@ -736,16 +737,22 @@ export function World() {
     orientLocal(_la, x - w.cx, y - w.cy, z - w.cz, w.yaw, w.pitch);
     return Math.abs(_la.x) <= w.hw + mg && Math.abs(_la.y) <= w.hh + mg && Math.abs(_la.z) <= w.hd + mg;
   };
-  type Shove = { pull?: number[]; tp?: number[] };
-  const applyShove = (e: Shove, at: THREE.Vector3) => {
+  type Shove = { pull?: number[]; tp?: number[]; slam?: number };
+  const applyShove = (e: Shove, o: { pos: THREE.Vector3; vy?: number }, id: string) => {
+    const at = o.pos;
     if (e.tp) { at.x = e.tp[0]!; at.z = e.tp[2]!; }
     else if (e.pull) { at.x += (e.pull[0]! - at.x) * 0.6; at.z += (e.pull[2]! - at.z) * 0.6; }
+    if (e.slam) {
+      // straight down, all other motion cancelled, frozen for `slam` seconds once it is on the ground
+      if ("vy" in o) o.vy = -250;
+      abilityStun.current.set(id, e.slam + Math.max(0, at.y) / 250 + 0.1);
+    }
   };
   /** move a bot: pulled toward a point or teleported. Followers ask the host to do it. */
   const shove = (kind: "t" | "b", i: number, e: Shove) => {
     if (isFollower()) { sendNet("ehit", { k: kind, i, dmg: 0, ...e }); return; }
     const o = kind === "t" ? tables[i] : blues[i];
-    if (o && o.alive) applyShove(e, o.pos);
+    if (o && o.alive) applyShove(e, o, `${kind}${i}`);
   };
   const meHurtable = () => G.mode === "pvp" || NET.kind === "pvp" || NET.kind === "lobby";
   /** Teleport bomb: everything in the blast (never me) is sent to the crosshair spot and stunned 0.5s. */
@@ -777,29 +784,28 @@ export function World() {
     tbMoved.current = moved;
     if (moved.length) playSfxShared("teleport_success");
   };
-  /** Trampoline mastery: a pad bursts when reset — 5 damage, survivors are pulled to the middle. Never hurts me. */
+  /** Trampoline mastery: a pad bursts when reset — 5 damage, survivors are slammed to the ground and stunned 2s. Never hurts me. */
   const springBlast = (pad: { cx: number; cy: number; cz: number }) => {
     const at = new THREE.Vector3(pad.cx, pad.cy, pad.cz);
-    const r = TABLE_W * 3.5;
-    const c = [at.x, at.y, at.z];
+    const r = TABLE_W * 14; // 4× bigger blast
     for (let i = 0; i < tables.length; i++) {
       const tb = tables[i]!;
       if (!tb.alive || at.distanceTo(tmpV.set(tb.pos.x, tb.pos.y + 2 * tb.s, tb.pos.z)) >= r + 3 * tb.s) continue;
       hitTable(tb, 5);
-      if (tb.alive) shove("t", i, { pull: c });
+      if (tb.alive) shove("t", i, { slam: 2 });
     }
     for (let i = 0; i < blues.length; i++) {
       const u = blues[i]!;
       if (!u.alive || at.distanceTo(tmpV.set(u.pos.x, 2, u.pos.z)) >= r + 4) continue;
       hitBlue(u, 5);
-      if (u.alive) shove("b", i, { pull: c });
+      if (u.alive) shove("b", i, { slam: 2 });
     }
     if (bossLive() && boss.current.landed && distToBossBox(at) < r) hitBoss(Math.max(1, Math.round(5 / DMG)));
     if (meHurtable()) {
       for (const pr of NET.peers.values()) {
         if (pr.dead || pr.id === myId()) continue;
         if (at.distanceTo(tmpV.set(pr.x, pr.y + 2, pr.z)) >= r + 4) continue;
-        hitPeer(pr.id, 5, false, undefined, { pull: c });
+        hitPeer(pr.id, 5, false, undefined, { slam: 2 });
         noteDmg(5, pr.id, pr.x, pr.y + 2, pr.z);
       }
     }
@@ -1388,7 +1394,7 @@ const kd = (e: KeyboardEvent) => {
 
   NET_HOOKS.onEnts = (snap) => { snapRef.current = snap; };
   NET_HOOKS.onEhit = (h) => {
-    const mv = h.pull || h.tp ? { pull: h.pull, tp: h.tp } : null;
+    const mv = h.pull || h.tp || h.slam ? { pull: h.pull, tp: h.tp, slam: h.slam } : null;
     if (h.dmg > 0 || !mv) {
       if (h.k === "t") { const t = tables[h.i]; if (t) hitTable(t, h.dmg); }
       else if (h.k === "b") { const u = blues[h.i]; if (u) hitBlue(u, h.dmg); }
@@ -1396,7 +1402,7 @@ const kd = (e: KeyboardEvent) => {
     }
     if (mv && (h.k === "t" || h.k === "b")) {
       const o = h.k === "t" ? tables[h.i] : blues[h.i];
-      if (o?.alive) applyShove(mv, o.pos);
+      if (o?.alive) applyShove(mv, o, `${h.k}${h.i}`);
     }
   };
   NET_HOOKS.onEspawn = (q) => {
@@ -1407,6 +1413,13 @@ const kd = (e: KeyboardEvent) => {
   NET_HOOKS.onHit = (d, stun, stunT, extra) => {
     if (d > 0) damagePlayer(d);
     if (extra?.tp && !G.pvpDead && !G.campaignDead) pos.current.set(extra.tp[0]!, extra.tp[1]!, extra.tp[2]!);
+    if (extra?.slam && !G.pvpDead && !G.campaignDead && G.playerHp > 0) {
+      // slammed straight down: cancel every other velocity; the stun starts once I touch the ground
+      hv.current.set(0, 0, 0);
+      vy.current = -250;
+      grounded.current = false;
+      slamStun.current = { dur: extra.slam, exp: 8 };
+    }
     if (extra?.pull && !G.pvpDead && !G.campaignDead && G.playerHp > 0) {
       const dx = extra.pull[0]! - pos.current.x, dy = extra.pull[1]! - pos.current.y, dz = extra.pull[2]! - pos.current.z;
       const l = Math.hypot(dx, dy, dz) || 1;
@@ -1757,6 +1770,11 @@ const kd = (e: KeyboardEvent) => {
         const ab = getAbility();
         G.abilityCharges = ab === "wall" ? 6 : ab === "trampoline" ? 3 : 1;
       }
+    }
+    if (slamStun.current.dur > 0) {
+      slamStun.current.exp -= dt;
+      if (grounded.current) { G.stun = Math.max(G.stun, slamStun.current.dur); slamStun.current.dur = 0; }
+      else if (slamStun.current.exp <= 0) slamStun.current.dur = 0;
     }
     if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
     if (abilityReq.current && G.phase === "playing" && G.locked && !G.freecam && G.countdown <= 0.6 && G.stun <= 0 && !G.pvpDead && !G.campaignDead) {

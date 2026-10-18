@@ -11,6 +11,7 @@ import { G } from "./state";
  */
 
 export type AchievementId =
+  | "wasting_your_time"
   | "bricked_master" | "cant_catch_me_now" | "hot_stuff" | "now_you_see_me"
   | "great_potential" | "down_you_go" | "down_you_go_friends"
   | "speedrunner" | "faster_than_light" | "hacker"
@@ -109,6 +110,12 @@ export const ACHIEVEMENTS: Achievement[] = [
     id: "mastery_king", name: "Mastery King", icon: "🪑",
     summary: "The collector.",
     how: "Earn all four ability masteries (Wall, Trampoline, Fire, Teleport).",
+  },
+  {
+    id: "wasting_your_time", name: "Your Wasting Your Time", icon: "🪑",
+    summary: "just play the game.",
+    how: "???",
+    secret: true,
   },
 ];
 
@@ -316,6 +323,21 @@ export function resetProgress() {
 }
 
 /** Cosmetic unlock helpers for skins */
+/** Home / loading green-table wall hits toward "Your Wasting Your Time". */
+let homeBounces = 0;
+export function getHomeBounces() { return homeBounces; }
+export function noteHomeTableBounce() {
+  if (progress.earned.wasting_your_time) return;
+  homeBounces++;
+  bump();
+  if (homeBounces >= 150) award("wasting_your_time");
+}
+
+export function legUnlocked(id: string) {
+  if (id === "nolegs") return !!progress.earned.wasting_your_time;
+  return true;
+}
+
 export function decorationUnlocked(id: string) {
   if (id === "trophy") return hasAchievement("champ");
   if (id === "crown") return hasAchievement("king");

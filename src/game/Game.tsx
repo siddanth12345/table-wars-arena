@@ -18,6 +18,7 @@ import { ACHIEVEMENTS, clearJustUnlocked, getJustUnlocked } from "./mastery";
 import { getAbility, ABILITY_LIST } from "./abilities";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
+import { HomeBounceTable } from "./HomeBounceTable";
 import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
 import { ChatBar, ChatResumeCatcher } from "./ChatBar";
 import { NET, opponentId } from "./net";
@@ -552,7 +553,8 @@ function Home() {
   if (G.phase !== "home") return null;
   return (
     <div className="fixed inset-0 z-20 flex bg-hud-scrim/40 font-mono text-hud">
-      <div className="flex w-full max-w-md flex-col justify-center bg-hud-panel/70 p-10 backdrop-blur-[2px]">
+      <HomeBounceTable />
+      <div className="relative z-20 flex w-full max-w-md flex-col justify-center bg-hud-panel/70 p-10 backdrop-blur-[2px]">
         <h1 className="text-7xl font-black leading-none tracking-tight">TBLE</h1>
         <p className="mt-3 text-sm opacity-70">Break every table. Survive the red boss.</p>
         <div className="mt-10 flex flex-col gap-3">

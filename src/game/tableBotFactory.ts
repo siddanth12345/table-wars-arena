@@ -53,6 +53,7 @@ function addEyes(g: THREE.Group, design: EyeDesign, color: string, ghost: boolea
 }
 
 function addLegs(g: THREE.Group, design: LegDesign, primary: string, ghost: boolean) {
+  if (design === "nolegs") return; // floating tabletop
   const legColor = darken(primary, 0.28);
   const opacity = ghost ? 0.35 : 1;
   const m = mat(legColor, { transparent: ghost, opacity, roughness: 0.4 });

@@ -5,7 +5,7 @@ import {
   applySkin, useSkin, COLOR_CHART, EYE_DESIGNS, DECORATIONS, TOP_DECORATIONS, LEG_DESIGNS,
   type Skin, type EyeDesign, type TableDecoration, type TopDecoration, type LegDesign,
 } from "./skins";
-import { decorationUnlocked, useProgress } from "./mastery";
+import { decorationUnlocked, legUnlocked, useProgress } from "./mastery";
 import { createStageDisc, createTableBot, skinKey } from "./tableBotFactory";
 
 const btn = "rounded-xl border-2 border-white/20 bg-black/50 px-3 py-2 text-sm font-bold uppercase tracking-wide text-white hover:bg-white/10 transition";
@@ -141,7 +141,8 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
   // Locked deco selected for preview only — block save until cleared
   const decoLocked = !decorationUnlocked(draft.decoration);
   const topLocked = draft.decoration === "stack" && !decorationUnlocked(draft.topDecoration ?? "none");
-  const canSave = !decoLocked && !topLocked;
+  const legLocked = !legUnlocked(draft.legDesign);
+  const canSave = !decoLocked && !topLocked && !legLocked;
 
   const trySave = () => {
     if (!canSave) {
@@ -175,11 +176,22 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
             <div>
               <p className="mb-2 text-xs font-bold uppercase tracking-widest opacity-70">Leg design</p>
               <div className="flex flex-wrap gap-2">
-                {LEG_DESIGNS.map((e) => (
-                  <button key={e.id} type="button" className={draft.legDesign === e.id ? btnOn : btn} onClick={() => set("legDesign", e.id as LegDesign)}>
-                    {e.label}
-                  </button>
-                ))}
+                {LEG_DESIGNS.map((e) => {
+                  const locked = !legUnlocked(e.id);
+                  const selected = draft.legDesign === e.id;
+                  const cls = locked ? (selected ? btnLockedOn : btnLocked) : (selected ? btnOn : btn);
+                  return (
+                    <button
+                      key={e.id}
+                      type="button"
+                      title={locked ? `Preview only — needs ${e.needs ?? "achievement"} to save` : e.label}
+                      className={cls}
+                      onClick={() => set("legDesign", e.id as LegDesign)}
+                    >
+                      {locked ? `🔒 ${e.label}` : e.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -233,6 +245,11 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
               {(decoLocked || topLocked) && (
                 <p className="mt-2 text-[11px] leading-relaxed text-amber-200/90">
                   Locked decoration is only a preview. Earn the achievement to save it.
+                </p>
+              )}
+              {legLocked && (
+                <p className="mt-2 text-[11px] leading-relaxed text-amber-200/90">
+                  Locked leg design is only a preview. Earn the achievement to save it.
                 </p>
               )}
             </div>

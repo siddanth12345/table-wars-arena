@@ -2,6 +2,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { initAccount } from "./account";
+import { noteHomeTableBounce } from "./mastery";
 import { supabase } from "@/integrations/supabase/client";
 
 const SIZE = 220;
@@ -77,10 +78,10 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
         P.x += P.vx * dt;
         P.y += P.vy * dt;
         const W = window.innerWidth - SIZE, H = window.innerHeight - SIZE;
-        if (P.x < 0) { P.x = 0; P.vx = Math.abs(P.vx) * 0.92; spin.current = -spin.current; }
-        if (P.x > W) { P.x = W; P.vx = -Math.abs(P.vx) * 0.92; spin.current = -spin.current; }
-        if (P.y < 0) { P.y = 0; P.vy = Math.abs(P.vy) * 0.92; }
-        if (P.y > H) { P.y = H; P.vy = -Math.abs(P.vy) * 0.92; }
+        if (P.x < 0) { P.x = 0; P.vx = Math.abs(P.vx) * 0.92; spin.current = -spin.current; noteHomeTableBounce(); }
+        if (P.x > W) { P.x = W; P.vx = -Math.abs(P.vx) * 0.92; spin.current = -spin.current; noteHomeTableBounce(); }
+        if (P.y < 0) { P.y = 0; P.vy = Math.abs(P.vy) * 0.92; noteHomeTableBounce(); }
+        if (P.y > H) { P.y = H; P.vy = -Math.abs(P.vy) * 0.92; noteHomeTableBounce(); }
         const sp = Math.hypot(P.vx, P.vy);
         if (sp < 120) { P.vx *= 1.01; P.vy *= 1.01; } // keep it drifting
         if (sp > 3000) { P.vx *= 0.98; P.vy *= 0.98; }

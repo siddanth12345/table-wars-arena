@@ -23,7 +23,7 @@ export type EyeDesign = "boss" | "square" | "triangle";
 export type TableDecoration = "none" | "plates" | "rug" | "office" | "birthday" | "trophy" | "crown" | "stack" | "throne";
 /** Only used when decoration is stack — sits on the upper table. */
 export type TopDecoration = "none" | "trophy" | "crown";
-export type LegDesign = "triangle" | "conic" | "minimal" | "oneleg";
+export type LegDesign = "triangle" | "conic" | "minimal" | "oneleg" | "nolegs";
 
 export type Skin = {
   eyeColor: string;
@@ -112,9 +112,10 @@ export const TOP_DECORATIONS: { id: TopDecoration; label: string; needs?: string
   { id: "crown", label: "Crown (top)", needs: "King" },
 ];
 
-export const LEG_DESIGNS: { id: LegDesign; label: string }[] = [
+export const LEG_DESIGNS: { id: LegDesign; label: string; needs?: string }[] = [
   { id: "triangle", label: "Triangle" },
   { id: "conic", label: "Default conic" },
   { id: "minimal", label: "Minimalistic" },
   { id: "oneleg", label: "One-legged" },
+  { id: "nolegs", label: "No legs", needs: "Your Wasting Your Time" },
 ];

@@ -47,7 +47,7 @@ export function AchievementsPanel({ onClose }: { onClose: () => void }) {
                   <div className="min-w-0 flex-1">
                     <div className="text-lg font-black uppercase tracking-wide">{name}</div>
                     <div className="text-xs opacity-70">
-                      {got ? (a.summary || a.masteryName || "Earned") : a.secret ? "???" : a.summary}
+                      {got ? (a.summary || a.masteryName || "Earned") : (a.summary || (a.secret ? "???" : ""))}
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-col gap-2">

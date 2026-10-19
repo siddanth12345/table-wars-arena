@@ -86,6 +86,18 @@ const R = ROOM.r;
 // 1v1 storm: starts 60s into a round, closes in from the arena edge at 30 u/s, 5 dmg every 0.6s while inside
 const STORM_SPEED = 30, STORM_DMG = 5, STORM_TICK = 0.6;
 const UP = new THREE.Vector3(0, 1, 0);
+const BOSS_BLADE_SHAPE = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(-13, -0.8);
+  shape.lineTo(-10.5, -1.15);
+  shape.lineTo(8.5, -0.65);
+  shape.lineTo(13, 0);
+  shape.lineTo(8.5, 0.65);
+  shape.lineTo(-10.5, 1.15);
+  shape.lineTo(-13, 0.8);
+  shape.closePath();
+  return shape;
+})();
 
 type Bullet = { pos: THREE.Vector3; prev: THREE.Vector3; vel: THREE.Vector3; life: number; alive: boolean; dmg: number };
 type Table = {
@@ -4433,7 +4445,7 @@ const kd = (e: KeyboardEvent) => {
       ))}
       <group ref={(m) => { bossSwordMesh.current = m; }} visible={false}>
         <mesh castShadow>
-          <shapeGeometry args={[new THREE.Shape().moveTo(-13, -0.8).lineTo(-10.5, -1.15).lineTo(8.5, -0.65).lineTo(13, 0).lineTo(8.5, 0.65).lineTo(-10.5, 1.15).lineTo(-13, 0.8).closePath(), 1]} />
+          <shapeGeometry args={[BOSS_BLADE_SHAPE, 1]} />
           <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
         </mesh>
         <mesh position={[-4, 0, 0.7]}>

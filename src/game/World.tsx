@@ -1731,6 +1731,10 @@ const kd = (e: KeyboardEvent) => {
       G.abilitySlow = 0;
       MAP.health = [];
       hazards.forEach((h) => (h.active = false));
+      bossSword.current.active = false;
+      bossSword.current.returning = false;
+      bossSword.current.hitTargets.clear();
+      bossSword.current.solidObjects.clear();
       waves.forEach((w) => (w.active = false));
       bomb.current.alive = false;
       slam.current.on = false;

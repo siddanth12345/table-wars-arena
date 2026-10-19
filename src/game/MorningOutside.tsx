@@ -116,7 +116,7 @@ function GrassTufts() {
 
 /**
  * Sky textures + dome.
- * Night Milky Way (simplified from real structure):
+ * Night sky: black with scattered stars. (Old galaxy notes below no longer apply.)
  * - Thin galactic plane band across the sky
  * - Yellowish central bulge (stellar population in the core)
  * - Dark dust lane (Great Rift) cutting the band
@@ -196,27 +196,7 @@ function makeDayEveningTexture(kind: "day" | "evening") {
   return tex;
 }
 
-// ---- procedural Milky Way (seamless noise, equirectangular; galactic plane = texture equator) ----
-function vnoise(x: number, y: number) {
-  const xi = Math.floor(x), yi = Math.floor(y);
-  const xf = x - xi, yf = y - yi;
-  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
-  const a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-}
-function fbm(x: number, y: number, oct = 5) {
-  let sum = 0, amp = 0.5, f = 1;
-  for (let i = 0; i < oct; i++) { sum += amp * vnoise(x * f, y * f); f *= 2.03; amp *= 0.5; }
-  return sum;
-}
-/** Longitude of the galactic centre on the texture (0..1). */
-const MW_BULGE_U = 0.3;
-/** Seamless noise: depends on longitude only through cos/sin, so the texture wraps without a seam. */
-function ringNoise(u: number, lat: number, ringR: number, latS: number, seed: number, oct = 5) {
-  const th = u * Math.PI * 2;
-  return fbm(Math.cos(th) * ringR + seed, Math.sin(th) * ringR + lat * latS + seed * 0.37, oct);
-}
-
+/** Night sky: plain black with stars scattered here and there (no galaxy). */
 function makeMilkyWayTexture() {
   const W = 4096, H = 2048;
   const c = document.createElement("canvas");
@@ -224,124 +204,36 @@ function makeMilkyWayTexture() {
   const ctx = c.getContext("2d")!;
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);
-
-  // 1) soft glow, dust lanes and nebulae computed at low resolution, then smoothly scaled up
-  const lw = 768, lh = 384;
-  const low = document.createElement("canvas");
-  low.width = lw; low.height = lh;
-  const lctx = low.getContext("2d")!;
-  const img = lctx.createImageData(lw, lh);
-  const wrapDl = (u: number) => { let d = u - MW_BULGE_U; d -= Math.round(d); return d * Math.PI * 2; }; // radians from the core, -π..π
-  for (let py = 0; py < lh; py++) {
-    const lat = (0.5 - (py + 0.5) / lh) * Math.PI; // galactic latitude
-    for (let px = 0; px < lw; px++) {
-      const u = (px + 0.5) / lw;
-      const dl = wrapDl(u);
-      const core = Math.exp(-((dl / 0.62) ** 2));           // 1 at the galactic centre
-      const sigma = 0.075 + 0.17 * core;                    // band is thicker toward the core
-      const prof = Math.exp(-0.5 * (lat / sigma) ** 2);
-      const halo = Math.exp(-0.5 * (lat / (sigma * 2.6)) ** 2) * 0.28;
-      // clumpy star clouds + patchy structure
-      const cloud = 0.45 + 1.15 * ringNoise(u, lat, 5.5, 9, 3.1, 5);
-      const fine = 0.7 + 0.6 * ringNoise(u, lat, 18, 30, 8.7, 3);
-      // dust: Great Rift down the middle + filaments across the band
-      const rift = Math.exp(-0.5 * ((lat - 0.018 * Math.sin(dl * 2.4)) / (sigma * 0.16)) ** 2) * (0.35 + 0.65 * core) * Math.max(0, Math.min(1, (dl + 1.1) / 0.5)) * Math.max(0, Math.min(1, (2.3 - dl) / 0.6));
-      const fil = Math.max(0, ringNoise(u, lat, 11, 26, 5.3, 5) - 0.5) * 3.2 * prof;
-      const dust = Math.min(0.95, rift * 0.95 + fil * 0.7);
-      let I = (prof * cloud * fine + halo * (0.6 + 0.6 * cloud)) * (0.45 + 0.75 * core + 0.2);
-      I *= 1 - dust;
-      // central bulge (warm, elliptical) + soft wide glow
-      const bulge = Math.exp(-((dl / 0.42) ** 2 + (lat / 0.2) ** 2) * 1.0) * (1 - dust * 0.6);
-      const bulgeWide = Math.exp(-((dl / 0.95) ** 2 + (lat / 0.34) ** 2)) * 0.35 * (1 - dust * 0.4);
-      // emission nebulae (pink/violet) scattered along the plane
-      const neb = Math.max(0, ringNoise(u, lat, 7, 16, 12.9, 4) - 0.56) * 4 * Math.exp(-0.5 * (lat / (sigma * 1.4)) ** 2);
-      // colour: cool blue-white arms, violet edges, warm core
-      const edge = Math.min(1, Math.abs(lat) / (sigma * 1.6));
-      let r = 168 + 40 * edge, g = 178 - 8 * edge, bl = 225 + 10 * edge;
-      const warm = Math.min(1, bulge * 1.4 + bulgeWide * 1.2 + core * 0.35);
-      r = r * (1 - warm) + 255 * warm; g = g * (1 - warm) + 205 * warm; bl = bl * (1 - warm) + 140 * warm;
-      const k = Math.min(1.25, I * 0.9 + bulge * 1.15 + bulgeWide);
-      let R = r * k, G2 = g * k, B = bl * k;
-      R += 255 * neb * 0.55; G2 += 90 * neb * 0.5; B += 190 * neb * 0.6;
-      const o = (py * lw + px) * 4;
-      img.data[o] = Math.max(0, Math.min(255, R));
-      img.data[o + 1] = Math.max(0, Math.min(255, G2));
-      img.data[o + 2] = Math.max(0, Math.min(255, B));
-      img.data[o + 3] = 255;
-    }
-  }
-  lctx.putImageData(img, 0, 0);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.globalCompositeOperation = "lighter";
-  ctx.drawImage(low, 0, 0, W, H);
-  // fine grain so the haze is not a smooth blur when it is magnified
-  for (let i = 0; i < 90000; i++) {
-    const u = hash2(i, 91), lat = (hash2(92, i) - 0.5) * 0.9;
-    const sg = 0.075 + 0.17 * Math.exp(-((wrapDl(u) / 0.62) ** 2));
-    if (hash2(i, 93) > Math.exp(-0.5 * (lat / sg) ** 2) * (0.5 + ringNoise(u, lat, 18, 30, 8.7, 2))) continue;
-    const x = u * W, y = (0.5 - lat / Math.PI) * H;
-    ctx.fillStyle = `rgba(190,200,235,${0.05 + hash2(i, 94) * 0.1})`;
-    ctx.fillRect(x, y, 1.6, 1.6);
-  }
-  ctx.globalCompositeOperation = "source-over";
-
-  // 2) stars. Pole-compensated width so equirectangular stretching doesn't smear them near the poles.
   const star = (u: number, lat: number, size: number, col: string) => {
     const x = u * W, y = (0.5 - lat / Math.PI) * H;
+    // widen near the poles so equirectangular stretching doesn't make stars look squashed
     const wd = Math.min(8, size / Math.max(0.2, Math.cos(lat)));
     ctx.fillStyle = col;
     ctx.fillRect(x - wd / 2, y - size / 2, wd, size);
   };
-  // field stars everywhere (uniform on the sphere, power-law brightness)
-  for (let i = 0; i < 16000; i++) {
+  // a modest number of small stars, uniform over the sphere, mostly dim
+  for (let i = 0; i < 1400; i++) {
     const u = hash2(i, 1), lat = Math.asin(hash2(2, i) * 2 - 1);
-    const m = Math.pow(hash2(i, 7), 3.2);
+    const m = Math.pow(hash2(i, 7), 2.4);
     const roll = hash2(i, 8);
-    const a = 0.25 + m * 0.75;
-    const col = roll > 0.93 ? `rgba(255,190,150,${a})` : roll > 0.8 ? `rgba(170,200,255,${a})` : `rgba(255,255,255,${a})`;
-    star(u, lat, m > 0.55 ? 1.8 : m > 0.2 ? 1.2 : 0.8, col);
-  }
-  // dense stars concentrated in the band (clumped by the same noise as the glow)
-  let placed = 0;
-  for (let i = 0; placed < 90000 && i < 400000; i++) {
-    const u = hash2(i * 1.7, 11);
-    const dl = wrapDl(u);
-    const core = Math.exp(-((dl / 0.62) ** 2));
-    const sg = 0.075 + 0.17 * core;
-    const lat = (hash2(12, i * 1.3) + hash2(13, i * 0.7) + hash2(14, i * 2.1) - 1.5) * 2 * sg * 1.6; // ~gaussian
-    const dens = (0.35 + 1.2 * ringNoise(u, lat, 5.5, 9, 3.1, 3)) * (0.35 + 0.8 * core);
-    if (hash2(i, 15) > Math.min(1, dens * 0.8)) continue;
-    // skip where dust lane sits
-    const rift = Math.exp(-0.5 * ((lat - 0.018 * Math.sin(dl * 2.4)) / (sg * 0.16)) ** 2);
-    if (rift * (0.35 + 0.65 * core) > hash2(i, 16) * 0.95) continue;
-    placed++;
-    const m = Math.pow(hash2(i, 17), 2.6);
-    const warm = hash2(i, 18) < 0.2 + core * 0.45;
     const a = 0.3 + m * 0.7;
-    const col = warm ? `rgba(255,${210 + (m * 40) | 0},${150 + (m * 60) | 0},${a})` : `rgba(${200 + (m * 55) | 0},${215 + (m * 40) | 0},255,${a})`;
-    star(u, lat, m > 0.7 ? 1.5 : m > 0.35 ? 1.0 : 0.7, col);
+    const col = roll > 0.92 ? `rgba(255,205,170,${a})` : roll > 0.78 ? `rgba(175,205,255,${a})` : `rgba(255,255,255,${a})`;
+    star(u, lat, m > 0.6 ? 2 : m > 0.25 ? 1.5 : 1.1, col);
   }
-  // bright stars with glow and a few diffraction spikes
-  for (let i = 0; i < 160; i++) {
+  // a few brighter stars with a soft glow
+  for (let i = 0; i < 40; i++) {
     const u = hash2(i, 70), lat = Math.asin(hash2(71, i) * 2 - 1);
     const x = u * W, y = (0.5 - lat / Math.PI) * H;
-    const r = 3 + hash2(i, 72) * 5;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.2);
+    const r = 3 + hash2(i, 72) * 3;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2);
     g.addColorStop(0, "rgba(255,255,255,1)");
-    g.addColorStop(0.25, "rgba(225,235,255,0.55)");
+    g.addColorStop(0.3, "rgba(225,235,255,0.5)");
     g.addColorStop(1, "rgba(150,170,255,0)");
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(x, y, r * 2.2, 0, Math.PI * 2);
+    ctx.arc(x, y, r * 2, 0, Math.PI * 2);
     ctx.fill();
-    if (hash2(i, 73) > 0.82) {
-      ctx.fillStyle = "rgba(255,255,255,0.55)";
-      ctx.fillRect(x - r * 3.2, y - 0.5, r * 6.4, 1);
-      ctx.fillRect(x - 0.5, y - r * 3.2, 1, r * 6.4);
-    }
   }
-
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
@@ -361,25 +253,11 @@ function SkyDome({ tod }: { tod: "day" | "evening" | "night" }) {
     return makeDayEveningTexture(tod);
   }, [tod]);
   const orb = ORB[tod];
-  // Galaxy orientation: put the galactic centre ~33° above the horizon (away from the moon at (-475, 650, -1830))
-  // and make the band arch up over the sky instead of lying along the horizon / under the ground.
-  const quat = useMemo(() => {
-    const th = Math.PI / 2, ph = MW_BULGE_U * Math.PI * 2;
-    // direction of the texture's bulge texel on three's SphereGeometry
-    const b0 = new THREE.Vector3(-Math.cos(ph) * Math.sin(th), Math.cos(th), Math.sin(ph) * Math.sin(th));
-    const b1 = new THREE.Vector3(0.62, 0.55, -0.56).normalize();
-    const q1 = new THREE.Quaternion().setFromUnitVectors(b0, b1);
-    const up = new THREE.Vector3(0, 1, 0);
-    const n = up.clone().applyQuaternion(q1);                           // current plane normal
-    const nt = new THREE.Vector3().crossVectors(b1, up).normalize();    // wanted: horizontal normal → plane passes the zenith
-    const ang = Math.atan2(new THREE.Vector3().crossVectors(n, nt).dot(b1), n.dot(nt));
-    return new THREE.Quaternion().setFromAxisAngle(b1, ang).multiply(q1);
-  }, []);
 
   return (
     <group>
       {/* ONE opaque sky sphere only — no transparent overlay (fixes polygon ghost) */}
-      <mesh quaternion={tod === "night" ? quat : undefined}>
+      <mesh>
         <sphereGeometry args={[2600, 96, 64]} />
         <meshBasicMaterial map={map} side={THREE.BackSide} fog={false} depthWrite={false} toneMapped={false} />
       </mesh>

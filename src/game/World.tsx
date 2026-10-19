@@ -694,6 +694,10 @@ export function World() {
   function despawnBoss() {
     Object.assign(boss.current, { landed: false, y: ROOM.h, vy: 0 });
     hazards.forEach((h) => (h.active = false));
+    bossSword.current.active = false;
+    bossSword.current.returning = false;
+    bossSword.current.hitTargets.clear();
+    bossSword.current.solidObjects.clear();
     waves.forEach((w) => (w.active = false));
     health.forEach((h) => (h.active = false));
     abilityWalls.forEach((w) => { w.active = false; });

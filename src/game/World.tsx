@@ -105,7 +105,7 @@ type Table = {
   jumpT: number; jumpsLeft: number; dashT: number; dash: THREE.Vector3; bob: number; s: number; yaw: number; summoned: boolean; passive: boolean;
 };
 type Splinter = { pos: THREE.Vector3; vel: THREE.Vector3; rot: THREE.Euler; spin: THREE.Vector3; life: number; size: number };
-type Hazard = { active: boolean; kind: "quarter" | "sword" | "stomp" | "aoe"; t: number; total: number; fx: number; x: number; z: number; a0: number; dmg?: number; owner?: "player" | "boss" };
+type Hazard = { active: boolean; kind: "quarter" | "sword" | "stomp" | "aoe"; t: number; total: number; fx: number; x: number; z: number; a0: number; dmg?: number; owner?: "player" | "boss"; remote?: boolean };
 
 const FX_LIGHTS = 5;
 const BOT_LIGHTS = 6;
@@ -392,7 +392,9 @@ export function World() {
   // Air fireballs (fire ability while airborne) + remote visual bullets
   const makeBossSword = () => ({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), returnHitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>(), stuck: new Map<string, { kind: "t" | "b" | "p"; offset: THREE.Vector3; netAcc: number }>() });
   const bossSwords = useRef([makeBossSword(), makeBossSword(), makeBossSword()]);
-  const bossSwordMeshes = useRef<Array<THREE.Group | null>>([null, null, null]);
+  const bossSwordMeshes = useRef<Array<THREE.Group | null>>([null, null, null, null, null, null]);
+  const swordNetT = useRef<number[]>([0, 0, 0]);
+  const remoteSwords = useRef(Array.from({ length: 3 }, () => ({ id: "", t: 0, pos: new THREE.Vector3(), vel: new THREE.Vector3() })));
   const lastAbilityMode = useRef(G.mode);
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
     active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string, m: false, b: 0, idle: 0,
@@ -426,7 +428,7 @@ export function World() {
   const blueTop = useRef<THREE.InstancedMesh>(null);
   const blueLeg = useRef<THREE.InstancedMesh>(null);
   const boss = useRef({ landed: false, y: ROOM.h, vy: 0, pos: new THREE.Vector3(), bulletT: 1, specialT: 2, next: "sword" as "sword" | "stomp", quarterT: 3, aoeT: 5, yaw: 0, lockT: 0 });
-  const waves = useMemo(() => Array.from({ length: 6 }, () => ({ active: false, r: 0, x: 0, z: 0, hit: false, stunOnly: false, hitPeers: new Set<string>() })), []);
+  const waves = useMemo(() => Array.from({ length: 6 }, () => ({ active: false, r: 0, x: 0, z: 0, hit: false, stunOnly: false, remote: false, hitPeers: new Set<string>() })), []);
   const waveRefs = useRef<(THREE.Mesh | null)[]>([]);
   const lastRespawn = useRef(0);
   const tutSetup = useRef(-1);
@@ -521,10 +523,10 @@ export function World() {
     clampCircle(u.pos, 3 * TABLE_S);
     u.dash.set(0, 0, 0);
   };
-  const addWave = (x: number, z: number, stunOnly = false) => {
+  const addWave = (x: number, z: number, stunOnly = false, remote = false) => {
     const w = waves.find((q) => !q.active) ?? waves[0]!;
     w.hitPeers.clear();
-    Object.assign(w, { active: true, r: stunOnly ? 0 : BOSS_S * 3, x, z, hit: false, stunOnly });
+    Object.assign(w, { active: true, r: stunOnly ? 0 : BOSS_S * 3, x, z, hit: false, stunOnly, remote });
   };
   const damagePlayer = (d: number, force = false, quiet = false) => {
     if (G.campaignDead) return;
@@ -1018,8 +1020,9 @@ export function World() {
   };
   const addHazard = (kind: Hazard["kind"], x: number, z: number, t: number, a0?: number, dmg?: number, owner: "player" | "boss" = "boss") => {
     const h = hazards.find((q) => !q.active);
-    if (!h) return;
-    Object.assign(h, { active: true, kind, t, total: t, fx: 0, x, z, a0: a0 ?? Math.floor(Math.random() * 4) * (Math.PI / 2), dmg, owner });
+    if (!h) return undefined;
+    Object.assign(h, { active: true, kind, t, total: t, fx: 0, x, z, a0: a0 ?? Math.floor(Math.random() * 4) * (Math.PI / 2), dmg, owner, remote: false });
+    return h;
   };
 
   useEffect(() => {
@@ -1559,6 +1562,25 @@ const kd = (e: KeyboardEvent) => {
       boomFx(tmpV.set(Number(payload.x), Number(payload.y), Number(payload.z)), Number(payload.r) || 8, Number(payload.t) || 0.4, false, "bomb", String(payload.c ?? ""), !!payload.h, rc);
       return;
     }
+    if (k === "bquarter") {
+      const h = addHazard("quarter", 0, 0, 1, Number(payload.a0) || 0, 0, "player");
+      if (h) h.remote = true;
+      return;
+    }
+    if (k === "bstomp") {
+      addWave(Number(payload.x) || 0, Number(payload.z) || 0, true, true);
+      return;
+    }
+    if (k === "bsword") {
+      const sid = String(payload.id ?? "");
+      if (!sid) return;
+      const slot = remoteSwords.current.find((q) => q.t > 0 && q.id === sid) ?? remoteSwords.current.find((q) => q.t <= 0);
+      if (!slot) return;
+      slot.id = sid; slot.t = 0.4;
+      slot.pos.set(Number(payload.x) || 0, Number(payload.y) || 0, Number(payload.z) || 0);
+      slot.vel.set(Number(payload.vx) || 0, Number(payload.vy) || 0, Number(payload.vz) || 0);
+      return;
+    }
     if (k === "crack") {
       spawnSlamCrack(Number(payload.x), Number(payload.y), Number(payload.z), !!payload.dark);
       return;
@@ -1941,7 +1963,7 @@ const kd = (e: KeyboardEvent) => {
           const peer = NET.peers.get(id);
           if (!peer || peer.dead) { sword.stuck.delete(id); continue; }
           stuck.netAcc += dt;
-          if (stuck.netAcc >= 0.1 || stuck.nextDamage) {
+          if (stuck.netAcc >= 0.1) {
             stuck.netAcc %= 0.1;
             const extra = { stick: [sword.pos.x + stuck.offset.x, sword.pos.y + stuck.offset.y, sword.pos.z + stuck.offset.z] };
             hitPeer(id, 0, false, undefined, extra);
@@ -2011,6 +2033,13 @@ const kd = (e: KeyboardEvent) => {
         }
         if (sword.pos.length() > R * 2.5) sword.returning = true;
       }
+      if (sword.active && NET.online) {
+        swordNetT.current[swordIndex] = (swordNetT.current[swordIndex] ?? 0) - dt;
+        if (swordNetT.current[swordIndex]! <= 0) {
+          swordNetT.current[swordIndex] = 0.07;
+          sendNet("vfx", { k: "bsword", id: `${myId()}-bs${swordIndex}`, x: sword.pos.x, y: sword.pos.y, z: sword.pos.z, vx: sword.vel.x, vy: sword.vel.y, vz: sword.vel.z });
+        }
+      }
       const mesh = bossSwordMeshes.current[swordIndex];
       if (mesh) {
         mesh.visible = sword.active;
@@ -2019,6 +2048,19 @@ const kd = (e: KeyboardEvent) => {
           // Spin dagger-style around the lengthwise axis on both outbound and return legs.
           mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), sword.vel.clone().normalize());
           mesh.rotateX(performance.now() / 65);
+        }
+      }
+    }
+    for (let ri = 0; ri < remoteSwords.current.length; ri++) {
+      const rs = remoteSwords.current[ri]!;
+      if (rs.t > 0) { rs.t -= dt; rs.pos.addScaledVector(rs.vel, dt); }
+      const rm = bossSwordMeshes.current[3 + ri];
+      if (rm) {
+        rm.visible = rs.t > 0;
+        if (rs.t > 0 && rs.vel.lengthSq() > 1) {
+          rm.position.copy(rs.pos);
+          rm.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), rs.vel.clone().normalize());
+          rm.rotateX(performance.now() / 65);
         }
       }
     }
@@ -2049,6 +2091,7 @@ const kd = (e: KeyboardEvent) => {
           const aimAngle = Math.atan2(-look.z, look.x);
           if (G.abilityCharges >= 2) {
             addHazard("quarter", 0, 0, 1, aimAngle - Math.PI / 4, 25, "player");
+            if (NET.online) sendNet("vfx", { k: "bquarter", a0: aimAngle - Math.PI / 4 });
             G.abilityCharges -= 2;
             if (G.abilityCharges <= 0) G.abilityCd = 5;
             playSfx("stun");
@@ -2988,7 +3031,7 @@ const kd = (e: KeyboardEvent) => {
             if (tier === SLAM_TIERS.length - 1) b.lockT = 2; // next boss attack waits 2s
           }
           pvpBlast(_pvpAt.copy(p).setY(p.y + 0.5), r, PVP_DMG.slam, true);
-          if (tier === SLAM_TIERS.length - 1 && getAbility() === "boss" && (hasAchievement("hardcore") || G.mode === "training")) addWave(p.x, p.z, true);
+          if (tier === SLAM_TIERS.length - 1 && getAbility() === "boss" && (hasAchievement("hardcore") || G.mode === "training")) { addWave(p.x, p.z, true); if (NET.online) sendNet("vfx", { k: "bstomp", x: p.x, z: p.z }); }
           ringsIn(p, r);
           boomFx(tmpV.copy(p).setY(p.y + 0.5), r, 0.4, true, "none");
           // Surface under feet: couch → bounce, no crack; raised solid → dark crack; floor → normal crack
@@ -3299,11 +3342,14 @@ const kd = (e: KeyboardEvent) => {
                 const ang = (Math.atan2(-z, x) - h.a0 + Math.PI * 4) % (Math.PI * 2);
                 return Math.hypot(x, z) <= R && ang <= Math.PI / 2;
               };
-              if (h.owner !== "player" && inQuarter(p.x, p.z)) damagePlayer(h.dmg ?? BIG_DMG);
+              if (h.remote) { /* another player's strike: visual only, they apply the damage */ }
+              else if (h.owner !== "player") { if (inQuarter(p.x, p.z)) damagePlayer(h.dmg ?? BIG_DMG); }
+              else {
               for (const t of tables) if (t.alive && inQuarter(t.pos.x, t.pos.z)) hitTable(t, h.dmg ?? BIG_DMG);
               for (const u of blues) if (u.alive && inQuarter(u.pos.x, u.pos.z)) hitBlue(u, h.dmg ?? BIG_DMG);
               if (NET.online && (NET.kind === "pvp" || NET.kind === "lobby")) {
                 for (const peer of NET.peers.values()) if (!peer.dead && inQuarter(peer.x, peer.z)) hitPeer(peer.id, h.dmg ?? BIG_DMG);
+              }
               }
             } else if (h.kind === "sword") {
               if (Math.hypot(p.x - h.x, p.z - h.z) < SWORD_R && p.y < 40) {
@@ -3361,11 +3407,11 @@ const kd = (e: KeyboardEvent) => {
         w.r += WAVE_SPEED * dt;
         if (w.r > R * 2) { w.active = false; continue; }
         const d = Math.hypot(p.x - w.x, p.z - w.z);
-        if (!w.stunOnly && !w.hit && d >= r0 - PLAYER_R - 1 && d <= w.r + PLAYER_R + 1 && p.y < WAVE_H) {
+        if (!w.stunOnly && !w.hit && !w.remote && d >= r0 - PLAYER_R - 1 && d <= w.r + PLAYER_R + 1 && p.y < WAVE_H) {
           w.hit = true;
           damagePlayer(G.mode === "game" ? 40 : WAVE_DMG);
         }
-        if (w.stunOnly) {
+        if (w.stunOnly && !w.remote) {
           // Freeze training bots as well as networked opponents when the ring crosses them.
           for (let ti = 0; ti < tables.length; ti++) {
             const t = tables[ti]!;
@@ -4454,48 +4500,22 @@ const kd = (e: KeyboardEvent) => {
           visible={false}
         />
       ))}
-      <group ref={(m) => { bossSwordMeshes.current[0] = m; }} visible={false}>
-        <mesh castShadow>
-          <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
-          <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
-        </mesh>
-        <mesh position={[-4, 0, 0.7]}>
-          <boxGeometry args={[1.1, 7, 0.7]} />
-          <meshStandardMaterial color="#7f1d1d" metalness={0.8} roughness={0.22} />
-        </mesh>
-        <mesh position={[-8, 0, 0]}>
-          <cylinderGeometry args={[0.7, 0.7, 5, 12]} />
-          <meshStandardMaterial color="#991b1b" metalness={0.85} roughness={0.18} />
-        </mesh>
-      </group>
-      <group ref={(m) => { bossSwordMeshes.current[1] = m; }} visible={false}>
-        <mesh castShadow>
-          <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
-          <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
-        </mesh>
-        <mesh position={[-4, 0, 0.7]}>
-          <boxGeometry args={[1.1, 7, 0.7]} />
-          <meshStandardMaterial color="#7f1d1d" metalness={0.8} roughness={0.22} />
-        </mesh>
-        <mesh position={[-8, 0, 0]}>
-          <cylinderGeometry args={[0.7, 0.7, 5, 12]} />
-          <meshStandardMaterial color="#991b1b" metalness={0.85} roughness={0.18} />
-        </mesh>
-      </group>
-      <group ref={(m) => { bossSwordMeshes.current[2] = m; }} visible={false}>
-        <mesh castShadow>
-          <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
-          <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
-        </mesh>
-        <mesh position={[-4, 0, 0.7]}>
-          <boxGeometry args={[1.1, 7, 0.7]} />
-          <meshStandardMaterial color="#7f1d1d" metalness={0.8} roughness={0.22} />
-        </mesh>
-        <mesh position={[-8, 0, 0]}>
-          <cylinderGeometry args={[0.7, 0.7, 5, 12]} />
-          <meshStandardMaterial color="#991b1b" metalness={0.85} roughness={0.18} />
-        </mesh>
-      </group>
+      {[0, 1, 2, 3, 4, 5].map((si) => (
+        <group key={`bsw${si}`} ref={(m) => { bossSwordMeshes.current[si] = m; }} visible={false}>
+          <mesh castShadow>
+            <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
+            <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
+          </mesh>
+          <mesh position={[-4, 0, 0.7]}>
+            <boxGeometry args={[1.1, 7, 0.7]} />
+            <meshStandardMaterial color="#7f1d1d" metalness={0.8} roughness={0.22} />
+          </mesh>
+          <mesh position={[-8, 0, 0]}>
+            <cylinderGeometry args={[0.7, 0.7, 5, 12]} />
+            <meshStandardMaterial color="#991b1b" metalness={0.85} roughness={0.18} />
+          </mesh>
+        </group>
+      ))}
       {fireballs.map((_, i) => (
         <mesh key={`fb${i}`} ref={(m) => { fireballMeshRefs.current[i] = m; }} visible={false}>
           <sphereGeometry args={[0.8, 12, 10]} />

@@ -122,12 +122,11 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                     ) : (
                       <button
                         type="button"
-                        disabled={a.id === "boss"}
                         className={`${btn} cursor-not-allowed opacity-40`}
                         onClick={() => setDetail(a.id)}
-                        title={a.id === "boss" ? "This ability has no mastery" : `Earn "${achievementFor(a.id)?.name ?? "the required achievement"}" to unlock`}
+                        title={`Earn "${achievementFor(a.id)?.name ?? "the required achievement"}" to unlock`}
                       >
-                        {a.id === "boss" ? "No Mastery" : "Mastery 🔒"}
+                        Mastery 🔒
                       </button>
                     ))}
                   </div>

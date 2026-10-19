@@ -62,7 +62,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   {
     id: "hardcore", name: "Hardcore", icon: "🛡️",
     summary: "I overcame all odds.",
-    how: "Beat the offline campaign without taking any damage. Any damage disqualifies the run. Using Combo Burst to heal also disqualifies the run.",
+    how: "Beat the offline campaign boss without taking damage during the boss fight. You start each boss attempt fully healed. Taking damage or using Combo Burst to heal during the fight disqualifies that attempt. Dying and returning to the boss checkpoint resets the attempt, so you can try again.",
   },
   {
     id: "down_you_go", name: "Down You Go", icon: "⬇️",

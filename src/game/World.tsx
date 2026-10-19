@@ -4455,8 +4455,34 @@ const kd = (e: KeyboardEvent) => {
         />
       ))}
       <group ref={(m) => { bossSwordMeshes.current[0] = m; }} visible={false}>
-<group ref={(m) => { bossSwordMeshes.current[1] = m; }} visible={false}>
-<group ref={(m) => { bossSwordMeshes.current[2] = m; }} visible={false}>
+        <mesh castShadow>
+          <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
+          <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
+        </mesh>
+        <mesh position={[-4, 0, 0.7]}>
+          <boxGeometry args={[1.1, 7, 0.7]} />
+          <meshStandardMaterial color="#7f1d1d" metalness={0.8} roughness={0.22} />
+        </mesh>
+        <mesh position={[-8, 0, 0]}>
+          <cylinderGeometry args={[0.7, 0.7, 5, 12]} />
+          <meshStandardMaterial color="#991b1b" metalness={0.85} roughness={0.18} />
+        </mesh>
+      </group>
+      <group ref={(m) => { bossSwordMeshes.current[1] = m; }} visible={false}>
+        <mesh castShadow>
+          <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
+          <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
+        </mesh>
+        <mesh position={[-4, 0, 0.7]}>
+          <boxGeometry args={[1.1, 7, 0.7]} />
+          <meshStandardMaterial color="#7f1d1d" metalness={0.8} roughness={0.22} />
+        </mesh>
+        <mesh position={[-8, 0, 0]}>
+          <cylinderGeometry args={[0.7, 0.7, 5, 12]} />
+          <meshStandardMaterial color="#991b1b" metalness={0.85} roughness={0.18} />
+        </mesh>
+      </group>
+      <group ref={(m) => { bossSwordMeshes.current[2] = m; }} visible={false}>
         <mesh castShadow>
           <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
           <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />

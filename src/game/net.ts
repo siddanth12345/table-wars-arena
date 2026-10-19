@@ -123,7 +123,7 @@ type Meta = { name: string; host: boolean; id: string };
 
 // Realtime payloads are client-controlled. Reject malformed values before they
 // reach the simulation or mutate shared game state.
-const isRecord = (v: unknown): v is Record<string, any> =>
+const isRecord = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
 const isText = (v: unknown, max = 128): v is string =>
   typeof v === "string" && v.length > 0 && v.length <= max;
@@ -140,7 +140,7 @@ const isEntSnap = (v: unknown): v is EntSnap =>
   isRecord(v) && isNumberArray(v.t) && isNumberArray(v.b) &&
   (v.boss === null || isNumberArray(v.boss)) && isText(v.stage, 40) &&
   isFiniteIn(v.bh, 0, 100000) && isFiniteIn(v.bm, 0, 100000) && isNumberArray(v.s);
-const isHitExtra = (v: Record<string, any>) =>
+const isHitExtra = (v: Record<string, unknown>) =>
   (v.tp === undefined || isNumberArray(v.tp, 3)) &&
   (v.pull === undefined || isNumberArray(v.pull, 3)) &&
   (v.slam === undefined || isFiniteIn(v.slam, -100, 100));
@@ -181,8 +181,8 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
     if (!isRecord(payload) || payload.to !== id || !isFiniteIn(payload.dmg, 0, 100) ||
       (payload.stunT !== undefined && !isFiniteIn(payload.stunT, 0, 10000)) || !isHitExtra(payload)) return;
     if (NET.kind === "pvp" ? NET.stage === "playing" : true) {
-      NET_HOOKS.onHit(payload.dmg, payload.stun === true, payload.stunT, {
-        tp: payload.tp, pull: payload.pull, slam: payload.slam,
+      NET_HOOKS.onHit(payload.dmg, payload.stun === true, payload.stunT as number | undefined, {
+        tp: payload.tp as number[] | undefined, pull: payload.pull as number[] | undefined, slam: payload.slam as number | undefined,
       });
     }
   });

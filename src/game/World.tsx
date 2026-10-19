@@ -378,7 +378,7 @@ export function World() {
     stung: new Set<string>(), tickAcc: new Map<string, number>(), netId: "" as string, m: false,
   })), []);
   // Air fireballs (fire ability while airborne) + remote visual bullets
-  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), returnHitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>(), stuck: new Map<string, { kind: "t" | "b" | "p"; offset: THREE.Vector3; acc: number; nextDamage: number }>() });
+  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), returnHitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>(), stuck: new Map<string, { kind: "t" | "b" | "p"; offset: THREE.Vector3; acc: number; netAcc: number; nextDamage: number }>() });
   const bossSwordMesh = useRef<THREE.Group | null>(null);
   const lastAbilityMode = useRef(G.mode);
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
@@ -1929,14 +1929,18 @@ const kd = (e: KeyboardEvent) => {
         } else {
           const peer = NET.peers.get(id);
           if (!peer || peer.dead) { sword.stuck.delete(id); continue; }
-          const extra = { stick: [sword.pos.x + stuck.offset.x, sword.pos.y + stuck.offset.y, sword.pos.z + stuck.offset.z] };
-          if (stuck.nextDamage) { hitPeer(id, 2, false, undefined, extra); stuck.nextDamage = 0; }
-          else hitPeer(id, 0, false, undefined, extra);
+          stuck.netAcc += dt;
+          if (stuck.netAcc >= 0.1 || stuck.nextDamage) {
+            stuck.netAcc %= 0.1;
+            const extra = { stick: [sword.pos.x + stuck.offset.x, sword.pos.y + stuck.offset.y, sword.pos.z + stuck.offset.z] };
+            hitPeer(id, stuck.nextDamage ? 2 : 0, false, undefined, extra);
+            stuck.nextDamage = 0;
+          }
         }
       }
       if (sword.active) {
         const wasReturning = sword.returning;
-        const radius = wasReturning ? 78 : 39;
+        const radius = wasReturning ? 39 : 19.5;
         const travelVec = sword.vel.clone().multiplyScalar(dt);
         const travel = travelVec.length();
         const dir = travel > 1e-6 ? travelVec.clone().normalize() : new THREE.Vector3(1, 0, 0);
@@ -1965,7 +1969,7 @@ const kd = (e: KeyboardEvent) => {
         const attach = (id: string, kind: "t" | "b" | "p", center: THREE.Vector3) => {
           if (sword.stuck.has(id) || contactTargets.has(id) || sword.pos.distanceTo(center) > radius) return;
           contactTargets.add(id);
-          sword.stuck.set(id, { kind, offset: center.clone().sub(sword.pos), acc: 0, nextDamage: 0 });
+          sword.stuck.set(id, { kind, offset: center.clone().sub(sword.pos), acc: 0, netAcc: 0, nextDamage: 0 });
           if (kind === "t") hitTable(tables[Number(id.slice(1))]!, 15);
           else if (kind === "b") hitBlue(blues[Number(id.slice(1))]!, 15);
           else hitPeer(id, 15, false, undefined, { stick: [sword.pos.x, sword.pos.y, sword.pos.z] });
@@ -4429,16 +4433,16 @@ const kd = (e: KeyboardEvent) => {
       ))}
       <group ref={(m) => { bossSwordMesh.current = m; }} visible={false}>
         <mesh castShadow>
-          <boxGeometry args={[26, 2.2, 1.2]} />
-          <meshStandardMaterial color="#cbd5e1" metalness={0.9} roughness={0.2} emissive="#64748b" emissiveIntensity={1.5} />
+          <shapeGeometry args={[new THREE.Shape().moveTo(-13, -0.8).lineTo(-10.5, -1.15).lineTo(8.5, -0.65).lineTo(13, 0).lineTo(8.5, 0.65).lineTo(-10.5, 1.15).lineTo(-13, 0.8).closePath(), 1]} />
+          <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
         </mesh>
-        <mesh position={[-3, 0, 0]}>
-          <boxGeometry args={[1.5, 9, 2]} />
-          <meshStandardMaterial color="#7f1d1d" metalness={0.7} roughness={0.25} />
+        <mesh position={[-4, 0, 0.7]}>
+          <boxGeometry args={[1.1, 7, 0.7]} />
+          <meshStandardMaterial color="#7f1d1d" metalness={0.8} roughness={0.22} />
         </mesh>
-        <mesh position={[-9, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[1.1, 1.1, 6, 8]} />
-          <meshStandardMaterial color="#991b1b" metalness={0.8} roughness={0.2} />
+        <mesh position={[-8, 0, 0]}>
+          <cylinderGeometry args={[0.7, 0.7, 5, 12]} />
+          <meshStandardMaterial color="#991b1b" metalness={0.85} roughness={0.18} />
         </mesh>
       </group>
       {fireballs.map((_, i) => (

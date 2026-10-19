@@ -1924,8 +1924,8 @@ const kd = (e: KeyboardEvent) => {
     }
     if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
     // Boss sword: spherical contact hitbox, attachment DoT, five distinct solid bounces.
-    {
-      const sword = bossSword.current;
+    for (let swordIndex = 0; swordIndex < bossSwords.current.length; swordIndex++) {
+      const sword = bossSwords.current[swordIndex]!;
       for (const [id, stuck] of sword.stuck) {
         if (stuck.kind === "t") {
           const t = tables[Number(id.slice(1))];
@@ -2011,7 +2011,7 @@ const kd = (e: KeyboardEvent) => {
         }
         if (sword.pos.length() > R * 2.5) sword.returning = true;
       }
-      const mesh = bossSwordMesh.current;
+      const mesh = bossSwordMeshes.current[swordIndex];
       if (mesh) {
         mesh.visible = sword.active;
         if (sword.active) {
@@ -4448,7 +4448,9 @@ const kd = (e: KeyboardEvent) => {
           visible={false}
         />
       ))}
-      <group ref={(m) => { bossSwordMesh.current = m; }} visible={false}>
+      <group ref={(m) => { bossSwordMeshes.current[0] = m; }} visible={false}>
+<group ref={(m) => { bossSwordMeshes.current[1] = m; }} visible={false}>
+<group ref={(m) => { bossSwordMeshes.current[2] = m; }} visible={false}>
         <mesh castShadow>
           <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
           <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />

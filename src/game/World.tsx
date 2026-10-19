@@ -1502,7 +1502,7 @@ const kd = (e: KeyboardEvent) => {
   NET_HOOKS.onHit = (d, stun, stunT, extra) => {
     if (d > 0) damagePlayer(d);
     if (extra?.tp && !G.pvpDead && !G.campaignDead) pos.current.set(extra.tp[0]!, extra.tp[1]!, extra.tp[2]!);
-    if (extra?.push && !G.pvpDead && !G.campaignDead) { hv.current.set(extra.push[0]!, 0, extra.push[2]!); grounded.current = false; }
+    if (extra?.push && !G.pvpDead && !G.campaignDead) { hv.current.set(extra.push[0]!, 0, extra.push[2]!); if (extra.push[1] !== undefined) vy.current = extra.push[1]!; grounded.current = false; }
     if (extra?.slam && !G.pvpDead && !G.campaignDead && G.playerHp > 0) {
       // slammed straight down: cancel every other velocity; the stun starts once I touch the ground
       hv.current.set(0, 0, 0);
@@ -1908,11 +1908,12 @@ const kd = (e: KeyboardEvent) => {
       else if (slamStun.current.exp <= 0) slamStun.current.dur = 0;
     }
     if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
-    // Boss sword: horizontal spin, spherical 26-unit hitbox, and solid-object bounces.
+    // Outbound sword: 39-unit sphere; returning sword: 78-unit sphere.
     {
       const sword = bossSword.current;
       if (sword.active) {
-        const radius = 13;
+        const wasReturning = sword.returning;
+        const radius = wasReturning ? 39 : 19.5;
         const travelVec = sword.vel.clone().multiplyScalar(dt);
         const travel = travelVec.length();
         const dir = travel > 1e-6 ? travelVec.clone().normalize() : new THREE.Vector3(1, 0, 0);
@@ -1934,46 +1935,50 @@ const kd = (e: KeyboardEvent) => {
             sword.vel.addScaledVector(normal, -2 * sword.vel.dot(normal)).normalize().multiplyScalar(300);
             sword.solidHits++;
             if (sword.solidHits >= 3) sword.returning = true;
-          } else {
-            sword.pos.add(travelVec);
-          }
+          } else sword.pos.add(travelVec);
         }
         const hitRadius = radius;
+        const targetHits = wasReturning ? sword.returnHitTargets : sword.hitTargets;
+        const damage = wasReturning ? 15 : 20;
+        const impulseFor = (target: THREE.Vector3) => {
+          if (wasReturning) return cam.position.clone().sub(target).normalize().multiplyScalar(300);
+          const a = Math.random() * Math.PI * 2;
+          return new THREE.Vector3(Math.cos(a) * Math.SQRT1_2 * 300, Math.SQRT1_2 * 300, Math.sin(a) * Math.SQRT1_2 * 300);
+        };
         for (let ti = 0; ti < tables.length; ti++) {
-          const t = tables[ti]!; const id = `t${ti}`;
-          if (t.alive && !sword.hitTargets.has(id) && sword.pos.distanceTo(tmpV.copy(t.pos).setY(t.pos.y + 2 * t.s)) <= hitRadius + 2 * t.s) {
-            sword.hitTargets.add(id); hitTable(t, 10);
-            const away = tmpV.copy(t.pos).sub(sword.pos).setY(0); if (away.lengthSq() < 0.01) away.set(Math.random() - 0.5, 0, Math.random() - 0.5); away.normalize();
-            t.dash.copy(away).multiplyScalar(300); t.dashT = Math.max(t.dashT, 0.25);
+          const t = tables[ti]!; const id = 't' + ti;
+          const center = tmpV.copy(t.pos).setY(t.pos.y + 2 * t.s);
+          if (t.alive && !targetHits.has(id) && sword.pos.distanceTo(center) <= hitRadius + 2 * t.s) {
+            targetHits.add(id); hitTable(t, damage);
+            const impulse = impulseFor(center); t.dash.set(impulse.x, 0, impulse.z); t.dashT = Math.max(t.dashT, 0.25); t.vy = impulse.y;
           }
         }
         for (let bi = 0; bi < blues.length; bi++) {
-          const u = blues[bi]!; const id = `b${bi}`;
-          if (u.alive && !sword.hitTargets.has(id) && sword.pos.distanceTo(tmpV.copy(u.pos).setY(u.pos.y + 2)) <= hitRadius + 2) {
-            sword.hitTargets.add(id); hitBlue(u, 10);
-            const away = tmpV.copy(u.pos).sub(sword.pos).setY(0); if (away.lengthSq() < 0.01) away.set(Math.random() - 0.5, 0, Math.random() - 0.5); away.normalize();
-            u.dash.copy(away).multiplyScalar(300); u.dashT = Math.max(u.dashT, 0.25);
+          const u = blues[bi]!; const id = 'b' + bi;
+          const center = tmpV.copy(u.pos).setY(u.pos.y + 2);
+          if (u.alive && !targetHits.has(id) && sword.pos.distanceTo(center) <= hitRadius + 2) {
+            targetHits.add(id); hitBlue(u, damage);
+            const impulse = impulseFor(center); u.dash.set(impulse.x, 0, impulse.z); u.dashT = Math.max(u.dashT, 0.25); u.vy = impulse.y;
           }
         }
-        if (NET.online && (NET.kind === "pvp" || NET.kind === "lobby")) {
+        if (NET.online && (NET.kind === 'pvp' || NET.kind === 'lobby')) {
           for (const peer of NET.peers.values()) {
-            if (peer.dead || sword.hitTargets.has(peer.id) || Math.hypot(peer.x - sword.pos.x, peer.y - sword.pos.y, peer.z - sword.pos.z) > hitRadius + 1.5) continue;
-            sword.hitTargets.add(peer.id);
-            let dx = peer.x - sword.pos.x, dz = peer.z - sword.pos.z; const len = Math.hypot(dx, dz);
-            if (len < 0.01) { const a = Math.random() * Math.PI * 2; dx = Math.cos(a); dz = Math.sin(a); } else { dx /= len; dz /= len; }
-            hitPeer(peer.id, 10, false, undefined, { push: [dx * 300, 0, dz * 300] });
+            if (peer.dead || targetHits.has(peer.id) || Math.hypot(peer.x - sword.pos.x, peer.y - sword.pos.y, peer.z - sword.pos.z) > hitRadius + 1.5) continue;
+            targetHits.add(peer.id);
+            let dx: number, dy: number, dz: number;
+            if (wasReturning) {
+              const vx = cam.position.x - peer.x, vy0 = cam.position.y - peer.y, vz = cam.position.z - peer.z;
+              const len = Math.hypot(vx, vy0, vz) || 1; dx = vx / len; dy = vy0 / len; dz = vz / len;
+            } else {
+              const a = Math.random() * Math.PI * 2; dx = Math.cos(a) * Math.SQRT1_2; dy = Math.SQRT1_2; dz = Math.sin(a) * Math.SQRT1_2;
+            }
+            hitPeer(peer.id, damage, false, undefined, { push: [dx * 300, dy * 300, dz * 300] });
           }
         }
         if (sword.pos.length() > R * 2.5) sword.returning = true;
       }
       const mesh = bossSwordMesh.current;
-      if (mesh) {
-        mesh.visible = sword.active;
-        if (sword.active) {
-          mesh.position.copy(sword.pos);
-          mesh.rotation.set(0, performance.now() / 80, 0);
-        }
-      }
+      if (mesh) { mesh.visible = sword.active; if (sword.active) { mesh.position.copy(sword.pos); mesh.rotation.set(0, performance.now() / 80, 0); } }
     }
     if (abilityReq.current && G.phase === "playing" && G.locked && !G.freecam && G.countdown <= 0.6 && G.stun <= 0 && !G.pvpDead && !G.campaignDead) {
       abilityReq.current = false;
@@ -1986,7 +1991,7 @@ const kd = (e: KeyboardEvent) => {
             cam.getWorldDirection(look);
             const sword = bossSword.current;
             if (!sword.active) {
-              sword.active = true; sword.returning = false; sword.solidHits = 0; sword.hitCooldown = 0; sword.solidObjects.clear(); sword.hitTargets.clear();
+              sword.active = true; sword.returning = false; sword.solidHits = 0; sword.hitCooldown = 0; sword.solidObjects.clear(); sword.hitTargets.clear(); sword.returnHitTargets.clear();
               sword.pos.copy(cam.position).addScaledVector(look, 2);
               sword.vel.copy(look).normalize().multiplyScalar(300);
               G.abilityCd = 3; G.abilityCharges = 0; playSfx("fire_ground");
@@ -3234,6 +3239,7 @@ const kd = (e: KeyboardEvent) => {
         }
         u.pos.addScaledVector(u.dash, dt);
         u.dash.multiplyScalar(Math.exp(-3 * dt));
+        if (u.vy !== 0 || u.pos.y > 0) { u.vy -= 700 * dt; u.pos.y = Math.max(0, u.pos.y + u.vy * dt); if (u.pos.y <= 0) u.vy = 0; }
         for (const s of SOLIDS) if (s.y0 < 5) pushOut(u.pos, s, 3 * TABLE_S);
         clampCircle(u.pos, 3 * TABLE_S);
         u.hitCd = Math.max(0, u.hitCd - dt);

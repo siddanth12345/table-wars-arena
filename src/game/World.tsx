@@ -390,8 +390,9 @@ export function World() {
     stung: new Set<string>(), tickAcc: new Map<string, number>(), netId: "" as string, m: false,
   })), []);
   // Air fireballs (fire ability while airborne) + remote visual bullets
-  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), returnHitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>(), stuck: new Map<string, { kind: "t" | "b" | "p"; offset: THREE.Vector3; netAcc: number }>() });
-  const bossSwordMesh = useRef<THREE.Group | null>(null);
+  const makeBossSword = () => ({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), returnHitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>(), stuck: new Map<string, { kind: "t" | "b" | "p"; offset: THREE.Vector3; netAcc: number }>() });
+  const bossSwords = useRef([makeBossSword(), makeBossSword(), makeBossSword()]);
+  const bossSwordMeshes = useRef<Array<THREE.Group | null>>([null, null, null]);
   const lastAbilityMode = useRef(G.mode);
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
     active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string, m: false, b: 0, idle: 0,
@@ -707,10 +708,10 @@ export function World() {
   function despawnBoss() {
     Object.assign(boss.current, { landed: false, y: ROOM.h, vy: 0 });
     hazards.forEach((h) => (h.active = false));
-    bossSword.current.active = false;
-    bossSword.current.returning = false;
-    bossSword.current.hitTargets.clear();
-    bossSword.current.solidObjects.clear();
+    for (const sword of bossSwords.current) {
+      sword.active = false; sword.returning = false; sword.hitTargets.clear(); sword.returnHitTargets.clear();
+      sword.solidObjects.clear(); sword.stuck.clear(); sword.solidHits = 0;
+    }
     waves.forEach((w) => (w.active = false));
     health.forEach((h) => (h.active = false));
     abilityWalls.forEach((w) => { w.active = false; });
@@ -1747,14 +1748,14 @@ const kd = (e: KeyboardEvent) => {
       abilityPads.forEach((pad) => { pad.active = false; });
       abilityFires.forEach((f) => { f.active = false; f.stung.clear(); f.tickAcc.clear(); });
       G.abilityCd = 0;
-      G.abilityCharges = getAbility() === "wall" ? 6 : getAbility() === "trampoline" ? 3 : 1;
+      G.abilityCharges = getAbility() === "wall" ? 6 : (getAbility() === "trampoline" || getAbility() === "boss") ? 3 : 1;
       G.abilitySlow = 0;
       MAP.health = [];
       hazards.forEach((h) => (h.active = false));
-      bossSword.current.active = false;
-      bossSword.current.returning = false;
-      bossSword.current.hitTargets.clear();
-      bossSword.current.solidObjects.clear();
+      for (const sword of bossSwords.current) {
+        sword.active = false; sword.returning = false; sword.hitTargets.clear(); sword.returnHitTargets.clear();
+        sword.solidObjects.clear(); sword.stuck.clear(); sword.solidHits = 0;
+      }
       waves.forEach((w) => (w.active = false));
       bomb.current.alive = false;
       slam.current.on = false;
@@ -1913,7 +1914,7 @@ const kd = (e: KeyboardEvent) => {
       if (G.abilityCd <= 0) {
         playSfx("ability_ready");
         const ab = getAbility();
-        G.abilityCharges = ab === "wall" ? 6 : ab === "trampoline" ? 3 : 1;
+        G.abilityCharges = ab === "wall" ? 6 : (ab === "trampoline" || ab === "boss") ? 3 : 1;
       }
     }
     if (slamStun.current.dur > 0) {
@@ -1923,8 +1924,8 @@ const kd = (e: KeyboardEvent) => {
     }
     if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
     // Boss sword: spherical contact hitbox, attachment DoT, five distinct solid bounces.
-    {
-      const sword = bossSword.current;
+    for (let swordIndex = 0; swordIndex < bossSwords.current.length; swordIndex++) {
+      const sword = bossSwords.current[swordIndex]!;
       for (const [id, stuck] of sword.stuck) {
         if (stuck.kind === "t") {
           const t = tables[Number(id.slice(1))];
@@ -2010,7 +2011,7 @@ const kd = (e: KeyboardEvent) => {
         }
         if (sword.pos.length() > R * 2.5) sword.returning = true;
       }
-      const mesh = bossSwordMesh.current;
+      const mesh = bossSwordMeshes.current[swordIndex];
       if (mesh) {
         mesh.visible = sword.active;
         if (sword.active) {
@@ -2030,23 +2031,29 @@ const kd = (e: KeyboardEvent) => {
           if (!grounded.current) {
             const look = new THREE.Vector3();
             cam.getWorldDirection(look);
-            const sword = bossSword.current;
-            if (!sword.active) {
-              sword.active = true; sword.returning = false; sword.solidHits = 0; sword.hitCooldown = 0; sword.solidObjects.clear(); sword.hitTargets.clear(); sword.returnHitTargets.clear(); sword.stuck.clear();
-              sword.pos.copy(cam.position).addScaledVector(look, 2);
-              sword.vel.copy(look).normalize().multiplyScalar(350);
-              G.abilityCd = 3; G.abilityCharges = 0; playSfx("fire_ground");
+            if (G.abilityCharges >= 1) {
+              const sword = bossSwords.current.find((candidate) => !candidate.active);
+              if (sword) {
+                sword.active = true; sword.returning = false; sword.solidHits = 0; sword.hitCooldown = 0; sword.solidObjects.clear(); sword.hitTargets.clear(); sword.returnHitTargets.clear(); sword.stuck.clear();
+                sword.pos.copy(cam.position).addScaledVector(look, 2);
+                sword.vel.copy(look).normalize().multiplyScalar(350);
+                G.abilityCharges--;
+                if (G.abilityCharges <= 0) G.abilityCd = 5;
+                playSfx("fire_ground");
+              }
             }
           } else {
           const look = new THREE.Vector3();
           cam.getWorldDirection(look);
           // The quarter's origin stays at the room center; its middle follows the crosshair direction.
           const aimAngle = Math.atan2(-look.z, look.x);
-          addHazard("quarter", 0, 0, 1, aimAngle - Math.PI / 4, 25, "player");
-          G.abilityCd = 4;
-          G.abilityCharges = 0;
-          playSfx("stun");
-          G.shake = Math.max(G.shake, 0.2);
+          if (G.abilityCharges >= 2) {
+            addHazard("quarter", 0, 0, 1, aimAngle - Math.PI / 4, 25, "player");
+            G.abilityCharges -= 2;
+            if (G.abilityCharges <= 0) G.abilityCd = 5;
+            playSfx("stun");
+            G.shake = Math.max(G.shake, 0.2);
+          }
           }
         }
       } else if (ab === "teleport" && !G.abilityLocked && !G.parryLocked) {
@@ -4447,7 +4454,35 @@ const kd = (e: KeyboardEvent) => {
           visible={false}
         />
       ))}
-      <group ref={(m) => { bossSwordMesh.current = m; }} visible={false}>
+      <group ref={(m) => { bossSwordMeshes.current[0] = m; }} visible={false}>
+        <mesh castShadow>
+          <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
+          <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
+        </mesh>
+        <mesh position={[-4, 0, 0.7]}>
+          <boxGeometry args={[1.1, 7, 0.7]} />
+          <meshStandardMaterial color="#7f1d1d" metalness={0.8} roughness={0.22} />
+        </mesh>
+        <mesh position={[-8, 0, 0]}>
+          <cylinderGeometry args={[0.7, 0.7, 5, 12]} />
+          <meshStandardMaterial color="#991b1b" metalness={0.85} roughness={0.18} />
+        </mesh>
+      </group>
+      <group ref={(m) => { bossSwordMeshes.current[1] = m; }} visible={false}>
+        <mesh castShadow>
+          <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
+          <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
+        </mesh>
+        <mesh position={[-4, 0, 0.7]}>
+          <boxGeometry args={[1.1, 7, 0.7]} />
+          <meshStandardMaterial color="#7f1d1d" metalness={0.8} roughness={0.22} />
+        </mesh>
+        <mesh position={[-8, 0, 0]}>
+          <cylinderGeometry args={[0.7, 0.7, 5, 12]} />
+          <meshStandardMaterial color="#991b1b" metalness={0.85} roughness={0.18} />
+        </mesh>
+      </group>
+      <group ref={(m) => { bossSwordMeshes.current[2] = m; }} visible={false}>
         <mesh castShadow>
           <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
           <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />

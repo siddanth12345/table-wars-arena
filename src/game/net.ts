@@ -121,6 +121,30 @@ const send = (event: string, payload: Record<string, unknown>) => {
 
 type Meta = { name: string; host: boolean; id: string };
 
+// Realtime payloads are client-controlled. Reject malformed values before they
+// reach the simulation or mutate shared game state.
+const isRecord = (v: unknown): v is Record<string, any> =>
+  !!v && typeof v === "object" && !Array.isArray(v);
+const isText = (v: unknown, max = 128): v is string =>
+  typeof v === "string" && v.length > 0 && v.length <= max;
+const isFiniteIn = (v: unknown, min = -10000, max = 10000): v is number =>
+  typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
+const isNumberArray = (v: unknown, maxLength = 3000): v is number[] =>
+  Array.isArray(v) && v.length <= maxLength && v.every((n) => isFiniteIn(n));
+const isTimeOfDay = (v: unknown): v is TimeOfDay =>
+  v === "day" || v === "evening" || v === "night";
+const isScores = (v: unknown): v is Record<string, number> =>
+  isRecord(v) && Object.keys(v).length <= LOBBY_MAX &&
+  Object.entries(v).every(([k, n]) => isText(k, 64) && isFiniteIn(n, 0, PVP_WIN) && Number.isInteger(n));
+const isEntSnap = (v: unknown): v is EntSnap =>
+  isRecord(v) && isNumberArray(v.t) && isNumberArray(v.b) &&
+  (v.boss === null || isNumberArray(v.boss)) && isText(v.stage, 40) &&
+  isFiniteIn(v.bh, 0, 100000) && isFiniteIn(v.bm, 0, 100000) && isNumberArray(v.s);
+const isHitExtra = (v: Record<string, any>) =>
+  (v.tp === undefined || isNumberArray(v.tp, 3)) &&
+  (v.pull === undefined || isNumberArray(v.pull, 3)) &&
+  (v.slam === undefined || isFiniteIn(v.slam, -100, 100));
+
 function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)["stage"]): Promise<RealtimeChannel> {
   leaveRoom(false);
   const id = myId();
@@ -130,69 +154,115 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
   const ch = supabase.channel(`tble:${name}`, { config: { broadcast: { self: false }, presence: { key: id } } });
   room = ch;
   ch.on("broadcast", { event: "pose" }, ({ payload }) => {
+    if (!isRecord(payload)) return;
     const p = payload as Peer & { skinVer?: number };
-    // Never treat ourselves as a remote peer (prevents ghost duplicate in lobby)
-    if (!p.id || p.id === id) return;
+    if (!isText(p.id, 64) || p.id === id ||
+      !isFiniteIn(p.x) || !isFiniteIn(p.y) || !isFiniteIn(p.z) ||
+      !isFiniteIn(p.yaw, -100000, 100000) || !isFiniteIn(p.hp, 0, 1000) ||
+      (p.name !== undefined && !isText(p.name, 32)) ||
+      (p.gx !== undefined && !isFiniteIn(p.gx)) ||
+      (p.gy !== undefined && !isFiniteIn(p.gy)) ||
+      (p.gz !== undefined && !isFiniteIn(p.gz))) return;
     const cur = NET.peers.get(p.id);
-    const skin = p.skin ?? cur?.skin;
-    const skinChanged = !!p.skin && (!cur?.skin || (p as { skinVer?: number }).skinVer !== (cur as { skinVer?: number } | undefined)?.skinVer);
+    const skin = isRecord(p.skin) ? p.skin as unknown as Skin : cur?.skin;
+    const skinChanged = !!p.skin && (!cur?.skin || p.skinVer !== (cur as { skinVer?: number } | undefined)?.skinVer);
     NET.peers.set(p.id, {
-      id: p.id,
-      name: cur?.name ?? NET.names[p.id] ?? p.name ?? "player",
-      x: p.x, y: p.y, z: p.z, yaw: p.yaw,
-      hp: p.hp, dead: !!p.dead,
-      t: performance.now(),
-      skin,
-      grappling: !!p.grappling,
-      gx: p.gx, gy: p.gy, gz: p.gz,
-      ...(p.skin ? { skinVer: (p as { skinVer?: number }).skinVer } as object : cur ? { skinVer: (cur as { skinVer?: number }).skinVer } as object : {}),
+      id: p.id, name: cur?.name ?? NET.names[p.id] ?? p.name ?? "player",
+      x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: p.hp, dead: p.dead === true,
+      t: performance.now(), skin, grappling: p.grappling === true,
+      gx: isFiniteIn(p.gx) ? p.gx : undefined,
+      gy: isFiniteIn(p.gy) ? p.gy : undefined,
+      gz: isFiniteIn(p.gz) ? p.gz : undefined,
+      ...(p.skin && isRecord(p.skin) ? { skinVer: isFiniteIn(p.skinVer, 0, 1000000) ? p.skinVer : undefined } : cur ? { skinVer: (cur as { skinVer?: number }).skinVer } : {}),
     } as Peer);
-    // Only force React re-render on join or skin change — pose interp runs from the Map in useFrame
     if (!cur || skinChanged) bump();
   });
   ch.on("broadcast", { event: "hit" }, ({ payload }) => {
-    if (payload.to !== id) return;
-    if (NET.kind === "pvp" ? NET.stage === "playing" : true) NET_HOOKS.onHit(payload.dmg as number, !!payload.stun, payload.stunT as number | undefined, { tp: payload.tp as number[] | undefined, pull: payload.pull as number[] | undefined, slam: payload.slam as number | undefined });
+    if (!isRecord(payload) || payload.to !== id || !isFiniteIn(payload.dmg, 0, 100) ||
+      (payload.stunT !== undefined && !isFiniteIn(payload.stunT, 0, 10000)) || !isHitExtra(payload)) return;
+    if (NET.kind === "pvp" ? NET.stage === "playing" : true) {
+      NET_HOOKS.onHit(payload.dmg, payload.stun === true, payload.stunT, {
+        tp: payload.tp, pull: payload.pull, slam: payload.slam,
+      });
+    }
   });
   ch.on("broadcast", { event: "vfx" }, ({ payload }) => {
-    NET_HOOKS.onVfx(payload as Record<string, unknown>);
+    if (isRecord(payload)) NET_HOOKS.onVfx(payload as Record<string, unknown>);
   });
-  ch.on("broadcast", { event: "ents" }, ({ payload }) => { if (!NET.isHost) NET_HOOKS.onEnts(payload as EntSnap); });
-  ch.on("broadcast", { event: "ehit" }, ({ payload }) => { if (NET.isHost) NET_HOOKS.onEhit(payload as EHit); });
-  ch.on("broadcast", { event: "eshot" }, ({ payload }) => { if (!NET.isHost) NET_HOOKS.onEshot(payload.b as number[]); });
-  ch.on("broadcast", { event: "espawn" }, ({ payload }) => { if (NET.isHost) NET_HOOKS.onEspawn(payload as { kind: string; n: number }); });
+  ch.on("broadcast", { event: "ents" }, ({ payload }) => {
+    if (!NET.isHost && isEntSnap(payload)) NET_HOOKS.onEnts(payload);
+  });
+  ch.on("broadcast", { event: "ehit" }, ({ payload }) => {
+    if (NET.isHost && isRecord(payload) &&
+      (payload.k === "t" || payload.k === "b" || payload.k === "boss") &&
+      isFiniteIn(payload.i, 0, 10000) && Number.isInteger(payload.i) &&
+      isFiniteIn(payload.dmg, 0, 1000) && isHitExtra(payload)) NET_HOOKS.onEhit(payload as EHit);
+  });
+  ch.on("broadcast", { event: "eshot" }, ({ payload }) => {
+    if (!NET.isHost && isRecord(payload) && isNumberArray(payload.b, 3000)) NET_HOOKS.onEshot(payload.b);
+  });
+  ch.on("broadcast", { event: "espawn" }, ({ payload }) => {
+    if (NET.isHost && isRecord(payload) && isText(payload.kind, 40) &&
+      isFiniteIn(payload.n, 0, 1000) && Number.isInteger(payload.n)) NET_HOOKS.onEspawn({ kind: payload.kind, n: payload.n });
+  });
   ch.on("broadcast", { event: "won" }, () => { if (!NET.isHost) NET_HOOKS.onWon(); });
   ch.on("broadcast", { event: "death" }, ({ payload }) => {
-    const id = payload.id as string;
+    if (!isRecord(payload) || !isText(payload.id, 64)) return;
+    const deadId = payload.id as string;
     if (NET.kind === "coop") {
-      if (!G.reviveQueue.includes(id)) G.reviveQueue.push(id);
-      const pr = NET.peers.get(id);
+      if (deadId !== id && !NET.peers.has(deadId)) return;
+      if (!G.reviveQueue.includes(deadId)) G.reviveQueue.push(deadId);
+      const pr = NET.peers.get(deadId);
       if (pr) pr.dead = true;
       bump();
       return;
     }
-    onDeath(id);
+    if (NET.kind === "pvp" && NET.names[deadId]) onDeath(deadId);
   });
   ch.on("broadcast", { event: "revive" }, ({ payload }) => {
-    const id = payload.id as string;
-    G.reviveQueue = G.reviveQueue.filter((x) => x !== id);
-    NET_HOOKS.onRevive(id);
+    if (!isRecord(payload) || !isText(payload.id, 64) || (payload.id !== id && !NET.peers.has(payload.id))) return;
+    const revivedId = payload.id as string;
+    G.reviveQueue = G.reviveQueue.filter((x) => x !== revivedId);
+    NET_HOOKS.onRevive(revivedId);
     bump();
   });
-  ch.on("broadcast", { event: "shards" }, ({ payload }) => { G.shardProgress = payload.n as number; });
-  ch.on("broadcast", { event: "chat" }, ({ payload }) => { onRemoteChat(payload as Record<string, unknown>); });
-  ch.on("broadcast", { event: "pickstart" }, ({ payload }) => beginPick(payload.ms as number));
-  ch.on("broadcast", { event: "pick" }, ({ payload }) => { picks[payload.id as string] = payload.tod as TimeOfDay; });
-  ch.on("broadcast", { event: "start" }, ({ payload }) => onStart(payload as StartMsg));
-  ch.on("broadcast", { event: "round" }, ({ payload }) => onRound(payload as RoundMsg));
-  ch.on("broadcast", { event: "over" }, ({ payload }) => onOver(payload as OverMsg));
-  ch.on("broadcast", { event: "rematch" }, ({ payload }) => onRematchReq(payload.from as string));
+  ch.on("broadcast", { event: "shards" }, ({ payload }) => {
+    if (isRecord(payload) && isFiniteIn(payload.n, 0, 1000000) && Number.isInteger(payload.n)) G.shardProgress = payload.n;
+  });
+  ch.on("broadcast", { event: "chat" }, ({ payload }) => {
+    if (isRecord(payload)) onRemoteChat(payload as Record<string, unknown>);
+  });
+  ch.on("broadcast", { event: "pickstart" }, ({ payload }) => {
+    if (isRecord(payload) && isFiniteIn(payload.ms, 500, 30000)) beginPick(payload.ms);
+  });
+  ch.on("broadcast", { event: "pick" }, ({ payload }) => {
+    if (isRecord(payload) && isText(payload.id, 64) && isTimeOfDay(payload.tod) && NET.names[payload.id]) picks[payload.id] = payload.tod;
+  });
+  ch.on("broadcast", { event: "start" }, ({ payload }) => {
+    if (!isRecord(payload) || !isTimeOfDay(payload.tod) || !isRecord(payload.colors) ||
+      !Object.values(payload.colors).every((c) => c === "red" || c === "blue") || !isScores(payload.scores)) return;
+    onStart(payload as StartMsg);
+  });
+  ch.on("broadcast", { event: "round" }, ({ payload }) => {
+    if (!isRecord(payload) || !isScores(payload.scores) || !isText(payload.dead, 64) || !NET.names[payload.dead]) return;
+    onRound(payload as RoundMsg);
+  });
+  ch.on("broadcast", { event: "over" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.winner, 64) || !NET.names[payload.winner] || !isScores(payload.scores)) return;
+    onOver(payload as OverMsg);
+  });
+  ch.on("broadcast", { event: "rematch" }, ({ payload }) => {
+    if (isRecord(payload) && isText(payload.from, 64) && NET.names[payload.from]) onRematchReq(payload.from);
+  });
   ch.on("broadcast", { event: "rematch-no" }, () => {
     NET.rematchStatus = "Rematch declined";
     NET.rematchBlockedUntil = Date.now() + 5000;
     bump();
   });
-  ch.on("broadcast", { event: "rematch-go" }, ({ payload }) => void startPvp(payload.room as string, payload.host as string === id, NET.partyMatch));
+  ch.on("broadcast", { event: "rematch-go" }, ({ payload }) => {
+    if (isRecord(payload) && isText(payload.room, 100) && isText(payload.host, 64) &&
+      NET.kind === "pvp" && NET.stage === "over") void startPvp(payload.room, payload.host === id, NET.partyMatch);
+  });
   ch.on("presence", { event: "sync" }, () => {
     const state = ch.presenceState<Meta>();
     const ids = new Set<string>();
@@ -356,8 +426,8 @@ export async function queue1v1() {
       if (a.id !== id && b.id !== id) continue;
       matched = true;
       const room = `pvp-${a.id}-${b.id}`;
-      // Lower id announces so both sides always agree
-      if (id === a.id || id === b.id) {
+      // Only the first player in the sorted pair announces the match.
+      if (id === a.id) {
         void ch.send({ type: "broadcast", event: "matched", payload: { room, a: a.id, b: b.id } });
       }
       void startPvp(room, a.id === id);

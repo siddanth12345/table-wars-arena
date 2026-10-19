@@ -62,7 +62,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   {
     id: "hardcore", name: "Hardcore", icon: "🛡️",
     summary: "I overcame all odds.",
-    how: "Beat the offline campaign without taking any damage. Any damage disqualifies the run, and using Combo Burst during the run also disqualifies it.",
+    how: "Beat the offline campaign without taking any damage. Any damage disqualifies the run. Using Combo Burst to heal also disqualifies the run.",
   },
   {
     id: "down_you_go", name: "Down You Go", icon: "⬇️",

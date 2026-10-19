@@ -465,6 +465,8 @@ export function World() {
   const tbMoved = useRef<{ id: string; x: number; y: number; z: number }[]>([]);
   const tpRefresh = useRef(0);
   const slamStun = useRef({ dur: 0, exp: 0 });
+  /** Smooth online sword-stick: lerp toward target instead of hard teleports */
+  const swordStick = useRef({ active: false, x: 0, y: 0, z: 0 });
   /** ability-applied stun timers (seconds left) for bots — real freeze */
   const abilityStun = useRef(new Map<string, number>());
   const teleportMeshRef = useRef<THREE.Mesh | null>(null);
@@ -1521,8 +1523,16 @@ const kd = (e: KeyboardEvent) => {
   NET_HOOKS.onHit = (d, stun, stunT, extra) => {
     if (d > 0) damagePlayer(d);
     if (extra?.tp && !G.pvpDead && !G.campaignDead) pos.current.set(extra.tp[0]!, extra.tp[1]!, extra.tp[2]!);
-    if (extra?.stick && !G.pvpDead && !G.campaignDead) { pos.current.set(extra.stick[0]!, extra.stick[1]!, extra.stick[2]!); hv.current.set(0, 0, 0); vy.current = 0; grounded.current = false; }
-    if (extra?.unstick) { hv.current.set(0, 0, 0); }
+    if (extra?.stick && !G.pvpDead && !G.campaignDead) {
+      const st = swordStick.current;
+      st.active = true;
+      st.x = extra.stick[0]!; st.y = extra.stick[1]!; st.z = extra.stick[2]!;
+      hv.current.set(0, 0, 0); vy.current = 0; grounded.current = false;
+    }
+    if (extra?.unstick) {
+      swordStick.current.active = false;
+      hv.current.set(0, 0, 0);
+    }
     if (extra?.push && !G.pvpDead && !G.campaignDead) { hv.current.set(extra.push[0]!, 0, extra.push[2]!); if (extra.push[1] !== undefined) vy.current = extra.push[1]!; grounded.current = false; }
     if (extra?.slam && !G.pvpDead && !G.campaignDead && G.playerHp > 0) {
       // slammed straight down: cancel every other velocity; the stun starts once I touch the ground
@@ -1948,26 +1958,39 @@ const kd = (e: KeyboardEvent) => {
       else if (slamStun.current.exp <= 0) slamStun.current.dur = 0;
     }
     if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
+    // Smooth sword-stick follow (online victims): lerp to last stick target, never hard-teleport
+    if (swordStick.current.active && !G.pvpDead && !G.campaignDead) {
+      const st = swordStick.current;
+      const k = 1 - Math.exp(-20 * dt);
+      p.x += (st.x - p.x) * k;
+      p.y += (st.y - p.y) * k;
+      p.z += (st.z - p.z) * k;
+      hv.current.set(0, 0, 0);
+      vy.current = 0;
+      grounded.current = false;
+    }
     // Boss sword: spherical contact hitbox, attachment DoT, five distinct solid bounces.
     for (let swordIndex = 0; swordIndex < bossSwords.current.length; swordIndex++) {
       const sword = bossSwords.current[swordIndex]!;
       for (const [id, stuck] of sword.stuck) {
         if (stuck.kind === "t") {
-          const t = tables[Number(id.slice(1))];
-          if (!t?.alive) { sword.stuck.delete(id); continue; }
-          t.pos.copy(sword.pos).add(stuck.offset);
-          
+          const tb = tables[Number(id.slice(1))];
+          if (!tb?.alive) { sword.stuck.delete(id); continue; }
+          const k = 1 - Math.exp(-22 * dt);
+          const tx = sword.pos.x + stuck.offset.x, ty = sword.pos.y + stuck.offset.y, tz = sword.pos.z + stuck.offset.z;
+          tb.pos.x += (tx - tb.pos.x) * k; tb.pos.y += (ty - tb.pos.y) * k; tb.pos.z += (tz - tb.pos.z) * k;
         } else if (stuck.kind === "b") {
           const u = blues[Number(id.slice(1))];
           if (!u?.alive) { sword.stuck.delete(id); continue; }
-          u.pos.copy(sword.pos).add(stuck.offset);
-          
+          const k = 1 - Math.exp(-22 * dt);
+          const tx = sword.pos.x + stuck.offset.x, ty = sword.pos.y + stuck.offset.y, tz = sword.pos.z + stuck.offset.z;
+          u.pos.x += (tx - u.pos.x) * k; u.pos.y += (ty - u.pos.y) * k; u.pos.z += (tz - u.pos.z) * k;
         } else {
           const peer = NET.peers.get(id);
           if (!peer || peer.dead) { sword.stuck.delete(id); continue; }
           stuck.netAcc += dt;
-          if (stuck.netAcc >= 0.1) {
-            stuck.netAcc %= 0.1;
+          if (stuck.netAcc >= 1 / 30) {
+            stuck.netAcc %= 1 / 30;
             const extra = { stick: [sword.pos.x + stuck.offset.x, sword.pos.y + stuck.offset.y, sword.pos.z + stuck.offset.z] };
             hitPeer(id, 0, false, undefined, extra);
           }

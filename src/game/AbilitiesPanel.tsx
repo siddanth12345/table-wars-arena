@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ABILITY_LIST, setAbility, useAbility, type AbilityId } from "./abilities";
 import { MASTERY_LINES, achievementFor, hasAchievement, hasMastery, masteryOn, setMasteryOn, useProgress } from "./mastery";
+import { G } from "./state";
 
 const btn = "rounded-xl border-2 border-white/20 bg-black/50 px-3 py-2 text-sm font-bold uppercase tracking-wide text-white hover:bg-white/10 transition";
 const btnOn = "rounded-xl border-2 border-crosshair bg-crosshair/20 px-3 py-2 text-sm font-bold uppercase tracking-wide text-crosshair";
@@ -89,7 +90,7 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
           <div className="space-y-3 overflow-y-auto p-6 md:flex-1">
             {ABILITY_LIST.map((a) => {
               const on = selected === a.id;
-              const unlocked = a.id !== "boss" || hasAchievement("hardcore");
+              const unlocked = a.id !== "boss" || hasAchievement("hardcore") || G.mode === "training";
               return (
                 <div
                   key={a.id}
@@ -171,8 +172,8 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className={`mt-4 w-full ${selected === detail ? btnOn : btn}`}
-                  onClick={() => { if (detail !== "boss" || hasAchievement("hardcore")) setAbility(detail); }}
-                  disabled={detail === "boss" && !hasAchievement("hardcore")}
+                  onClick={() => { if (detail !== "boss" || hasAchievement("hardcore") || G.mode === "training") setAbility(detail); }}
+                  disabled={detail === "boss" && !hasAchievement("hardcore") && G.mode !== "training"}
                 >
                   {detail === "boss" && !hasAchievement("hardcore") ? "Locked 🔒" : selected === detail ? "Selected" : "Select this ability"}
                 </button>

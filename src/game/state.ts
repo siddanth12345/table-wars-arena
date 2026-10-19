@@ -337,8 +337,8 @@ export function onParrySuccess() {
 export function tryComboBurst() {
   if (G.phase !== "playing" || G.combo < comboBurstThreshold()) return false;
   if (G.playerHp <= 0 || G.pvpDead || G.campaignDead) return false;
-  if (G.mode === "game") G.campaignHardcoreEligible = false;
   const heal = comboBurstHeal();
+  if (G.mode === "game" && G.playerHp < cfg.maxHp() && heal > 0) G.campaignHardcoreEligible = false;
   G.combo = 0;
   G.comboTimer = 0;
   G.slamCd = 0;

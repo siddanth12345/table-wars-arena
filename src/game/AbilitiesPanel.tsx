@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ABILITY_LIST, setAbility, useAbility, type AbilityId } from "./abilities";
+import { ABILITY_LIST, setAbility, useAbility, canUseAbility, type AbilityId } from "./abilities";
 import { MASTERY_LINES, achievementFor, hasAchievement, hasMastery, masteryOn, setMasteryOn, useProgress } from "./mastery";
 import { G } from "./state";
 

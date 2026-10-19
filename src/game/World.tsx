@@ -14,7 +14,7 @@ import {
   tune, maxCharges,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
-import { getAbility, getLastUnlockedAbility, setAbility } from "./abilities";
+import { getAbility, getLastUnlockedAbility, setAbility, clampSelectedAbility } from "./abilities";
 import { hasAchievement, masteryOn, onCampaignWin, onPlayerDeath } from "./mastery";
 import { createTableBot, skinKey } from "./tableBotFactory";
 import { Room, ROOM, SOLIDS } from "./Room";
@@ -1942,6 +1942,7 @@ const kd = (e: KeyboardEvent) => {
       G.dmgFloat.pop = Math.max(0, G.dmgFloat.pop - dt * 2.2);
     }
     // --- abilities ---
+    clampSelectedAbility(G.mode);
     // Offline pause freezes ability CDs (and later fire/boss damage). Online never freezes.
     const offlinePaused = G.userPaused && !NET.online;
     if (G.abilityCd > 0 && !offlinePaused) {

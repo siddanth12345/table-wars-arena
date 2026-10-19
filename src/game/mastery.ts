@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { getAbility, type AbilityId } from "./abilities";
+import { getAbility, setAbilityUnlockCheck, type AbilityId } from "./abilities";
 import { G } from "./state";
 
 /**
@@ -190,6 +190,12 @@ export function getProgress() { return progress; }
 export function setProgressPersister(fn: (() => void) | null) { persister = fn; }
 
 export const hasAchievement = (id: AchievementId) => !!progress.earned[id];
+
+// Gate Boss ability on Hardcore without a circular runtime import from abilities → mastery
+setAbilityUnlockCheck((id) => {
+  if (id !== "boss") return true;
+  return !!progress.earned.hardcore;
+});
 export const hasMastery = (ab: AbilityId) => { const a = achievementFor(ab); return !!a && !!progress.earned[a.id]; };
 // training mastery overrides (existing)
 const trainPick: Partial<Record<AbilityId, boolean>> = {};
@@ -326,6 +332,10 @@ export function resetProgress() {
   progress = { earned: {}, off: {}, pvpWins: 0 };
   justUnlocked = [];
   bump();
+  // Drop locked abilities (e.g. Boss without Hardcore) after progress wipe
+  try {
+    void import("./abilities").then((a) => a.clampSelectedAbility());
+  } catch { /* ignore */ }
 }
 
 /** Cosmetic unlock helpers for skins */

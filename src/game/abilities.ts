@@ -47,6 +47,12 @@ const LAST_UNLOCKED_STORE = "tw-last-unlocked-ability";
 let selected: AbilityId = "wall";
 const subs = new Set<() => void>();
 
+/** Injected from mastery to avoid circular imports. */
+let unlockCheck: ((id: AbilityId, mode?: string) => boolean) | null = null;
+export function setAbilityUnlockCheck(fn: (id: AbilityId, mode?: string) => boolean) {
+  unlockCheck = fn;
+}
+
 function load() {
   try {
     const v = localStorage.getItem(STORE);
@@ -57,7 +63,27 @@ load();
 
 function bump() { subs.forEach((f) => f()); }
 
-export function getAbility() { return selected; }
+/** Boss needs Hardcore (except training). Other abilities are always free. */
+export function canUseAbility(id: AbilityId, mode?: string): boolean {
+  if (id !== "boss") return true;
+  if (mode === "training") return true;
+  if (unlockCheck) return unlockCheck(id, mode);
+  // Fallback before mastery finishes loading: deny Boss
+  return false;
+}
+
+/** If current selection isn't allowed, fall back to wall and persist. */
+export function clampSelectedAbility(mode?: string) {
+  if (canUseAbility(selected, mode)) return selected;
+  selected = "wall";
+  try { localStorage.setItem(STORE, "wall"); } catch { /* ignore */ }
+  bump();
+  return selected;
+}
+
+export function getAbility(mode?: string) {
+  return clampSelectedAbility(mode);
+}
 export function getLastUnlockedAbility(): AbilityId {
   try {
     const v = localStorage.getItem(LAST_UNLOCKED_STORE);
@@ -65,7 +91,8 @@ export function getLastUnlockedAbility(): AbilityId {
   } catch { /* ignore */ }
   return "wall";
 }
-export function setAbility(id: AbilityId) {
+export function setAbility(id: AbilityId, mode?: string) {
+  if (!canUseAbility(id, mode)) return;
   if (id !== "boss") {
     try { localStorage.setItem(LAST_UNLOCKED_STORE, id); } catch { /* ignore */ }
   }
@@ -76,7 +103,7 @@ export function setAbility(id: AbilityId) {
 export function useAbility() {
   return useSyncExternalStore(
     (cb) => { subs.add(cb); return () => { subs.delete(cb); }; },
-    () => selected,
+    () => clampSelectedAbility(),
     () => selected,
   );
 }

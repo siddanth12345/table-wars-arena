@@ -68,6 +68,8 @@ export const ONLINE_TUT_STEPS: { title: string; text: string; enter?: boolean }[
 export const G = {
   phase: "home" as Phase,
   mode: "game" as Mode,
+  /** Offline campaign remains eligible for Hardcore until damage or Combo Burst is used. */
+  campaignHardcoreEligible: true,
   stage: "tables" as Stage,
   locked: false,
   playerHp: MAX_HP,
@@ -163,7 +165,7 @@ export const G = {
 
 export function resetGame(mode: Mode = G.mode) {
   Object.assign(G, {
-    mode, stage: "tables", playerHp: MAX_HP, slamCd: 0, slamming: false, bounceWin: 0, ammo: MAG, reloading: 0, parryWin: 0, parryCd: 0, buff: 0,
+    mode, stage: "tables", playerHp: MAX_HP, campaignHardcoreEligible: mode === "game", slamCd: 0, slamming: false, bounceWin: 0, ammo: MAG, reloading: 0, parryWin: 0, parryCd: 0, buff: 0,
     dashCd: 0, bombCd: 0, airJumps: AIR_JUMPS, airDashes: AIR_DASHES, wallrun: false, wallrunTime: 3, wallrunRecharge: 1, wallrunReady: true, grounded: true, grappling: false,
     speed: 0, altitude: 0, slamAoe: 1.35, slamAoeMax: 10.8,
     hitFlash: 0, hurtFlash: 0, parryFlash: 0, redFlash: 0, shake: 0, alive: 1, bluesAlive: 0, kills: 0, capReached: false,
@@ -335,6 +337,7 @@ export function onParrySuccess() {
 export function tryComboBurst() {
   if (G.phase !== "playing" || G.combo < comboBurstThreshold()) return false;
   if (G.playerHp <= 0 || G.pvpDead || G.campaignDead) return false;
+  if (G.mode === "game") G.campaignHardcoreEligible = false;
   const heal = comboBurstHeal();
   G.combo = 0;
   G.comboTimer = 0;

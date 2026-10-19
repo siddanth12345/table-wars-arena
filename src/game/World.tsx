@@ -13,7 +13,7 @@ import {
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, SHARD_SPAWN_N, LOBBY_RESPAWN, FREECAM_SPEEDS,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
-import { getAbility } from "./abilities";
+import { getAbility, getLastUnlockedAbility, setAbility } from "./abilities";
 import { hasAchievement, masteryOn, onCampaignWin, onPlayerDeath } from "./mastery";
 import { createTableBot, skinKey } from "./tableBotFactory";
 import { Room, ROOM, SOLIDS } from "./Room";
@@ -93,7 +93,7 @@ type Table = {
   jumpT: number; jumpsLeft: number; dashT: number; dash: THREE.Vector3; bob: number; s: number; yaw: number; summoned: boolean; passive: boolean;
 };
 type Splinter = { pos: THREE.Vector3; vel: THREE.Vector3; rot: THREE.Euler; spin: THREE.Vector3; life: number; size: number };
-type Hazard = { active: boolean; kind: "quarter" | "sword" | "stomp" | "aoe"; t: number; total: number; fx: number; x: number; z: number; a0: number; dmg?: number };
+type Hazard = { active: boolean; kind: "quarter" | "sword" | "stomp" | "aoe"; t: number; total: number; fx: number; x: number; z: number; a0: number; dmg?: number; owner?: "player" | "boss" };
 
 const FX_LIGHTS = 5;
 const BOT_LIGHTS = 6;
@@ -380,6 +380,7 @@ export function World() {
   // Air fireballs (fire ability while airborne) + remote visual bullets
   const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>() });
   const bossSwordMesh = useRef<THREE.Group | null>(null);
+  const lastAbilityMode = useRef(G.mode);
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
     active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string, m: false, b: 0, idle: 0,
   })), []);
@@ -1002,10 +1003,10 @@ export function World() {
     if (any) G.hits++;
     boomFx(at, BULLET_AOE_R, 0.25, true, "none");
   };
-  const addHazard = (kind: Hazard["kind"], x: number, z: number, t: number, a0?: number, dmg?: number) => {
+  const addHazard = (kind: Hazard["kind"], x: number, z: number, t: number, a0?: number, dmg?: number, owner: "player" | "boss" = "boss") => {
     const h = hazards.find((q) => !q.active);
     if (!h) return;
-    Object.assign(h, { active: true, kind, t, total: t, fx: 0, x, z, a0: a0 ?? Math.floor(Math.random() * 4) * (Math.PI / 2), dmg });
+    Object.assign(h, { active: true, kind, t, total: t, fx: 0, x, z, a0: a0 ?? Math.floor(Math.random() * 4) * (Math.PI / 2), dmg, owner });
   };
 
   useEffect(() => {
@@ -1696,6 +1697,11 @@ const kd = (e: KeyboardEvent) => {
     const cam = camera as THREE.PerspectiveCamera;
     const p = pos.current;
     const b = boss.current;
+    if (lastAbilityMode.current !== G.mode) {
+      const leavingTraining = lastAbilityMode.current === "training" && G.mode !== "training";
+      lastAbilityMode.current = G.mode;
+      if (leavingTraining && getAbility() === "boss" && !hasAchievement("hardcore")) setAbility(getLastUnlockedAbility());
+    }
 
     const clearArena = () => {
       p.copy(START);
@@ -1987,7 +1993,7 @@ const kd = (e: KeyboardEvent) => {
           cam.getWorldDirection(look);
           // The quarter's origin stays at the room center; its middle follows the crosshair direction.
           const aimAngle = Math.atan2(-look.z, look.x);
-          addHazard("quarter", 0, 0, 1, aimAngle - Math.PI / 4, 25);
+          addHazard("quarter", 0, 0, 1, aimAngle - Math.PI / 4, 25, "player");
           G.abilityCd = 4;
           G.abilityCharges = 0;
           playSfx("stun");
@@ -3245,7 +3251,7 @@ const kd = (e: KeyboardEvent) => {
                 const ang = (Math.atan2(-z, x) - h.a0 + Math.PI * 4) % (Math.PI * 2);
                 return Math.hypot(x, z) <= R && ang <= Math.PI / 2;
               };
-              if (inQuarter(p.x, p.z)) damagePlayer(h.dmg ?? BIG_DMG);
+              if (h.owner !== "player" && inQuarter(p.x, p.z)) damagePlayer(h.dmg ?? BIG_DMG);
               for (const t of tables) if (t.alive && inQuarter(t.pos.x, t.pos.z)) hitTable(t, h.dmg ?? BIG_DMG);
               for (const u of blues) if (u.alive && inQuarter(u.pos.x, u.pos.z)) hitBlue(u, h.dmg ?? BIG_DMG);
               if (NET.online && (NET.kind === "pvp" || NET.kind === "lobby")) {

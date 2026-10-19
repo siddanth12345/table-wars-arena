@@ -390,8 +390,9 @@ export function World() {
     stung: new Set<string>(), tickAcc: new Map<string, number>(), netId: "" as string, m: false,
   })), []);
   // Air fireballs (fire ability while airborne) + remote visual bullets
-  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), returnHitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>(), stuck: new Map<string, { kind: "t" | "b" | "p"; offset: THREE.Vector3; netAcc: number }>() });
-  const bossSwordMesh = useRef<THREE.Group | null>(null);
+  const makeBossSword = () => ({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), returnHitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>(), stuck: new Map<string, { kind: "t" | "b" | "p"; offset: THREE.Vector3; netAcc: number }>() });
+  const bossSwords = useRef([makeBossSword(), makeBossSword(), makeBossSword()]);
+  const bossSwordMeshes = useRef<Array<THREE.Group | null>>([null, null, null]);
   const lastAbilityMode = useRef(G.mode);
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
     active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string, m: false, b: 0, idle: 0,
@@ -707,10 +708,10 @@ export function World() {
   function despawnBoss() {
     Object.assign(boss.current, { landed: false, y: ROOM.h, vy: 0 });
     hazards.forEach((h) => (h.active = false));
-    bossSword.current.active = false;
-    bossSword.current.returning = false;
-    bossSword.current.hitTargets.clear();
-    bossSword.current.solidObjects.clear();
+    for (const sword of bossSwords.current) {
+      sword.active = false; sword.returning = false; sword.hitTargets.clear(); sword.returnHitTargets.clear();
+      sword.solidObjects.clear(); sword.stuck.clear(); sword.solidHits = 0;
+    }
     waves.forEach((w) => (w.active = false));
     health.forEach((h) => (h.active = false));
     abilityWalls.forEach((w) => { w.active = false; });
@@ -1747,14 +1748,14 @@ const kd = (e: KeyboardEvent) => {
       abilityPads.forEach((pad) => { pad.active = false; });
       abilityFires.forEach((f) => { f.active = false; f.stung.clear(); f.tickAcc.clear(); });
       G.abilityCd = 0;
-      G.abilityCharges = getAbility() === "wall" ? 6 : getAbility() === "trampoline" ? 3 : 1;
+      G.abilityCharges = getAbility() === "wall" ? 6 : (getAbility() === "trampoline" || getAbility() === "boss") ? 3 : 1;
       G.abilitySlow = 0;
       MAP.health = [];
       hazards.forEach((h) => (h.active = false));
-      bossSword.current.active = false;
-      bossSword.current.returning = false;
-      bossSword.current.hitTargets.clear();
-      bossSword.current.solidObjects.clear();
+      for (const sword of bossSwords.current) {
+        sword.active = false; sword.returning = false; sword.hitTargets.clear(); sword.returnHitTargets.clear();
+        sword.solidObjects.clear(); sword.stuck.clear(); sword.solidHits = 0;
+      }
       waves.forEach((w) => (w.active = false));
       bomb.current.alive = false;
       slam.current.on = false;
@@ -1913,7 +1914,7 @@ const kd = (e: KeyboardEvent) => {
       if (G.abilityCd <= 0) {
         playSfx("ability_ready");
         const ab = getAbility();
-        G.abilityCharges = ab === "wall" ? 6 : ab === "trampoline" ? 3 : 1;
+        G.abilityCharges = ab === "wall" ? 6 : (ab === "trampoline" || ab === "boss") ? 3 : 1;
       }
     }
     if (slamStun.current.dur > 0) {

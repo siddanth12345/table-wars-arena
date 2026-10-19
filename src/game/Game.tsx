@@ -26,7 +26,7 @@ import { useAccount } from "./account";
 
 const LIGHT = {
   day: { hemiSky: "#e6f1ff", hemiGround: "#8a8f94", hemi: 0.75, amb: 0.3, ambC: "#f2f7ff", sun: 6.5, sunC: "#f6f9ff", bg: "#8fc4ee", fog: "#a8cce8", lf: "#eef5ff", lf2: "#b9cde0", lfI: 0.9 },
-  evening: { hemiSky: "#ffb36b", hemiGround: "#24120e", hemi: 0.18, amb: 0.06, ambC: "#ffd0a0", sun: 5.8, sunC: "#ff8b3d", bg: "#d96c32", fog: "#b85b32", lf: "#ffb15f", lf2: "#8f4a45", lfI: 0.5 },
+  evening: { hemiSky: "#c4a8d0", hemiGround: "#2a2430", hemi: 0.28, amb: 0.12, ambC: "#e8d0e0", sun: 5.2, sunC: "#ffb088", bg: "#7a6a9a", fog: "#6a5a80", lf: "#d0b0c8", lf2: "#6a5080", lfI: 0.45 },
   night: { hemiSky: "#000000", hemiGround: "#05060c", hemi: 0.04, amb: 0.02, ambC: "#8fa2d8", sun: 3.2, sunC: "#a9bcff", bg: "#000000", fog: "#000000", lf: "#6f84c4", lf2: "#1c2448", lfI: 0.12 },
 };
 

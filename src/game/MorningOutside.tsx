@@ -115,55 +115,74 @@ function GrassTufts() {
 /** Solid houses, planted verges and a circular residential street beyond the open windows. */
 
 /**
- * Equirectangular sky textures.
- * Night: Milky Way inspired by galactic structure (central bulge, Great Rift dust lane,
- * denser star field along the plane). Oriented so the galactic center sits off the moon.
+ * Sky textures + dome.
+ * Night Milky Way (simplified from real structure):
+ * - Thin galactic plane band across the sky
+ * - Yellowish central bulge (stellar population in the core)
+ * - Dark dust lane (Great Rift) cutting the band
+ * - Sparse field stars outside the band; dense white stars in-band
+ * - Soft purple / blue-white nebular patches near the plane
+ * Day/evening: solid base color + soft cartoony clouds baked into ONE opaque map
+ * so there is no transparent second sphere (that caused the polygon ghost).
  */
 function hash2(x: number, y: number) {
   const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
   return s - Math.floor(s);
 }
 
-function makeCloudTexture(kind: "day" | "evening") {
+function makeDayEveningTexture(kind: "day" | "evening") {
   const w = 2048, h = 1024;
   const c = document.createElement("canvas");
   c.width = w; c.height = h;
   const ctx = c.getContext("2d")!;
-  // clear (transparent) — base sky color comes from scene.background
-  ctx.clearRect(0, 0, w, h);
+  // Gradient sky (horizon warmer, zenith cooler) — single bake, no second mesh
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  if (kind === "day") {
+    grad.addColorStop(0, "#6eb0e8");
+    grad.addColorStop(0.45, "#8fc4ee");
+    grad.addColorStop(0.75, "#b7d9f5");
+    grad.addColorStop(1, "#d5eaf8");
+  } else {
+    // Cooler evening: between day blue and warm sunset
+    grad.addColorStop(0, "#3a5a8a");
+    grad.addColorStop(0.35, "#7a6a9a");
+    grad.addColorStop(0.55, "#c4785a");
+    grad.addColorStop(0.75, "#e8a060");
+    grad.addColorStop(1, "#f0c090");
+  }
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
   const clouds = kind === "day"
     ? [
-        { x: 0.18, y: 0.28, sx: 0.28, sy: 0.12, a: 0.55 },
-        { x: 0.55, y: 0.22, sx: 0.34, sy: 0.14, a: 0.5 },
-        { x: 0.78, y: 0.34, sx: 0.22, sy: 0.1, a: 0.45 },
-        { x: 0.35, y: 0.42, sx: 0.26, sy: 0.11, a: 0.4 },
-        { x: 0.08, y: 0.5, sx: 0.2, sy: 0.09, a: 0.35 },
-        { x: 0.62, y: 0.48, sx: 0.3, sy: 0.12, a: 0.42 },
+        { x: 0.18, y: 0.22, sx: 0.26, sy: 0.1, a: 0.7 },
+        { x: 0.52, y: 0.18, sx: 0.32, sy: 0.12, a: 0.65 },
+        { x: 0.78, y: 0.28, sx: 0.22, sy: 0.09, a: 0.55 },
+        { x: 0.35, y: 0.36, sx: 0.24, sy: 0.1, a: 0.5 },
+        { x: 0.62, y: 0.4, sx: 0.28, sy: 0.11, a: 0.48 },
       ]
     : [
-        { x: 0.22, y: 0.32, sx: 0.36, sy: 0.13, a: 0.55 },
-        { x: 0.6, y: 0.26, sx: 0.32, sy: 0.12, a: 0.5 },
-        { x: 0.85, y: 0.38, sx: 0.24, sy: 0.1, a: 0.45 },
-        { x: 0.4, y: 0.45, sx: 0.28, sy: 0.11, a: 0.4 },
-        { x: 0.12, y: 0.55, sx: 0.22, sy: 0.09, a: 0.38 },
+        { x: 0.2, y: 0.25, sx: 0.3, sy: 0.11, a: 0.55 },
+        { x: 0.55, y: 0.2, sx: 0.34, sy: 0.12, a: 0.5 },
+        { x: 0.8, y: 0.32, sx: 0.24, sy: 0.1, a: 0.45 },
+        { x: 0.38, y: 0.38, sx: 0.26, sy: 0.1, a: 0.42 },
       ];
   for (const cl of clouds) {
     const cx = cl.x * w, cy = cl.y * h, rx = cl.sx * w, ry = cl.sy * h;
-    // puffy stacked ellipses (cartoony but soft)
-    for (let i = 0; i < 7; i++) {
-      const ox = (hash2(cl.x * 10, i) - 0.5) * rx * 0.7;
+    for (let i = 0; i < 8; i++) {
+      const ox = (hash2(cl.x * 10, i) - 0.5) * rx * 0.75;
       const oy = (hash2(i, cl.y * 10) - 0.5) * ry * 0.55;
-      const rrx = rx * (0.35 + hash2(i, 3) * 0.35);
-      const rry = ry * (0.4 + hash2(3, i) * 0.35);
+      const rrx = rx * (0.32 + hash2(i, 3) * 0.38);
+      const rry = ry * (0.38 + hash2(3, i) * 0.35);
       const g = ctx.createRadialGradient(cx + ox, cy + oy, 0, cx + ox, cy + oy, Math.max(rrx, rry));
       if (kind === "day") {
-        g.addColorStop(0, `rgba(255,255,255,${cl.a * 0.95})`);
-        g.addColorStop(0.45, `rgba(245,250,255,${cl.a * 0.55})`);
+        g.addColorStop(0, `rgba(255,255,255,${cl.a})`);
+        g.addColorStop(0.5, `rgba(240,248,255,${cl.a * 0.55})`);
         g.addColorStop(1, "rgba(220,235,255,0)");
       } else {
-        g.addColorStop(0, `rgba(255,210,160,${cl.a * 0.9})`);
-        g.addColorStop(0.4, `rgba(255,150,90,${cl.a * 0.5})`);
-        g.addColorStop(1, "rgba(180,60,40,0)");
+        g.addColorStop(0, `rgba(255,230,210,${cl.a * 0.85})`);
+        g.addColorStop(0.45, `rgba(255,180,140,${cl.a * 0.4})`);
+        g.addColorStop(1, "rgba(200,100,80,0)");
       }
       ctx.fillStyle = g;
       ctx.beginPath();
@@ -173,8 +192,6 @@ function makeCloudTexture(kind: "day" | "evening") {
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.needsUpdate = true;
   return tex;
 }
@@ -184,162 +201,160 @@ function makeMilkyWayTexture() {
   const c = document.createElement("canvas");
   c.width = w; c.height = h;
   const ctx = c.getContext("2d")!;
-  // Deep space
+  // Deep black sky
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, w, h);
 
-  // Background stars (faint field everywhere)
-  for (let i = 0; i < 6000; i++) {
+  // Sparse field stars OUTSIDE the galactic ring
+  for (let i = 0; i < 3500; i++) {
     const x = hash2(i, 1) * w;
     const y = hash2(2, i) * h;
-    const b = 0.25 + hash2(i, 7) * 0.55;
-    const s = hash2(9, i) > 0.92 ? 1.6 : 0.7;
-    ctx.fillStyle = `rgba(${200 + b * 55 | 0},${210 + b * 40 | 0},${255},${0.35 + b * 0.45})`;
+    const b = 0.3 + hash2(i, 7) * 0.5;
+    const s = hash2(9, i) > 0.94 ? 1.5 : 0.6;
+    // mostly white, some cool blue-white, rare purple tint
+    const roll = hash2(i, 8);
+    let col: string;
+    if (roll > 0.92) col = `rgba(180,140,255,${0.4 + b * 0.4})`;
+    else if (roll > 0.7) col = `rgba(200,220,255,${0.4 + b * 0.4})`;
+    else col = `rgba(255,255,255,${0.35 + b * 0.45})`;
+    ctx.fillStyle = col;
     ctx.fillRect(x, y, s, s);
   }
 
-  // Galactic plane: band across sky. Center of band ~ mid height with slight tilt via sampling.
-  // Bulge (galactic center) denser — placed ~25% along longitude so it sits away from the moon azimuth.
-  const bulgeX = w * 0.28;
-  const planeY = h * 0.48;
+  // ONE galactic ring / plane — narrow band
+  const planeY = h * 0.5;
+  const bulgeX = w * 0.30; // offset from moon direction
+  const bandHalf = h * 0.055; // thin ring
 
-  // Soft galactic glow along the plane
-  for (let x = 0; x < w; x += 2) {
-    const lon = (x / w) * Math.PI * 2;
-    // Distance from galactic center along the plane (approx)
-    const dLon = Math.min(Math.abs(x - bulgeX), w - Math.abs(x - bulgeX)) / w;
-    const arm = 0.55 + 0.45 * Math.cos(lon * 2.0); // mild arm modulation
-    const thickness = (0.07 + 0.12 * Math.exp(-dLon * dLon * 18) * arm) * h;
-    const bright = (0.15 + 0.85 * Math.exp(-dLon * dLon * 10)) * arm;
-    for (let k = 0; k < 18; k++) {
-      const yy = planeY + (hash2(x, k) - 0.5) * thickness * 2.2;
-      const rr = thickness * (0.4 + hash2(k, x) * 0.8);
-      const g = ctx.createRadialGradient(x, yy, 0, x, yy, rr);
-      const a = bright * (0.04 + hash2(k * 3, x) * 0.06);
-      // warm-white core near bulge, cooler arms (approx stellar population)
-      const near = Math.exp(-dLon * dLon * 14);
-      const r = 180 + near * 60 | 0;
-      const gg = 170 + near * 40 | 0;
-      const bb = 200 + (1 - near) * 40 | 0;
-      g.addColorStop(0, `rgba(${r},${gg},${bb},${a})`);
-      g.addColorStop(1, `rgba(${r},${gg},${bb},0)`);
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(x, yy, rr, 0, Math.PI * 2);
-      ctx.fill();
+  // Soft luminous band (cool white + purple edges)
+  for (let x = 0; x < w; x += 1) {
+    const dLon = Math.min(Math.abs(x - bulgeX), w - Math.abs(x - bulgeX)) / (w * 0.5);
+    // intensity peaks at bulge, falls along plane
+    const along = Math.exp(-dLon * dLon * 2.8);
+    const edge = Math.exp(-dLon * dLon * 0.6);
+    for (let dy = -bandHalf * 2.2; dy <= bandHalf * 2.2; dy += 1.2) {
+      const ny = dy / bandHalf;
+      const profile = Math.exp(-ny * ny * 1.6); // Gaussian cross-section of the ring
+      if (profile < 0.02) continue;
+      const y = planeY + dy + (hash2(x * 0.02, dy) - 0.5) * bandHalf * 0.15;
+      // core of band: white; near bulge: yellow; edges: purple
+      const purple = Math.max(0, Math.abs(ny) - 0.4) * edge;
+      const yellow = along * (1 - Math.abs(ny) * 0.5);
+      const r = Math.min(255, 160 + yellow * 95 + purple * 20);
+      const g = Math.min(255, 155 + yellow * 70 - purple * 30);
+      const b = Math.min(255, 180 + purple * 70 + (1 - yellow) * 30);
+      const a = profile * (0.08 + along * 0.22);
+      ctx.fillStyle = `rgba(${r | 0},${g | 0},${b | 0},${a})`;
+      ctx.fillRect(x, y, 1.5, 1.5);
     }
   }
 
-  // Great Rift — dark dust lane through the plane (real MW feature)
-  ctx.globalCompositeOperation = "multiply";
-  for (let i = 0; i < 40; i++) {
-    const x = bulgeX + (i / 40 - 0.2) * w * 0.55;
-    const y = planeY + Math.sin(i * 0.4) * h * 0.03;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, h * 0.06);
-    g.addColorStop(0, "rgba(8,6,12,0.85)");
-    g.addColorStop(1, "rgba(8,6,12,0)");
+  // Yellow bulge at galactic center
+  {
+    const g = ctx.createRadialGradient(bulgeX, planeY, 0, bulgeX, planeY, h * 0.11);
+    g.addColorStop(0, "rgba(255,230,160,0.7)");
+    g.addColorStop(0.25, "rgba(255,200,110,0.4)");
+    g.addColorStop(0.55, "rgba(200,160,120,0.15)");
+    g.addColorStop(1, "rgba(80,60,40,0)");
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.ellipse(x, y, w * 0.04, h * 0.045, i * 0.05, 0, Math.PI * 2);
+    ctx.ellipse(bulgeX, planeY, h * 0.14, h * 0.09, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Purple nebular patches near plane (not the whole sky)
+  for (let i = 0; i < 12; i++) {
+    const x = (bulgeX + (hash2(i, 40) - 0.3) * w * 0.5 + w) % w;
+    const y = planeY + (hash2(41, i) - 0.5) * bandHalf * 2.5;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, h * (0.04 + hash2(i, 42) * 0.05));
+    g.addColorStop(0, `rgba(140,100,255,${0.12 + hash2(i, 43) * 0.1})`);
+    g.addColorStop(1, "rgba(80,40,160,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, h * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Great Rift — dark dust cutting the band
+  ctx.globalCompositeOperation = "destination-out";
+  for (let i = 0; i < 28; i++) {
+    const t = i / 28;
+    const x = bulgeX + (t - 0.15) * w * 0.42;
+    const y = planeY + Math.sin(t * 6) * bandHalf * 0.35;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, bandHalf * (0.9 + hash2(i, 50) * 0.5));
+    g.addColorStop(0, "rgba(0,0,0,0.75)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(x, y, w * 0.03, bandHalf * 1.1, t * 0.3, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.globalCompositeOperation = "source-over";
 
-  // Bright bulge core
-  {
-    const g = ctx.createRadialGradient(bulgeX, planeY, 0, bulgeX, planeY, h * 0.18);
-    g.addColorStop(0, "rgba(255,236,210,0.55)");
-    g.addColorStop(0.35, "rgba(255,200,160,0.25)");
-    g.addColorStop(1, "rgba(120,100,180,0)");
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(bulgeX, planeY, h * 0.18, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Dense star field along the plane
-  for (let i = 0; i < 9000; i++) {
-    const x = hash2(i * 1.7, 4) * w;
-    const dLon = Math.min(Math.abs(x - bulgeX), w - Math.abs(x - bulgeX)) / w;
-    const y = planeY + (hash2(5, i) - 0.5) * h * (0.05 + 0.12 * (1 - Math.exp(-dLon * 8)));
-    const near = Math.exp(-dLon * dLon * 12);
-    if (hash2(i, 11) > 0.35 + near * 0.4) continue;
-    const b = 0.4 + hash2(i, 13) * 0.6;
-    const s = hash2(i, 17) > 0.97 ? 2.2 : hash2(i, 19) > 0.85 ? 1.4 : 0.8;
-    ctx.fillStyle = `rgba(255,${230 + near * 20 | 0},${200 + b * 40 | 0},${0.5 + b * 0.5})`;
+  // Dense white stars along the ring only
+  for (let i = 0; i < 5000; i++) {
+    const x = hash2(i * 1.3, 60) * w;
+    const dLon = Math.min(Math.abs(x - bulgeX), w - Math.abs(x - bulgeX)) / (w * 0.5);
+    const y = planeY + (hash2(61, i) - 0.5) * bandHalf * (1.6 + dLon);
+    // reject if too far from plane
+    if (Math.abs(y - planeY) > bandHalf * 2.2) continue;
+    const near = Math.exp(-dLon * dLon * 3);
+    if (hash2(i, 62) > 0.45 + near * 0.4) continue;
+    const s = hash2(i, 63) > 0.96 ? 2.0 : hash2(i, 64) > 0.8 ? 1.2 : 0.7;
+    const roll = hash2(i, 65);
+    if (roll > 0.93) ctx.fillStyle = "rgba(200,170,255,0.95)";
+    else if (roll > 0.8) ctx.fillStyle = "rgba(255,240,200,0.95)";
+    else ctx.fillStyle = "rgba(255,255,255,0.95)";
     ctx.fillRect(x, y, s, s);
   }
 
-  // A few brighter "star" flares
-  for (let i = 0; i < 80; i++) {
-    const x = hash2(i, 30) * w;
-    const y = hash2(31, i) * h;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, 3 + hash2(i, 32) * 4);
-    g.addColorStop(0, "rgba(255,255,255,0.95)");
-    g.addColorStop(0.4, "rgba(200,220,255,0.35)");
-    g.addColorStop(1, "rgba(150,180,255,0)");
+  // A few bright point stars with tiny glow
+  for (let i = 0; i < 60; i++) {
+    const x = hash2(i, 70) * w;
+    const y = hash2(71, i) * h;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 4);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.35, "rgba(220,230,255,0.4)");
+    g.addColorStop(1, "rgba(150,160,255,0)");
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
     ctx.fill();
   }
 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.needsUpdate = true;
   return tex;
 }
 
-const SKY = {
-  day: { color: "#8fc4ee", orb: "#fffef5", r: 90 },
-  evening: { color: "#d96c32", orb: "#fff0ad", r: 90 },
-  night: { color: "#000000", orb: "#e8eeff", r: 36 },
+const ORB = {
+  day: { color: "#fffef5", r: 70 },
+  evening: { color: "#ffe8c0", r: 75 },
+  night: { color: "#e8eeff", r: 32 },
 };
 
 function SkyDome({ tod }: { tod: "day" | "evening" | "night" }) {
-  const sky = SKY[tod];
-  // Textures built once per mode
   const map = useMemo(() => {
     if (tod === "night") return makeMilkyWayTexture();
-    return makeCloudTexture(tod);
+    return makeDayEveningTexture(tod);
   }, [tod]);
-
-  // Galaxy rotation: tilt the plane and swing the bulge away from the moon at (-475,650,-1830)
-  const nightRot: [number, number, number] = [-0.35, 2.35, 0.4];
+  const orb = ORB[tod];
+  // Galaxy orientation: plane across sky, bulge away from moon at (-475, 650, -1830)
+  const rot: [number, number, number] = tod === "night" ? [-0.4, 2.4, 0.25] : [0, 0, 0];
 
   return (
     <group>
-      {/* Solid color sphere — high segment count, no second mesh (that caused the octagon artifact) */}
-      <mesh>
-        <sphereGeometry args={[2800, 64, 48]} />
-        <meshBasicMaterial color={sky.color} side={THREE.BackSide} fog={false} depthWrite={false} />
+      {/* ONE opaque sky sphere only — no transparent overlay (fixes polygon ghost) */}
+      <mesh rotation={rot}>
+        <sphereGeometry args={[2600, 96, 64]} />
+        <meshBasicMaterial map={map} side={THREE.BackSide} fog={false} depthWrite={false} toneMapped={false} />
       </mesh>
-      {/* Detail layer: clouds (day/evening) or Milky Way (night) */}
-      <mesh rotation={tod === "night" ? nightRot : [0, 0.15, 0]}>
-        <sphereGeometry args={[2785, 64, 48]} />
-        <meshBasicMaterial
-          map={map}
-          transparent
-          opacity={tod === "night" ? 1 : 0.92}
-          side={THREE.BackSide}
-          fog={false}
-          depthWrite={false}
-        />
-      </mesh>
-      {/* Sun / moon — smooth sphere, not a faceted blob */}
+      {/* Smooth sun / moon */}
       <mesh position={[-475, 650, -1830]}>
-        <sphereGeometry args={[sky.r, 48, 32]} />
-        <meshBasicMaterial color={sky.orb} fog={false} />
+        <sphereGeometry args={[orb.r, 64, 48]} />
+        <meshBasicMaterial color={orb.color} fog={false} toneMapped={false} />
       </mesh>
-      {tod !== "night" && (
-        // Soft glow halo around the sun (no geometry silhouette)
-        <mesh position={[-475, 650, -1830]}>
-          <sphereGeometry args={[sky.r * 2.4, 32, 24]} />
-          <meshBasicMaterial color={sky.orb} transparent opacity={0.18} fog={false} depthWrite={false} />
-        </mesh>
-      )}
     </group>
   );
 }

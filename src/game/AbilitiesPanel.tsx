@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ABILITY_LIST, setAbility, useAbility, type AbilityId } from "./abilities";
-import { MASTERY_LINES, achievementFor, hasMastery, masteryOn, setMasteryOn, useProgress } from "./mastery";
+import { MASTERY_LINES, achievementFor, hasAchievement, hasMastery, masteryOn, setMasteryOn, useProgress } from "./mastery";
 
 const btn = "rounded-xl border-2 border-white/20 bg-black/50 px-3 py-2 text-sm font-bold uppercase tracking-wide text-white hover:bg-white/10 transition";
 const btnOn = "rounded-xl border-2 border-crosshair bg-crosshair/20 px-3 py-2 text-sm font-bold uppercase tracking-wide text-crosshair";
@@ -54,6 +54,16 @@ const DETAILS: Record<AbilityId, { summary: string; lines: string[] }> = {
       "Campaign boss (after parry lock): Teleport is disabled.",
     ],
   },
+  boss: {
+    summary: "A boss-style quarter-room strike and a stun ring from maximum-area slams.",
+    lines: [
+      "Unlock by earning the Hardcore achievement: beat offline campaign without taking damage.",
+      "On the ground, press V to aim a quarter-room warning sector toward your crosshair. It starts at the room center, warns for 1 second, then deals 25 damage.",
+      "The ground strike has a 4-second cooldown and can aim at any angle.",
+      "A maximum-area slam creates an expanding ring that deals no damage and stuns players it catches for 3 seconds.",
+      "This ability has no mastery.",
+    ],
+  },
 };
 
 export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
@@ -62,6 +72,8 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
   const [detail, setDetail] = useState<AbilityId | null>(null);
   const d = detail ? DETAILS[detail] : null;
   const def = detail ? ABILITY_LIST.find((a) => a.id === detail) : null;
+  const masteryAchievement = detail ? achievementFor(detail) : undefined;
+  const masteryLines = detail ? MASTERY_LINES[detail] : undefined;
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4 font-mono text-hud backdrop-blur-sm">
@@ -77,6 +89,7 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
           <div className="space-y-3 overflow-y-auto p-6 md:flex-1">
             {ABILITY_LIST.map((a) => {
               const on = selected === a.id;
+              const unlocked = a.id !== "boss" || hasAchievement("hardcore");
               return (
                 <div
                   key={a.id}
@@ -90,8 +103,8 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                     <p className="mt-1 text-xs leading-relaxed opacity-70">{a.desc}</p>
                   </div>
                   <div className="flex shrink-0 flex-col gap-2">
-                    <button type="button" className={on ? btnOn : btn} onClick={() => setAbility(a.id as AbilityId)}>
-                      {on ? "Selected" : "Select"}
+                    <button type="button" disabled={!unlocked} className={on ? btnOn : btn} onClick={() => { if (unlocked) setAbility(a.id as AbilityId); }}>
+                      {!unlocked ? "Locked 🔒" : on ? "Selected" : "Select"}
                     </button>
                     <button type="button" className={btn} onClick={() => setDetail(a.id)}>
                       Details
@@ -108,11 +121,12 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                     ) : (
                       <button
                         type="button"
+                        disabled={a.id === "boss"}
                         className={`${btn} cursor-not-allowed opacity-40`}
                         onClick={() => setDetail(a.id)}
-                        title={`Earn "${achievementFor(a.id).name}" to unlock`}
+                        title={a.id === "boss" ? "This ability has no mastery" : `Earn "${achievementFor(a.id)?.name ?? "the required achievement"}" to unlock`}
                       >
-                        Mastery 🔒
+                        {a.id === "boss" ? "No Mastery" : "Mastery 🔒"}
                       </button>
                     )}
                   </div>
@@ -138,13 +152,13 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                 </ul>
                 <div className="mt-5 border-t border-white/10 pt-3">
                   <div className="text-[10px] font-bold uppercase tracking-widest text-crosshair">
-                    {achievementFor(detail).masteryName} · {hasMastery(detail) ? (masteryOn(detail) ? "ON" : "OFF") : "LOCKED"}
+                    {masteryAchievement?.masteryName ?? "No mastery available"} · {masteryAchievement ? (hasMastery(detail) ? (masteryOn(detail) ? "ON" : "OFF") : "LOCKED") : "N/A"}
                   </div>
-                  {!hasMastery(detail) && (
-                    <p className="mt-1 text-[11px] opacity-70">Unlock it with the “{achievementFor(detail).name}” achievement: beat campaign mode using this ability.</p>
+                  {masteryAchievement && !hasMastery(detail) && (
+                    <p className="mt-1 text-[11px] opacity-70">Unlock it with the “{masteryAchievement.name}” achievement: beat campaign mode using this ability.</p>
                   )}
                   <ul className="mt-2 space-y-2 text-xs leading-relaxed opacity-80">
-                    {MASTERY_LINES[detail].map((line) => (
+                    {(masteryLines ?? []).map((line) => (
                       <li key={line} className="border-l-2 border-crosshair/40 pl-2">{line}</li>
                     ))}
                   </ul>
@@ -157,9 +171,10 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className={`mt-4 w-full ${selected === detail ? btnOn : btn}`}
-                  onClick={() => setAbility(detail)}
+                  onClick={() => { if (detail !== "boss" || hasAchievement("hardcore")) setAbility(detail); }}
+                  disabled={detail === "boss" && !hasAchievement("hardcore")}
                 >
-                  {selected === detail ? "Selected" : "Select this ability"}
+                  {detail === "boss" && !hasAchievement("hardcore") ? "Locked 🔒" : selected === detail ? "Selected" : "Select this ability"}
                 </button>
               </div>
             </div>

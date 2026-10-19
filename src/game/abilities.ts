@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export type AbilityId = "wall" | "trampoline" | "fire" | "teleport";
+export type AbilityId = "wall" | "trampoline" | "fire" | "teleport" | "boss";
 
 export type AbilityDef = {
   id: AbilityId;
@@ -34,6 +34,12 @@ export const ABILITY_LIST: AbilityDef[] = [
     icon: "🟣",
     desc: "Mark a point (3.5× grapple range). Purple ball grows, then you blink. Cancel free; rewind once during CD.",
   },
+  {
+    id: "boss",
+    name: "Boss",
+    icon: "🔴",
+    desc: "Hardcore unlock. Ground: aim a quarter-room strike (25 damage, 1s warning, 4s cooldown). Max-area slams release a non-damaging stun ring. No mastery.",
+  },
 ];
 
 const STORE = "tw-ability";
@@ -43,7 +49,7 @@ const subs = new Set<() => void>();
 function load() {
   try {
     const v = localStorage.getItem(STORE);
-    if (v === "wall" || v === "trampoline" || v === "fire" || v === "teleport") selected = v;
+    if (v === "wall" || v === "trampoline" || v === "fire" || v === "teleport" || v === "boss") selected = v;
   } catch { /* ignore */ }
 }
 load();

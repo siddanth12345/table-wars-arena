@@ -1978,7 +1978,20 @@ const kd = (e: KeyboardEvent) => {
         if (sword.pos.length() > R * 2.5) sword.returning = true;
       }
       const mesh = bossSwordMesh.current;
-      if (mesh) { mesh.visible = sword.active; if (sword.active) { mesh.position.copy(sword.pos); mesh.rotation.set(0, performance.now() / 80, 0); } }
+      if (mesh) {
+        mesh.visible = sword.active;
+        if (sword.active) {
+          mesh.position.copy(sword.pos);
+          if (sword.returning) {
+            // Point the blade's tip along its return velocity, then spin around its own centerline.
+            mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), sword.vel.clone().normalize());
+            mesh.rotateX(performance.now() / 80);
+          } else {
+            // Outbound: keep the blade horizontal and spinning around its center.
+            mesh.rotation.set(0, performance.now() / 80, 0);
+          }
+        }
+      }
     }
     if (abilityReq.current && G.phase === "playing" && G.locked && !G.freecam && G.countdown <= 0.6 && G.stun <= 0 && !G.pvpDead && !G.campaignDead) {
       abilityReq.current = false;

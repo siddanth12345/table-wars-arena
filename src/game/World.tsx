@@ -38,6 +38,7 @@ const BOT_BULLET_HALF = 0.35;
 const TABLE_S = 1.5;
 const TABLE_W = 6 * TABLE_S;
 const BOMB_R = TABLE_W * 12;
+const BOMB_SIZE = 0.7; // bomb (blast + projectile) is 0.7× its original size
 const AOE_R = TABLE_W * 6;
 const BOMB_DMG = 20;
 const GRAPPLE_MAX = ROOM.r / 4;
@@ -716,7 +717,7 @@ export function World() {
   };
   const explode = (at: THREE.Vector3, tele?: THREE.Vector3) => {
     const buffed = G.buff > 0;
-    const br = BOMB_R * (G.bombBig > 0 ? 1.5 : 1);
+    const br = BOMB_R * BOMB_SIZE * (G.bombBig > 0 ? 1.5 : 1);
     G.tut.bombed = true;
     for (const t of tables) if (t.alive && t.pos.distanceTo(at) < br) hitTable(t, BOMB_DMG * (buffed ? 2 : 1));
     for (const u of blues) if (u.alive && u.pos.distanceTo(at) < br) hitBlue(u, 9999);
@@ -2226,7 +2227,7 @@ const kd = (e: KeyboardEvent) => {
       const travel = fb.vel.length() * dt;
       const steps = Math.max(1, Math.ceil(travel / (fb.m ? 0.75 : 1.2)));
       const stepV = fb.vel.clone().multiplyScalar(dt / steps);
-      const blastR = BOMB_R * 0.5;
+      const blastR = BOMB_R * 0.5; // fireball blast keeps its own size (not scaled by BOMB_SIZE)
       const FB_DMG = 15;
       const maxHits = fb.m ? 3 : 1;
       // 5s with no hit → auto explode in place
@@ -3677,7 +3678,7 @@ const kd = (e: KeyboardEvent) => {
     // --- bomb / explosions / hazards / boss visuals ---
     {
       const alive = bomb.current.alive;
-      const sc = G.bombBig > 0 ? 1.6 : 1;
+      const sc = (G.bombBig > 0 ? 1.6 : 1) * BOMB_SIZE;
       if (bombGroupRef.current) {
         bombGroupRef.current.visible = alive;
         if (alive) {
@@ -4015,6 +4016,7 @@ const kd = (e: KeyboardEvent) => {
       m.visible = rb.active;
       if (!rb.active) return;
       m.position.copy(rb.pos);
+      m.scale.setScalar(BOMB_SIZE);
       const mat = m.material as THREE.MeshStandardMaterial;
       mat.color.set(rb.tele ? "#ffffff" : "#1a1a1a");
       mat.emissive.set(rb.tele ? "#e5e7eb" : "#ff7a1a");

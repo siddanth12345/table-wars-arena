@@ -6,7 +6,7 @@ import {
   createLobby, joinLobby, sendInvite, acceptInvite, dismissInvite, partyGo, kickMember, disbandParty, leaveParty,
   isPartyLeader, inParty, myId, opponentId, startInbox, stopInbox,
 } from "./net";
-import { useAccount, signIn, signUp, playAsGuest, signOut } from "./account";
+import { useAccount, signIn, signUp, playAsGuest, signOut, logoutGuest, transferGuestProgress, isProgressTransferPending, clearProgressTransfer } from "./account";
 import { G, resetGame, lockPointer } from "./state";
 import { getPvpWins, useProgress } from "./mastery";
 import type { TimeOfDay } from "./settings";
@@ -52,6 +52,7 @@ export function ConnectingOverlay({ label, onCancel }: { label: string; onCancel
 // ---------------------------------------------------------------- account
 
 export function AuthPanel({ onClose }: { onClose?: () => void }) {
+  const transferring = isProgressTransferPending();
   const [mode, setMode] = useState<"login" | "create">("login");
   const [u, setU] = useState("");
   const [p, setP] = useState("");
@@ -71,6 +72,11 @@ export function AuthPanel({ onClose }: { onClose?: () => void }) {
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-hud-scrim p-6 font-mono text-hud">
       <form onSubmit={submit} className="w-full max-w-sm rounded-lg border-2 border-hud/30 bg-hud-panel p-8">
         <h2 className="text-3xl font-black uppercase">{mode === "login" ? "Log in" : "Create account"}</h2>
+        {transferring && (
+          <p className="mt-2 rounded border border-crosshair/40 bg-crosshair/10 px-3 py-2 text-xs leading-relaxed text-crosshair">
+            Transferring guest progress — achievements and unlocks from this guest session will be merged into the account (anything the account already has is kept).
+          </p>
+        )}
         <div className="mt-5 space-y-3">
           <input className={input} placeholder="Username (3–20)" value={u} maxLength={20} onChange={(e) => setU(e.target.value)} autoFocus />
           <input className={input} type="password" placeholder="Password" value={p} maxLength={20} onChange={(e) => setP(e.target.value)} />
@@ -85,7 +91,7 @@ export function AuthPanel({ onClose }: { onClose?: () => void }) {
           <button type="button" className={`${btnAlt} w-full`} onClick={() => { setMode(mode === "login" ? "create" : "login"); setErr(""); }}>
             {mode === "login" ? "Create an account" : "I already have an account"}
           </button>
-          <button type="button" className={`${btnAlt} w-full`} onClick={() => { playAsGuest(); onClose?.(); }}>Play as guest</button>
+          <button type="button" className={`${btnAlt} w-full`} onClick={() => { clearProgressTransfer?.(); playAsGuest(); onClose?.(); }}>Play as guest</button>
         </div>
       </form>
     </div>
@@ -94,24 +100,104 @@ export function AuthPanel({ onClose }: { onClose?: () => void }) {
 
 export function AccountBadge({ onLogin }: { onLogin: () => void }) {
   const acc = useAccount();
+  const [confirmGuestOut, setConfirmGuestOut] = useState(false);
   useEffect(() => {
     if (acc.status === "user" || acc.status === "guest") startInbox();
     else stopInbox();
   }, [acc.status, acc.username]);
-  if (acc.status === "user")
+
+  if (acc.status === "user") {
     return (
       <div className="mt-6 flex items-center justify-between gap-2 text-xs">
         <span className="opacity-80">Signed in as <b className="text-crosshair">{acc.username}</b></span>
-        <button className="pointer-events-auto underline opacity-80" onClick={() => void signOut()}>Sign out</button>
+        <button
+          type="button"
+          className="pointer-events-auto underline opacity-80"
+          onClick={() => void signOut()}
+        >
+          Log out
+        </button>
       </div>
     );
+  }
+
+  if (acc.status === "guest") {
+    return (
+      <div className="mt-6 space-y-2 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="opacity-80">Signed in as guest <b className="text-crosshair">{acc.username}</b></span>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              className="pointer-events-auto font-bold text-crosshair underline"
+              onClick={() => {
+                transferGuestProgress();
+                onLogin();
+              }}
+            >
+              Transfer progress
+            </button>
+            <button
+              type="button"
+              className="pointer-events-auto underline opacity-80"
+              onClick={() => setConfirmGuestOut(true)}
+            >
+              Log out
+            </button>
+          </div>
+        </div>
+        {confirmGuestOut && (
+          <div className="rounded-lg border border-white/20 bg-black/60 p-3 text-[11px] leading-relaxed">
+            <p className="opacity-90">
+              Are you sure you want to log out? This could delete your current progress if you log in to another account.
+              Instead you can click <b className="text-crosshair">Transfer progress</b> to keep your progress and log in or create an account.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded bg-crosshair px-3 py-1 font-bold uppercase text-hud-ink"
+                onClick={() => {
+                  setConfirmGuestOut(false);
+                  logoutGuest();
+                  onLogin();
+                }}
+              >
+                Log out anyway
+              </button>
+              <button
+                type="button"
+                className="rounded border border-white/25 px-3 py-1 font-bold uppercase"
+                onClick={() => {
+                  setConfirmGuestOut(false);
+                  transferGuestProgress();
+                  onLogin();
+                }}
+              >
+                Transfer progress
+              </button>
+              <button
+                type="button"
+                className="rounded border border-white/25 px-3 py-1 opacity-80"
+                onClick={() => setConfirmGuestOut(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="mt-6 flex items-center justify-between gap-2 text-xs">
-      <span className="opacity-80">{acc.status === "guest" ? <>Playing as <b className="text-crosshair">{acc.username}</b></> : "Not signed in"}</span>
-      <button className="pointer-events-auto underline" onClick={onLogin}>Log in / Create account</button>
+      <span className="opacity-80">Not signed in</span>
+      <button type="button" className="pointer-events-auto underline opacity-80" onClick={onLogin}>Log in</button>
     </div>
   );
 }
+
+
 
 // ---------------------------------------------------------------- play menu
 

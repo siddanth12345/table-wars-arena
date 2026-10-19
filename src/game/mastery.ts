@@ -317,7 +317,7 @@ export function hydrateProgress(raw: unknown) {
   const next: Progress = { earned: { ...progress.earned }, off: { ...progress.off }, pvpWins: progress.pvpWins | 0 };
   if (Array.isArray(r.earned)) for (const k of r.earned) if (typeof k === "string" && ids.has(k)) next.earned[k as AchievementId] = true;
   if (Array.isArray(r.off)) for (const k of r.off) if (typeof k === "string" && abs.has(k)) next.off[k as AbilityId] = true;
-  if (typeof r.pvpWins === "number" && r.pvpWins >= 0) next.pvpWins = Math.floor(r.pvpWins);
+  if (typeof r.pvpWins === "number" && r.pvpWins >= 0) next.pvpWins = Math.max(next.pvpWins | 0, Math.floor(r.pvpWins));
   progress = next;
   bump();
   tryAwardMasteryKing();

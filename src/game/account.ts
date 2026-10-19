@@ -8,6 +8,11 @@ import { hydrateProgress, resetProgress, serializeProgress, setProgressPersister
 export type Account = { status: "loading" | "signedOut" | "guest" | "user"; userId: string | null; username: string; email: string | null };
 
 let ACC: Account = { status: "loading", userId: null, username: "guest", email: null };
+/** When true, next sign-in/sign-up merges current (guest) progress into the account instead of replacing it. */
+let pendingProgressTransfer = false;
+export function beginProgressTransfer() { pendingProgressTransfer = true; }
+export function clearProgressTransfer() { pendingProgressTransfer = false; }
+export function isProgressTransferPending() { return pendingProgressTransfer; }
 const subs = new Set<() => void>();
 function set(next: Partial<Account>) {
   ACC = { ...ACC, ...next };
@@ -70,6 +75,11 @@ function profilePayload(s: Settings = SETTINGS, skin: Skin = SKIN): StoredSettin
 async function loadProfile(userId: string) {
   const { data } = await supabase.from("profiles").select("username, email, settings, training").eq("id", userId).maybeSingle();
   if (!data) return;
+  const merging = pendingProgressTransfer;
+  pendingProgressTransfer = false;
+  // Normal login: wipe tab progress so you don't carry another person's guest unlocks.
+  // Transfer: keep current progress so hydrate merges (union of achievements / max wins).
+  if (!merging) resetProgress();
   set({ status: "user", userId, username: data.username, email: data.email });
   if (data.settings) {
     const raw = data.settings as unknown as StoredSettings;
@@ -83,7 +93,7 @@ async function loadProfile(userId: string) {
     const rawLs = localStorage.getItem(`tble-prog-${userId}`);
     if (rawLs) hydrateProgress(JSON.parse(rawLs));
   } catch { /* ignore */ }
-  // Save back right away if a guest earned something before signing in (their progress was merged above)
+  // Persist merged (or account-only) progress back to the profile
   persistProfileSettings(SETTINGS);
   if (data.training) Object.assign(TRAIN, data.training as unknown as TrainCfg);
 }
@@ -160,13 +170,33 @@ export async function signIn(username: string, password: string) {
 }
 
 export function playAsGuest() {
+  pendingProgressTransfer = false;
+  // Fresh guest session on this tab
+  if (ACC.status !== "guest") resetProgress();
   set({ status: "guest", userId: null, username: displayName(), email: null });
 }
 
 export async function signOut() {
+  // Save account progress before leaving so alts / next login keep unlocks
+  if (ACC.status === "user" && ACC.userId) {
+    try { persistProfileSettings(SETTINGS); } catch { /* ignore */ }
+  }
+  pendingProgressTransfer = false;
   await supabase.auth.signOut();
   set({ status: "signedOut", userId: null, username: "guest", email: null });
-  resetProgress(); // the next person on this tab starts clean
+  resetProgress(); // tab is clean — alts don't inherit the previous account's unlocks
+}
+
+/** Guest "log out": discard this tab's guest progress and open the login flow. */
+export function logoutGuest() {
+  pendingProgressTransfer = false;
+  resetProgress();
+  set({ status: "signedOut", userId: null, username: "guest", email: null });
+}
+
+/** Guest → account: keep current progress and open auth so sign-in/up merges it. */
+export function transferGuestProgress() {
+  pendingProgressTransfer = true;
 }
 
 export async function lookupUsername(name: string) {

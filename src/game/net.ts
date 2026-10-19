@@ -144,7 +144,9 @@ const isHitExtra = (v: Record<string, unknown>) =>
   (v.tp === undefined || isNumberArray(v.tp, 3)) &&
   (v.pull === undefined || isNumberArray(v.pull, 3)) &&
   (v.push === undefined || isNumberArray(v.push, 3)) &&
-  (v.slam === undefined || isFiniteIn(v.slam, -100, 100)) &&\n  (v.stick === undefined || isNumberArray(v.stick, 3)) &&\n  (v.unstick === undefined || typeof v.unstick === "boolean");
+  (v.slam === undefined || isFiniteIn(v.slam, -100, 100)) &&
+  (v.stick === undefined || isNumberArray(v.stick, 3)) &&
+  (v.unstick === undefined || typeof v.unstick === "boolean");
 
 function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)["stage"]): Promise<RealtimeChannel> {
   leaveRoom(false);

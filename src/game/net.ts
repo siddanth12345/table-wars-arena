@@ -92,8 +92,8 @@ export const NET_HOOKS = {
 };
 export type EntSnap = { t: number[]; b: number[]; boss: number[] | null; stage: string; bh: number; bm: number; s: number[] };
 /** Ability-mastery extras on a hit: teleport the victim, or pull them toward a point. */
-export type HitExtra = { tp?: number[]; pull?: number[]; slam?: number };
-export type EHit = { k: "t" | "b" | "boss"; i: number; dmg: number; tp?: number[]; pull?: number[]; slam?: number };
+export type HitExtra = { tp?: number[] | undefined; pull?: number[] | undefined; slam?: number | undefined };
+export type EHit = { k: "t" | "b" | "boss"; i: number; dmg: number; tp?: number[] | undefined; pull?: number[] | undefined; slam?: number | undefined };
 
 /** Followers in shared-enemy rooms show the host's enemies instead of simulating their own. */
 export const sharesEnemies = () => NET.online && (NET.kind === "coop" || NET.kind === "lobby");

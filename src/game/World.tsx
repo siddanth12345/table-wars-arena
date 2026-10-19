@@ -768,7 +768,7 @@ export function World() {
     orientLocal(_la, x - w.cx, y - w.cy, z - w.cz, w.yaw, w.pitch);
     return Math.abs(_la.x) <= w.hw + mg && Math.abs(_la.y) <= w.hh + mg && Math.abs(_la.z) <= w.hd + mg;
   };
-  type Shove = { pull?: number[]; tp?: number[]; slam?: number };
+  type Shove = { pull?: number[] | undefined; tp?: number[] | undefined; slam?: number | undefined };
   const applyShove = (e: Shove, o: { pos: THREE.Vector3; vy?: number }, id: string) => {
     const at = o.pos;
     if (e.tp) { at.x = e.tp[0]!; at.z = e.tp[2]!; }
@@ -1828,7 +1828,7 @@ const kd = (e: KeyboardEvent) => {
     }
 
     const freecamOn = G.freecam && G.phase === "playing" && (
-      G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.campaignDead || (NET.kind === "lobby" && G.pvpDead)
+      G.mode === "training" || NET.kind === "lobby" || NET.kind === "pvp" || G.campaignDead
     );
 
     // Freecam owns the keyboard/mouse: on entering AND leaving it, drop every held input so nothing
@@ -2308,7 +2308,7 @@ const kd = (e: KeyboardEvent) => {
           }
         }
         if (!hit) {
-          const ownerPid = fb.netId.split("-")[0] ?? "";
+          const ownerPid = ownerOf(fb.netId); // ids contain a dash, so never split on "-"
           for (const pr of NET.peers.values()) {
             if (pr.dead || pr.id === myId() || pr.id === ownerPid) continue;
             if (near(pr.x, pr.y + 2, pr.z, 4)) { hit = true; break; }
@@ -3246,7 +3246,7 @@ const kd = (e: KeyboardEvent) => {
           tables.forEach((t) => (t.alive = false));
           blues.forEach((u) => (u.alive = false));
           botPool.forEach((x) => (x.alive = false));
-          G.tut = { enter: false, dashed: false, zoomed: false, bombed: false };
+          G.tut = { enter: false, dashed: false, zoomed: false, bombed: false, slammed: false };
           const ahead = p.clone().addScaledVector(f, 70).setY(0);
           clampCircle(ahead, 20);
           if (s === 7 || s === 8) {

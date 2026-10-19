@@ -133,17 +133,17 @@ export const MASTERY_LINES: Record<AbilityId, string[]> = {
     "Never hurts you or your teammates.",
   ],
   fire: [
-    "The ground fire line is 2× bigger.",
-    "The air fireball bounces up to 3 times; every bounce explodes with full damage and burn.",
-    "Fire line and fireball explosions are blue.",
+    "The ground fire line is 2× bigger and burns blue.",
+    "The air fireball flies at half speed, explodes on up to 3 things (bots, players, walls, the room) and bounces off each one, with full damage and burn every time.",
+    "If a fireball finds nothing to hit for 5 seconds it explodes where it is.",
     "Never hurts you or your teammates.",
   ],
   teleport: [
     "Teleport balls are white.",
     "Anything the ball touches stays stunned from the moment it touches the growing circle until 3 seconds after you teleport.",
-    "TELEPORT BOMB: while Teleport is ready, your bomb is white and teleports everything in its blast to where your crosshair was pointing when you threw it, stunning them 2s. The ability then cools down for 3s (the bomb's own cooldown is normal).",
-    "Press the ability key during that 3s to rewind whatever your teleport bomb moved. (A normal teleport still only rewinds you.)",
-    "Bomb thrown while the ability is cooling down (or mid-teleport) is a normal bomb. Normal damage either way.",
+    "TELEPORT BOMB: while Teleport is ready, your bomb is white. Anything in its blast swaps places with you (several targets: they all go to your old spot and you land in the middle of them) and is stunned for 2s. The ability then cools down for 3s (the bomb's own cooldown is normal).",
+    "Press the ability key during that 3s to put everyone the teleport bomb moved — and you — back. (A normal teleport still only rewinds you.)",
+    "A bomb thrown while the ability is cooling down (or mid-teleport) is a normal bomb. Normal damage either way.",
   ],
 };
 

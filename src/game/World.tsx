@@ -1013,10 +1013,11 @@ export function World() {
     const onLock = () => {
       const hard = !!document.pointerLockElement;
       if (hard) {
-        // Hard pointer lock only counts while actually playing
-        if (G.phase === "playing" && !G.userPaused) {
+        // Accept hard lock whenever we're in a match (Resume must always stick)
+        if (G.phase === "playing") {
           G.locked = true;
           G.userPaused = false;
+          G.mobilePaused = false;
           setCursorLocked(true);
         } else {
           G.locked = false;

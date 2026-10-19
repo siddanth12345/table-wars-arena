@@ -471,7 +471,10 @@ function startTutorial() {
 function resume() {
   G.mobilePaused = false;
   G.userPaused = false;
-  G.countdown = 3.6;
+  G.chatOpen = false;
+  if (G.countdown <= 0) G.countdown = 0;
+  // Don't force a long countdown if already mid-match; short ready beat only when needed
+  if (G.countdown < 0.05) G.countdown = 0;
   lockPointer();
 }
 
@@ -668,7 +671,12 @@ function Menu() {
           {isMobilePlay() ? "Tap Resume to lock controls and play · Pause button unlocks" : "Click Resume to lock the mouse and play"}
         </p>
         <div className="mt-6 flex flex-col gap-3">
-          <button className={btnMain} onClick={resume}>Resume</button>
+          <button
+            type="button"
+            className={btnMain}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); resume(); }}
+            onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); resume(); }}
+          >Resume</button>
           <button className={btnAlt} onClick={tut ? startTutorial : train ? startTraining : playGame}>Restart</button>
           {tut ? (
             <button className={btnAlt} onClick={finishTutorial}>Skip Tutorial</button>

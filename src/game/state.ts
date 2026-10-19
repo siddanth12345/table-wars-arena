@@ -263,13 +263,33 @@ export function lockPointer() {
   G.userPaused = false;
   const mobile = isMobilePlay();
   tryHardLock();
-  if (mobile) {
-    G.locked = true;
-    setCursorLocked(true);
-    return;
+  // Close the pause menu immediately so Resume never feels dead.
+  // pointerlockchange will keep locked=true on success, or re-pause on PC if lock is denied.
+  G.locked = true;
+  setCursorLocked(true);
+  if (!mobile && !document.pointerLockElement) {
+    // Some browsers apply lock one frame later when called from a button
+    requestAnimationFrame(() => {
+      if (G.userPaused || G.phase !== "playing") return;
+      tryHardLock();
+      if (document.pointerLockElement) {
+        G.locked = true;
+        setCursorLocked(true);
+      }
+    });
+    setTimeout(() => {
+      if (G.userPaused || G.phase !== "playing") return;
+      if (document.pointerLockElement) {
+        G.locked = true;
+        setCursorLocked(true);
+        return;
+      }
+      // Still no hard lock — keep soft-locked so menu stays closed and game is playable
+      tryHardLock();
+      G.locked = true;
+      setCursorLocked(true);
+    }, 120);
   }
-  G.locked = !!document.pointerLockElement;
-  setCursorLocked(G.locked);
 }
 
 

@@ -363,8 +363,14 @@ export function OnlinePause({ onSettings }: { onSettings: () => void }) {
         <h1 className="text-4xl font-black uppercase">Menu</h1>
         <p className="mt-1 text-xs opacity-70">The match keeps going. Click outside to return.</p>
         <div className="mt-6 flex flex-col gap-3">
-          <button className={btnAlt} onClick={onSettings}>Settings</button>
-          <button className={btnAlt} onClick={goHomeOnline}>Return to home</button>
+          <button
+            type="button"
+            className={btnMain}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); G.userPaused = false; G.chatOpen = false; lockPointer(); }}
+            onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); G.userPaused = false; G.chatOpen = false; lockPointer(); }}
+          >Resume</button>
+          <button type="button" className={btnAlt} onClick={onSettings}>Settings</button>
+          <button type="button" className={btnAlt} onClick={goHomeOnline}>Return to home</button>
         </div>
       </div>
     </div>

@@ -467,6 +467,8 @@ export function World() {
   const slamStun = useRef({ dur: 0, exp: 0 });
   /** Smooth online sword-stick: lerp toward target instead of hard teleports */
   const swordStick = useRef({ active: false, x: 0, y: 0, z: 0 });
+  /** After unstick, block new sticks for 2s (multi-sword spam) */
+  const stickImmuneUntil = useRef(0);
   /** ability-applied stun timers (seconds left) for bots — real freeze */
   const abilityStun = useRef(new Map<string, number>());
   const teleportMeshRef = useRef<THREE.Mesh | null>(null);
@@ -1524,13 +1526,18 @@ const kd = (e: KeyboardEvent) => {
     if (d > 0) damagePlayer(d);
     if (extra?.tp && !G.pvpDead && !G.campaignDead) pos.current.set(extra.tp[0]!, extra.tp[1]!, extra.tp[2]!);
     if (extra?.stick && !G.pvpDead && !G.campaignDead) {
-      const st = swordStick.current;
-      st.active = true;
-      st.x = extra.stick[0]!; st.y = extra.stick[1]!; st.z = extra.stick[2]!;
-      hv.current.set(0, 0, 0); vy.current = 0; grounded.current = false;
+      if (performance.now() < stickImmuneUntil.current) {
+        // still in post-unstick immunity — ignore new stick
+      } else {
+        const st = swordStick.current;
+        st.active = true;
+        st.x = extra.stick[0]!; st.y = extra.stick[1]!; st.z = extra.stick[2]!;
+        hv.current.set(0, 0, 0); vy.current = 0; grounded.current = false;
+      }
     }
     if (extra?.unstick) {
       swordStick.current.active = false;
+      stickImmuneUntil.current = performance.now() + 2000;
       hv.current.set(0, 0, 0);
     }
     if (extra?.push && !G.pvpDead && !G.campaignDead) { hv.current.set(extra.push[0]!, 0, extra.push[2]!); if (extra.push[1] !== undefined) vy.current = extra.push[1]!; grounded.current = false; }
@@ -1652,8 +1659,10 @@ const kd = (e: KeyboardEvent) => {
       return;
     }
     if (k === "padclear") {
+      const owner = payload.owner != null ? String(payload.owner) : "";
+      // Only clear pads placed by that player — never everyone else's
       for (const pad of abilityPads) {
-        if (!payload.owner || pad.netId.startsWith(String(payload.owner))) pad.active = false;
+        if (owner && pad.netId.startsWith(`${owner}-`)) pad.active = false;
       }
       playSfx("spring_reset", 0.5);
       return;
@@ -1688,8 +1697,16 @@ const kd = (e: KeyboardEvent) => {
     if (k === "tp") {
       const tp = teleportRef.current;
       const rx = Number(payload.x), ry = Number(payload.y), rz = Number(payload.z);
+      // Cancel / finish: always clear remote decoy so it doesn't linger after the caster cancels
+      if (payload.phase === "cancel" || payload.phase === "done") {
+        if (payload.phase === "done") playSfx("teleport_success", nearGain(rx, ry, rz));
+        if ((tp as { remote?: boolean }).remote || payload.phase === "cancel") {
+          tp.active = false;
+          (tp as { remote?: boolean }).remote = false;
+        }
+        return;
+      }
       if (payload.phase === "expand" && (!tp.active || tp.phase === "fly")) playSfx("teleport_expand", nearGain(rx, ry, rz));
-      if (payload.phase === "done") playSfx("teleport_success", nearGain(rx, ry, rz));
       // visual only for remote: use teleport mesh if local not using
       if (!tp.active) {
         tp.active = true;
@@ -1707,10 +1724,6 @@ const kd = (e: KeyboardEvent) => {
         tp.pos.set(Number(payload.x), Number(payload.y), Number(payload.z));
         tp.target.copy(tp.pos);
         tp.chargeT = Number(payload.ct) || 0;
-        if (payload.phase === "done") {
-          tp.active = false;
-          (tp as { remote?: boolean }).remote = false;
-        }
       }
       return;
     }
@@ -2049,6 +2062,10 @@ const kd = (e: KeyboardEvent) => {
         const contactTargets = wasReturning ? sword.returnHitTargets : sword.hitTargets;
         const attach = (id: string, kind: "t" | "b" | "p", center: THREE.Vector3) => {
           if (sword.stuck.has(id) || contactTargets.has(id) || sword.pos.distanceTo(center) > radius) return;
+          // Already stuck to a different sword → skip (one stick at a time)
+          for (const other of bossSwords.current) {
+            if (other !== sword && other.active && other.stuck.has(id)) return;
+          }
           contactTargets.add(id);
           sword.stuck.set(id, { kind, offset: center.clone().sub(sword.pos), netAcc: 0 });
           G.hitFlash = 0.15;
@@ -2132,9 +2149,11 @@ const kd = (e: KeyboardEvent) => {
         }
       } else if (ab === "teleport" && !G.abilityLocked && !G.parryLocked) {
         if (tp.active) {
-          // Cancel free during fly/expand — no cooldown
+          // Cancel free during fly/expand — no cooldown; clear decoy on other clients too
           tp.active = false;
           tp.pendingStun.clear();
+          (tp as { remote?: boolean }).remote = false;
+          if (NET.online) sendNet("vfx", { k: "tp", phase: "cancel", x: tp.pos.x, y: tp.pos.y, z: tp.pos.z });
         } else if (G.abilityCd > 0 && tp.canRewind && !tp.rewindUsed) {
           p.copy(tp.origin);
           playSfxShared("teleport_success"); // rewind uses the same sound as a successful teleport (opponents hear it too)
@@ -2188,10 +2207,14 @@ const kd = (e: KeyboardEvent) => {
           }
         }
       } else if (ab === "trampoline" && !G.abilityLocked && !G.parryLocked && G.abilityCd <= 0 && G.abilityCharges <= 0) {
-        // Reset trampolines: start cooldown and delete all placed pads
+        // Reset trampolines: only MY pads (never touch other players' pads)
         const sm = masteryOn("trampoline");
-        if (sm) for (const pad of abilityPads) if (pad.active && pad.m && pad.netId.startsWith(`${myId()}-`)) springBlast(pad);
-        for (const pad of abilityPads) pad.active = false;
+        const mine = `${myId()}-`;
+        for (const pad of abilityPads) {
+          if (!pad.active || !pad.netId.startsWith(mine)) continue;
+          if (sm && pad.m) springBlast(pad);
+          pad.active = false;
+        }
         playSfx("spring_reset");
         G.abilityCd = sm ? Math.max(0, tune("padCd") - 1.5) : tune("padCd");
         G.abilityCharges = 0;

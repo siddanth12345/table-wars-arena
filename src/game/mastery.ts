@@ -15,7 +15,7 @@ export type AchievementId =
   | "bricked_master" | "cant_catch_me_now" | "hot_stuff" | "now_you_see_me"
   | "great_potential" | "down_you_go" | "down_you_go_friends"
   | "speedrunner" | "faster_than_light" | "hacker"
-  | "champ" | "king" | "tble"
+  | "champ" | "king" | "tble" | "hardcore"
   | "get_back_up" | "mastery_king";
 
 export type Achievement = {
@@ -58,6 +58,11 @@ export const ACHIEVEMENTS: Achievement[] = [
     id: "great_potential", name: "Great Potential", icon: "🌱",
     summary: "Potential table.",
     how: "Beat the tutorial.",
+  },
+  {
+    id: "hardcore", name: "Hardcore", icon: "🛡️",
+    summary: "I overcame all odds.",
+    how: "Beat the offline campaign without taking any damage. Any damage disqualifies the run, and using Combo Burst during the run also disqualifies it.",
   },
   {
     id: "down_you_go", name: "Down You Go", icon: "⬇️",
@@ -119,7 +124,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   },
 ];
 
-export const MASTERY_LINES: Record<AbilityId, string[]> = {
+export const MASTERY_LINES: Partial<Record<AbilityId, string[]>> = {
   wall: [
     "Walls glow red and are 1.5× bigger in every dimension.",
     "Enemies touching a wall take 10 damage every 0.7s (bots, tables, and players in modes where players can hurt each other).",
@@ -147,8 +152,8 @@ export const MASTERY_LINES: Record<AbilityId, string[]> = {
   ],
 };
 
-export function achievementFor(ability: AbilityId): Achievement {
-  return ACHIEVEMENTS.find((a) => a.ability === ability)!;
+export function achievementFor(ability: AbilityId): Achievement | undefined {
+  return ACHIEVEMENTS.find((a) => a.ability === ability);
 }
 
 /** Display name: secret achievements stay ??? until owned. */
@@ -185,7 +190,7 @@ export function getProgress() { return progress; }
 export function setProgressPersister(fn: (() => void) | null) { persister = fn; }
 
 export const hasAchievement = (id: AchievementId) => !!progress.earned[id];
-export const hasMastery = (ab: AbilityId) => !!progress.earned[achievementFor(ab).id];
+export const hasMastery = (ab: AbilityId) => { const a = achievementFor(ab); return !!a && !!progress.earned[a.id]; };
 // training mastery overrides (existing)
 const trainPick: Partial<Record<AbilityId, boolean>> = {};
 export function getTrainMastery(ab: AbilityId) { return !!trainPick[ab]; }
@@ -197,7 +202,7 @@ export const masteryOn = (ab: AbilityId) => {
 };
 
 export function setMasteryOn(ab: AbilityId, on: boolean) {
-  if (!hasMastery(ab)) return;
+  if (!achievementFor(ab) || !hasMastery(ab)) return;
   if (on) delete progress.off[ab]; else progress.off[ab] = true;
   bump();
   persister?.();
@@ -290,6 +295,7 @@ export function onCampaignWin(isParty = false) {
     if (t < 150) award("faster_than_light");
     if (t < 60) award("hacker");
   }
+  if (!isParty && G.campaignHardcoreEligible) award("hardcore");
   tryAwardTble();
 }
 
@@ -307,7 +313,7 @@ export function hydrateProgress(raw: unknown) {
   const r = raw as { earned?: unknown; off?: unknown; pvpWins?: unknown } | null | undefined;
   if (!r || typeof r !== "object") return;
   const ids = new Set<string>(ACHIEVEMENTS.map((a) => a.id));
-  const abs = new Set<string>(["wall", "trampoline", "fire", "teleport"]);
+  const abs = new Set<string>(["wall", "trampoline", "fire", "teleport", "boss"]);
   const next: Progress = { earned: { ...progress.earned }, off: { ...progress.off }, pvpWins: progress.pvpWins | 0 };
   if (Array.isArray(r.earned)) for (const k of r.earned) if (typeof k === "string" && ids.has(k)) next.earned[k as AchievementId] = true;
   if (Array.isArray(r.off)) for (const k of r.off) if (typeof k === "string" && abs.has(k)) next.off[k as AbilityId] = true;

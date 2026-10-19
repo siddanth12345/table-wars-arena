@@ -92,7 +92,7 @@ export const NET_HOOKS = {
 };
 export type EntSnap = { t: number[]; b: number[]; boss: number[] | null; stage: string; bh: number; bm: number; s: number[] };
 /** Ability-mastery extras on a hit: teleport the victim, or pull them toward a point. */
-export type HitExtra = { tp?: number[] | undefined; pull?: number[] | undefined; slam?: number | undefined };
+export type HitExtra = { tp?: number[] | undefined; pull?: number[] | undefined; push?: number[] | undefined; slam?: number | undefined };
 export type EHit = { k: "t" | "b" | "boss"; i: number; dmg: number; tp?: number[] | undefined; pull?: number[] | undefined; slam?: number | undefined };
 
 /** Followers in shared-enemy rooms show the host's enemies instead of simulating their own. */
@@ -143,6 +143,7 @@ const isEntSnap = (v: unknown): v is EntSnap =>
 const isHitExtra = (v: Record<string, unknown>) =>
   (v.tp === undefined || isNumberArray(v.tp, 3)) &&
   (v.pull === undefined || isNumberArray(v.pull, 3)) &&
+  (v.push === undefined || isNumberArray(v.push, 3)) &&
   (v.slam === undefined || isFiniteIn(v.slam, -100, 100));
 
 function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)["stage"]): Promise<RealtimeChannel> {
@@ -182,7 +183,7 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
       (payload.stunT !== undefined && !isFiniteIn(payload.stunT, 0, 10000)) || !isHitExtra(payload)) return;
     if (NET.kind === "pvp" ? NET.stage === "playing" : true) {
       NET_HOOKS.onHit(payload.dmg, payload.stun === true, payload.stunT as number | undefined, {
-        tp: payload.tp as number[] | undefined, pull: payload.pull as number[] | undefined, slam: payload.slam as number | undefined,
+        tp: payload.tp as number[] | undefined, pull: payload.pull as number[] | undefined, push: payload.push as number[] | undefined, slam: payload.slam as number | undefined,
       });
     }
   });
@@ -376,7 +377,7 @@ export function hitPeer(to: string, dmg: number, stun = false, stunT?: number, e
   // No friendly fire in party modes (kind "coop" = party campaign / party training); only 1v1 and lobbies let players hurt each other.
   const ok = NET.kind === "pvp" ? NET.stage === "playing" : NET.kind === "lobby";
   if (!ok) return;
-  send("hit", { to, dmg, stun, ...(stunT != null ? { stunT } : {}), ...(extra?.tp ? { tp: extra.tp } : {}), ...(extra?.pull ? { pull: extra.pull } : {}), ...(extra?.slam ? { slam: extra.slam } : {}) });
+  send("hit", { to, dmg, stun, ...(stunT != null ? { stunT } : {}), ...(extra?.tp ? { tp: extra.tp } : {}), ...(extra?.pull ? { pull: extra.pull } : {}), ...(extra?.push ? { push: extra.push } : {}), ...(extra?.slam ? { slam: extra.slam } : {}) });
 }
 /** Host enemies hurting another player in a shared-enemy room. */
 export function enemyHitPeer(to: string, dmg: number) {

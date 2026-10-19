@@ -4445,7 +4445,7 @@ const kd = (e: KeyboardEvent) => {
       ))}
       <group ref={(m) => { bossSwordMesh.current = m; }} visible={false}>
         <mesh castShadow>
-          <shapeGeometry args={[BOSS_BLADE_SHAPE, 1]} />
+          <extrudeGeometry args={[BOSS_BLADE_SHAPE, { depth: 1.2, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.25, bevelThickness: 0.25 }]} />
           <meshStandardMaterial color="#e2e8f0" metalness={0.95} roughness={0.16} />
         </mesh>
         <mesh position={[-4, 0, 0.7]}>

@@ -163,7 +163,7 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                       <li key={line} className="border-l-2 border-crosshair/40 pl-2">{line}</li>
                     ))}
                   </ul>
-                  {hasMastery(detail) && (
+                  {detail !== "boss" && hasMastery(detail) && (
                     <button type="button" className={`mt-3 w-full ${masteryOn(detail) ? btnOn : btn}`} onClick={() => setMasteryOn(detail, !masteryOn(detail))}>
                       Mastery: {masteryOn(detail) ? "On" : "Off"}
                     </button>

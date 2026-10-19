@@ -2051,9 +2051,9 @@ const kd = (e: KeyboardEvent) => {
             addHazard("quarter", 0, 0, 1, aimAngle - Math.PI / 4, 25, "player");
             G.abilityCharges -= 2;
             if (G.abilityCharges <= 0) G.abilityCd = 5;
+            playSfx("stun");
+            G.shake = Math.max(G.shake, 0.2);
           }
-          playSfx("stun");
-          G.shake = Math.max(G.shake, 0.2);
           }
         }
       } else if (ab === "teleport" && !G.abilityLocked && !G.parryLocked) {

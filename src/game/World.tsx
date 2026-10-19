@@ -1957,7 +1957,7 @@ const kd = (e: KeyboardEvent) => {
         }
         if (NET.online && (NET.kind === "pvp" || NET.kind === "lobby")) {
           for (const peer of NET.peers.values()) {
-            if (peer.dead || sword.hitTargets.has(peer.id) || Math.hypot(peer.x - sword.pos.x, peer.z - sword.pos.z) > hitRadius + 1.5 || Math.abs(peer.y - sword.pos.y) > hitRadius + 2) continue;
+            if (peer.dead || sword.hitTargets.has(peer.id) || Math.hypot(peer.x - sword.pos.x, peer.y - sword.pos.y, peer.z - sword.pos.z) > hitRadius + 1.5) continue;
             sword.hitTargets.add(peer.id);
             let dx = peer.x - sword.pos.x, dz = peer.z - sword.pos.z; const len = Math.hypot(dx, dz);
             if (len < 0.01) { const a = Math.random() * Math.PI * 2; dx = Math.cos(a); dz = Math.sin(a); } else { dx /= len; dz /= len; }

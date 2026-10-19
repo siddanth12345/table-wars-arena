@@ -378,7 +378,7 @@ export function World() {
     stung: new Set<string>(), tickAcc: new Map<string, number>(), netId: "" as string, m: false,
   })), []);
   // Air fireballs (fire ability while airborne) + remote visual bullets
-  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hits: 0, hitCooldown: 0, hitTargets: new Set<string>(), solidHits: 0, lastSolid: "" });
+  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>() });
   const bossSwordMesh = useRef<THREE.Group | null>(null);
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
     active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string, m: false, b: 0, idle: 0,
@@ -1904,10 +1904,13 @@ const kd = (e: KeyboardEvent) => {
         const ray = new THREE.Raycaster(sword.pos.clone(), dir, 0, travel + 0.8);
         const solidHit = staticRef.current ? ray.intersectObject(staticRef.current, true).find((h) => h.object.visible) : undefined;
         if (solidHit && !sword.returning && sword.hitCooldown <= 0) {
-          sword.solidHits++;
+          if (!sword.solidObjects.has(solidHit.object.uuid)) {
+            sword.solidObjects.add(solidHit.object.uuid);
+            sword.solidHits++;
+          }
           sword.hitCooldown = 0.12;
-          sword.lastSolid = solidHit.object.uuid;
-          sword.pos.copy(solidHit.point).addScaledVector(dir, 1.5);
+          // Continue through the contacted surface so one wall cannot count as all three hits.
+          sword.pos.copy(solidHit.point).addScaledVector(dir, 16);
           if (sword.solidHits >= 3) sword.returning = true;
         }
         const targetPos = sword.returning ? cam.position : null;
@@ -1966,7 +1969,7 @@ const kd = (e: KeyboardEvent) => {
             cam.getWorldDirection(look);
             const sword = bossSword.current;
             if (!sword.active) {
-              sword.active = true; sword.returning = false; sword.hits = 0; sword.solidHits = 0; sword.hitCooldown = 0; sword.lastSolid = ""; sword.hitTargets.clear();
+              sword.active = true; sword.returning = false; sword.solidHits = 0; sword.hitCooldown = 0; sword.solidObjects.clear(); sword.hitTargets.clear();
               sword.pos.copy(cam.position).addScaledVector(look, 2);
               sword.vel.copy(look).normalize().multiplyScalar(300);
               G.abilityCd = 3; G.abilityCharges = 0; playSfx("fire_ground");

@@ -110,7 +110,7 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                     <button type="button" className={btn} onClick={() => setDetail(a.id)}>
                       Details
                     </button>
-                    {hasMastery(a.id) ? (
+                    {a.id !== "boss" && (hasMastery(a.id) ? (
                       <button
                         type="button"
                         className={masteryOn(a.id) ? btnOn : btn}
@@ -129,7 +129,7 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                       >
                         {a.id === "boss" ? "No Mastery" : "Mastery 🔒"}
                       </button>
-                    )}
+                    ))}
                   </div>
                 </div>
               );

@@ -11,6 +11,7 @@ import {
   BOMB_CD, BOMB_CD_BUFF, TABLE_HP, TABLE_CAP, BOSS_HITS, BOSS_WARN, setLocker,
   MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, isMobilePlay, pauseGame, setCursorLocked, registerDamage, tryComboBurst, onParrySuccess, STORM_START, type TrainSpawn,
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, SHARD_SPAWN_N, LOBBY_RESPAWN, FREECAM_SPEEDS,
+  tune, maxCharges,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
 import { getAbility, getLastUnlockedAbility, setAbility } from "./abilities";
@@ -86,6 +87,8 @@ const R = ROOM.r;
 // 1v1 storm: starts 60s into a round, closes in from the arena edge at 30 u/s, 5 dmg every 0.6s while inside
 const STORM_SPEED = 30, STORM_DMG = 5, STORM_TICK = 0.6;
 const UP = new THREE.Vector3(0, 1, 0);
+const _swRay = new THREE.Raycaster();
+const _swSolids: THREE.Object3D[] = [];
 const BOSS_BLADE_SHAPE = (() => {
   const shape = new THREE.Shape();
   shape.moveTo(-13, -0.8);
@@ -1563,7 +1566,7 @@ const kd = (e: KeyboardEvent) => {
       return;
     }
     if (k === "bquarter") {
-      const h = addHazard("quarter", 0, 0, 1, Number(payload.a0) || 0, 0, "player");
+      const h = addHazard("quarter", 0, 0, Math.min(4, Math.max(0.2, Number(payload.w) || 1)), Number(payload.a0) || 0, 0, "player");
       if (h) h.remote = true;
       return;
     }
@@ -1770,7 +1773,7 @@ const kd = (e: KeyboardEvent) => {
       abilityPads.forEach((pad) => { pad.active = false; });
       abilityFires.forEach((f) => { f.active = false; f.stung.clear(); f.tickAcc.clear(); });
       G.abilityCd = 0;
-      G.abilityCharges = getAbility() === "wall" ? 6 : (getAbility() === "trampoline" || getAbility() === "boss") ? 3 : 1;
+      G.abilityCharges = maxCharges(getAbility());
       G.abilitySlow = 0;
       MAP.health = [];
       hazards.forEach((h) => (h.active = false));
@@ -1936,7 +1939,7 @@ const kd = (e: KeyboardEvent) => {
       if (G.abilityCd <= 0) {
         playSfx("ability_ready");
         const ab = getAbility();
-        G.abilityCharges = ab === "wall" ? 6 : (ab === "trampoline" || ab === "boss") ? 3 : 1;
+        G.abilityCharges = maxCharges(ab);
       }
     }
     if (slamStun.current.dur > 0) {
@@ -1979,19 +1982,22 @@ const kd = (e: KeyboardEvent) => {
         if (sword.returning) {
           const to = cam.position.clone().sub(sword.pos);
           if (to.length() < 5) { sword.active = false; for (const [id, st] of sword.stuck) if (st.kind === "p") hitPeer(id, 0, false, undefined, { unstick: true }); sword.stuck.clear(); }
-          else { sword.vel.copy(to.normalize()).multiplyScalar(350); sword.pos.addScaledVector(sword.vel, dt); }
+          else { sword.vel.copy(to.normalize()).multiplyScalar(tune("swordSpeed")); sword.pos.addScaledVector(sword.vel, dt); }
         } else if (travel > 0) {
-          const solids: THREE.Object3D[] = [];
+          const solids = _swSolids;
+          solids.length = 0;
           if (staticRef.current) solids.push(staticRef.current);
           for (const m of wallMeshRefs.current) if (m && m.visible) solids.push(m);
-          const ray = new THREE.Raycaster(sword.pos.clone(), dir, 0, travel + radius);
+          const ray = _swRay;
+          ray.set(sword.pos, dir);
+          ray.near = 0; ray.far = travel + radius;
           const hit = ray.intersectObjects(solids, true).find((h) => h.object.visible && h.distance > 0.02);
           if (hit) {
             const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize() : dir.clone().negate();
             if (normal.dot(sword.vel) > 0) normal.negate();
             sword.pos.addScaledVector(dir, Math.max(0, hit.distance - radius - 0.05));
             sword.pos.addScaledVector(normal, radius + 0.2);
-            sword.vel.addScaledVector(normal, -2 * sword.vel.dot(normal)).normalize().multiplyScalar(350);
+            sword.vel.addScaledVector(normal, -2 * sword.vel.dot(normal)).normalize().multiplyScalar(tune("swordSpeed"));
             const surfaceId = hit.object.uuid;
             if (!sword.solidObjects.has(surfaceId)) { sword.solidObjects.add(surfaceId); }
             sword.solidHits++;
@@ -1999,21 +2005,21 @@ const kd = (e: KeyboardEvent) => {
             for (const [id, stuck] of sword.stuck) {
               if (stuck.kind === "t") {
                 const target = tables[Number(id.slice(1))];
-                if (target?.alive) hitTable(target, 2);
+                if (target?.alive) hitTable(target, tune("swordBounceDmg"));
                 else sword.stuck.delete(id);
               } else if (stuck.kind === "b") {
                 const target = blues[Number(id.slice(1))];
-                if (target?.alive) hitBlue(target, 2);
+                if (target?.alive) hitBlue(target, tune("swordBounceDmg"));
                 else sword.stuck.delete(id);
               } else {
                 const peer = NET.peers.get(id);
                 if (peer && !peer.dead) {
                   const extra = { stick: [sword.pos.x + stuck.offset.x, sword.pos.y + stuck.offset.y, sword.pos.z + stuck.offset.z] };
-                  hitPeer(id, 2, false, undefined, extra);
+                  hitPeer(id, tune("swordBounceDmg"), false, undefined, extra);
                 } else sword.stuck.delete(id);
               }
             }
-            if (sword.solidHits >= 5) sword.returning = true;
+            if (sword.solidHits >= tune("swordBounces")) sword.returning = true;
           } else sword.pos.add(travelVec);
         }
         const contactTargets = wasReturning ? sword.returnHitTargets : sword.hitTargets;
@@ -2021,9 +2027,10 @@ const kd = (e: KeyboardEvent) => {
           if (sword.stuck.has(id) || contactTargets.has(id) || sword.pos.distanceTo(center) > radius) return;
           contactTargets.add(id);
           sword.stuck.set(id, { kind, offset: center.clone().sub(sword.pos), netAcc: 0 });
-          if (kind === "t") hitTable(tables[Number(id.slice(1))]!, 15);
-          else if (kind === "b") hitBlue(blues[Number(id.slice(1))]!, 15);
-          else hitPeer(id, 15, false, undefined, { stick: [sword.pos.x, sword.pos.y, sword.pos.z] });
+          G.hitFlash = 0.15;
+          if (kind === "t") hitTable(tables[Number(id.slice(1))]!, tune("swordDmg"));
+          else if (kind === "b") hitBlue(blues[Number(id.slice(1))]!, tune("swordDmg"));
+          else hitPeer(id, tune("swordDmg"), false, undefined, { stick: [sword.pos.x, sword.pos.y, sword.pos.z] });
         };
         for (let ti = 0; ti < tables.length; ti++) { const t = tables[ti]!; if (t.alive) attach("t" + ti, "t", tmpV.copy(t.pos).setY(t.pos.y + 2 * t.s)); }
         for (let bi = 0; bi < blues.length; bi++) { const u = blues[bi]!; if (u.alive) attach("b" + bi, "b", tmpV.copy(u.pos).setY(u.pos.y + 2)); }
@@ -2078,9 +2085,9 @@ const kd = (e: KeyboardEvent) => {
               if (sword) {
                 sword.active = true; sword.returning = false; sword.solidHits = 0; sword.hitCooldown = 0; sword.solidObjects.clear(); sword.hitTargets.clear(); sword.returnHitTargets.clear(); sword.stuck.clear();
                 sword.pos.copy(cam.position).addScaledVector(look, 2);
-                sword.vel.copy(look).normalize().multiplyScalar(350);
+                sword.vel.copy(look).normalize().multiplyScalar(tune("swordSpeed"));
                 G.abilityCharges--;
-                if (G.abilityCharges <= 0) G.abilityCd = 5;
+                if (G.abilityCharges <= 0) G.abilityCd = tune("bossCd");
                 playSfx("fire_ground");
               }
             }
@@ -2090,10 +2097,10 @@ const kd = (e: KeyboardEvent) => {
           // The quarter's origin stays at the room center; its middle follows the crosshair direction.
           const aimAngle = Math.atan2(-look.z, look.x);
           if (G.abilityCharges >= 2) {
-            addHazard("quarter", 0, 0, 1, aimAngle - Math.PI / 4, 25, "player");
-            if (NET.online) sendNet("vfx", { k: "bquarter", a0: aimAngle - Math.PI / 4 });
+            addHazard("quarter", 0, 0, tune("quarterWarn"), aimAngle - Math.PI / 4, tune("quarterDmg"), "player");
+            if (NET.online) sendNet("vfx", { k: "bquarter", a0: aimAngle - Math.PI / 4, w: tune("quarterWarn") });
             G.abilityCharges -= 2;
-            if (G.abilityCharges <= 0) G.abilityCd = 5;
+            if (G.abilityCharges <= 0) G.abilityCd = tune("bossCd");
             playSfx("stun");
             G.shake = Math.max(G.shake, 0.2);
           }
@@ -2162,7 +2169,7 @@ const kd = (e: KeyboardEvent) => {
         if (sm) for (const pad of abilityPads) if (pad.active && pad.m && pad.netId.startsWith(`${myId()}-`)) springBlast(pad);
         for (const pad of abilityPads) pad.active = false;
         playSfx("spring_reset");
-        G.abilityCd = sm ? 3.5 : 5;
+        G.abilityCd = sm ? Math.max(0, tune("padCd") - 1.5) : tune("padCd");
         G.abilityCharges = 0;
         if (NET.online) sendNet("vfx", { k: "padclear", owner: myId() });
       } else {
@@ -2193,10 +2200,10 @@ const kd = (e: KeyboardEvent) => {
               slot.cx = place.x; slot.cy = place.y; slot.cz = place.z;
               slot.yaw = yaw; slot.pitch = pitch;
               slot.hw = halfW; slot.hh = halfH; slot.hd = thick;
-              slot.t = wallM ? 3 : 2; // Wall mastery lasts 1s longer
+              slot.t = tune("wallLife") + (wallM ? 1 : 0); // Wall mastery lasts 1s longer
               slot.m = wallM; slot.ret = false; slot.rt = 0; slot.hit.clear();
               G.abilityCharges--;
-              if (G.abilityCharges <= 0) G.abilityCd = 3;
+              if (G.abilityCharges <= 0) G.abilityCd = tune("wallCd");
               if (NET.online) sendNet("vfx", { k: "wall", m: wallM ? 1 : 0, id: slot.netId, cx: slot.cx, cy: slot.cy, cz: slot.cz, yaw: slot.yaw, pitch: slot.pitch, hw: slot.hw, hh: slot.hh, hd: slot.hd, life: slot.t });
             }
           } else {
@@ -2243,7 +2250,7 @@ const kd = (e: KeyboardEvent) => {
               slot.netId = `${myId()}-fb-${Date.now()}`;
               playSfx("fire_air");
               G.abilityCharges = 0;
-              G.abilityCd = 4; // air fireball CD
+              G.abilityCd = tune("fireAirCd"); // air fireball CD
               if (NET.online) sendNet("vfx", { k: "fball", m: slot.m ? 1 : 0, id: slot.netId, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z, vx: slot.vel.x, vy: slot.vel.y, vz: slot.vel.z, life: 999 });
             }
           } else {
@@ -2269,7 +2276,7 @@ const kd = (e: KeyboardEvent) => {
               playSfx("fire_ground");
               G.shake = Math.max(G.shake, 0.45);
               G.abilityCharges = 0;
-              G.abilityCd = 5;
+              G.abilityCd = tune("fireGroundCd");
               if (NET.online) sendNet("vfx", { k: "fire", m: slot.m ? 1 : 0, id: slot.netId, ax: slot.ax, ay: slot.ay, az: slot.az, bx: slot.bx, by: slot.by, bz: slot.bz, life: 3 });
             }
           }
@@ -2654,7 +2661,7 @@ const kd = (e: KeyboardEvent) => {
             p.copy(tp.target);
             playSfx("teleport_success");
             tp.active = false;
-            G.abilityCd = TELEPORT_CD; // 2.5s
+            G.abilityCd = tune("tpCd");
             G.abilityCharges = 0;
             tp.canRewind = true;
             tp.rewindUsed = false;
@@ -3419,7 +3426,7 @@ const kd = (e: KeyboardEvent) => {
             const td = Math.hypot(t.pos.x - w.x, t.pos.z - w.z);
             if (t.alive && !w.hitPeers.has(id) && td >= r0 - 2 && td <= w.r + 2 && t.pos.y < WAVE_H) {
               w.hitPeers.add(id);
-              abilityStun.current.set(id, 3);
+              abilityStun.current.set(id, tune("stunRing"));
             }
           }
           for (let bi = 0; bi < blues.length; bi++) {
@@ -3428,7 +3435,7 @@ const kd = (e: KeyboardEvent) => {
             const bd = Math.hypot(u.pos.x - w.x, u.pos.z - w.z);
             if (u.alive && !w.hitPeers.has(id) && bd >= r0 - 2 && bd <= w.r + 2 && u.pos.y < WAVE_H) {
               w.hitPeers.add(id);
-              abilityStun.current.set(id, 3);
+              abilityStun.current.set(id, tune("stunRing"));
             }
           }
           if (NET.online && (NET.kind === "pvp" || NET.kind === "lobby")) {
@@ -3437,7 +3444,7 @@ const kd = (e: KeyboardEvent) => {
               const pd = Math.hypot(peer.x - w.x, peer.z - w.z);
               if (pd >= r0 - PLAYER_R - 1 && pd <= w.r + PLAYER_R + 1 && peer.y < WAVE_H) {
                 w.hitPeers.add(peer.id);
-                hitPeer(peer.id, 0, true, 3);
+                hitPeer(peer.id, 0, true, tune("stunRing"));
               }
             }
           }
@@ -4127,7 +4134,7 @@ const kd = (e: KeyboardEvent) => {
       const coreW = f.m ? 1.0 : 0.65;
       const rockH = bedW; // protrusion = thickness
       const segs = grp.userData.segs as {
-        bed: THREE.Mesh; core: THREE.Mesh; light: THREE.PointLight;
+        bed: THREE.Mesh; core: THREE.Mesh;
         rockL: THREE.Mesh; rockR: THREE.Mesh;
         dnaBed?: THREE.Mesh; dnaCore?: THREE.Mesh;
       }[] | undefined;
@@ -4184,11 +4191,6 @@ const kd = (e: KeyboardEvent) => {
             rm.emissiveIntensity = 0;
           }
         }
-        s.light.position.set(mx, 2.2, mz);
-        s.light.color.set(glowCol);
-        s.light.intensity = (f.m ? 3.0 : 2.4) * shimmer;
-        s.light.distance = 50;
-        s.light.visible = true;
         // Mastered DNA second jagged strand (phase-shifted sharp path)
         if (s.dnaBed && s.dnaCore) {
           if (f.m) {
@@ -4249,7 +4251,7 @@ const kd = (e: KeyboardEvent) => {
       rb.t -= dt;
       if (rb.t <= 0) { rb.active = false; continue; }
       rb.pos.addScaledVector(rb.vel, dt);
-      rb.vel.y -= 40 * dt; // light gravity so it arcs a bit like local bombs
+      // local bombs fly straight, so remote copies do too (no gravity)
     }
     remoteBombMeshRefs.current.forEach((m, i) => {
       const rb = remoteBombs[i];
@@ -4391,10 +4393,8 @@ const kd = (e: KeyboardEvent) => {
         l.distance = 220;
         l.position.set(a.x, a.y, a.z);
         l.color.set(a.c);
-        l.visible = true;
       } else {
         l.intensity = 0;
-        l.visible = false;
       }
     });
   });
@@ -4458,7 +4458,7 @@ const kd = (e: KeyboardEvent) => {
             }
             g.userData.vfxVer = FIRE_VFX_VER;
             const segs: {
-              bed: THREE.Mesh; core: THREE.Mesh; light: THREE.PointLight;
+              bed: THREE.Mesh; core: THREE.Mesh;
               rockL: THREE.Mesh; rockR: THREE.Mesh;
               dnaBed: THREE.Mesh; dnaCore: THREE.Mesh;
             }[] = [];
@@ -4488,12 +4488,11 @@ const kd = (e: KeyboardEvent) => {
                   roughness: 0.25, toneMapped: false,
                 }),
               );
-              const light = new THREE.PointLight("#ff6a1a", 2.5, 50);
               bed.visible = core.visible = rockL.visible = rockR.visible = false;
-              dnaBed.visible = dnaCore.visible = light.visible = false;
+              dnaBed.visible = dnaCore.visible = false;
               g.add(bed); g.add(core); g.add(rockL); g.add(rockR);
-              g.add(dnaBed); g.add(dnaCore); g.add(light);
-              segs.push({ bed, core, light, rockL, rockR, dnaBed, dnaCore });
+              g.add(dnaBed); g.add(dnaCore);
+              segs.push({ bed, core, rockL, rockR, dnaBed, dnaCore });
             }
             g.userData.segs = segs;
           }}

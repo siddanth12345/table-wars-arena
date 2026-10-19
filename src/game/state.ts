@@ -370,6 +370,62 @@ export const TRAIN_Q: TrainSpawn[] = [];
 export const TRAIN_CMD = { despawn: false };
 
 const training = () => G.mode === "training";
+// --- Ability tuning (training sandbox only; every other mode always uses the defaults) ---
+export type TuneKey =
+  | "wallCharges" | "wallCd" | "wallLife" | "padCount" | "padCd" | "fireGroundCd" | "fireAirCd" | "tpCd"
+  | "bossCharges" | "bossCd" | "quarterDmg" | "quarterWarn" | "swordSpeed" | "swordDmg" | "swordBounceDmg" | "swordBounces" | "stunRing";
+export type TuneDef = { k: TuneKey; label: string; def: number; min: number; max: number; step: number; unit?: string };
+export const TUNE_DEFS: Record<"wall" | "trampoline" | "fire" | "teleport" | "boss", TuneDef[]> = {
+  wall: [
+    { k: "wallCharges", label: "Charges", def: 6, min: 1, max: 12, step: 1 },
+    { k: "wallCd", label: "Cooldown", def: 3, min: 0.5, max: 15, step: 0.5, unit: "s" },
+    { k: "wallLife", label: "Lifetime", def: 2, min: 0.5, max: 10, step: 0.5, unit: "s" },
+  ],
+  trampoline: [
+    { k: "padCount", label: "Pads", def: 3, min: 1, max: 6, step: 1 },
+    { k: "padCd", label: "Reset cooldown", def: 5, min: 0.5, max: 15, step: 0.5, unit: "s" },
+  ],
+  fire: [
+    { k: "fireGroundCd", label: "Fire line cooldown", def: 5, min: 0.5, max: 15, step: 0.5, unit: "s" },
+    { k: "fireAirCd", label: "Fireball cooldown", def: 4, min: 0.5, max: 15, step: 0.5, unit: "s" },
+  ],
+  teleport: [
+    { k: "tpCd", label: "Cooldown", def: 2.5, min: 0.5, max: 15, step: 0.5, unit: "s" },
+  ],
+  boss: [
+    { k: "bossCharges", label: "Charges", def: 3, min: 2, max: 9, step: 1 },
+    { k: "bossCd", label: "Cooldown", def: 5, min: 0.5, max: 15, step: 0.5, unit: "s" },
+    { k: "quarterDmg", label: "Quarter damage", def: 25, min: 1, max: 100, step: 1 },
+    { k: "quarterWarn", label: "Quarter warning", def: 1, min: 0.2, max: 4, step: 0.1, unit: "s" },
+    { k: "swordSpeed", label: "Sword speed", def: 350, min: 50, max: 600, step: 10, unit: "u/s" },
+    { k: "swordDmg", label: "Sword hit damage", def: 15, min: 1, max: 100, step: 1 },
+    { k: "swordBounceDmg", label: "Sword bounce damage", def: 2, min: 0, max: 50, step: 1 },
+    { k: "swordBounces", label: "Bounces before return", def: 5, min: 1, max: 12, step: 1 },
+    { k: "stunRing", label: "Stun ring stun", def: 3, min: 0.5, max: 10, step: 0.5, unit: "s" },
+  ],
+};
+const TUNE_ALL = Object.values(TUNE_DEFS).flat();
+const TUNE_STORE = "tw-ability-tune";
+export const TUNE = Object.fromEntries(TUNE_ALL.map((d) => [d.k, d.def])) as Record<TuneKey, number>;
+try {
+  const raw = localStorage.getItem(TUNE_STORE);
+  if (raw) {
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    for (const d of TUNE_ALL) { const v = o[d.k]; if (typeof v === "number" && Number.isFinite(v)) TUNE[d.k] = Math.min(d.max, Math.max(d.min, v)); }
+  }
+} catch { /* ignore */ }
+export function setTune(k: TuneKey, v: number) {
+  TUNE[k] = v;
+  try { localStorage.setItem(TUNE_STORE, JSON.stringify(TUNE)); } catch { /* ignore */ }
+}
+export function resetTune(ids: TuneDef[]) { for (const d of ids) setTune(d.k, d.def); }
+const TUNE_DEF_MAP = Object.fromEntries(TUNE_ALL.map((d) => [d.k, d.def])) as Record<TuneKey, number>;
+/** Tuned value in training, the real default everywhere else. */
+export const tune = (k: TuneKey): number => (G.mode === "training" ? TUNE[k] : TUNE_DEF_MAP[k]);
+/** Charges an ability starts/refills with. */
+export const maxCharges = (ab: string): number =>
+  ab === "wall" ? tune("wallCharges") : ab === "trampoline" ? tune("padCount") : ab === "boss" ? tune("bossCharges") : 1;
+
 /** Gameplay values that training mode can override. */
 export const cfg = {
   maxHp: () => (training() ? TRAIN.maxHp : MAX_HP),

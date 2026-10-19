@@ -3,7 +3,7 @@ import { saveTraining } from "./account";
 import { LobbyInvite } from "./OnlineUI";
 import { ABILITY_LIST, getAbility, setAbility, useAbility } from "./abilities";
 import { masteryOn, setTrainMastery, useProgress } from "./mastery";
-import { G, TRAIN, TRAIN_CMD, TRAIN_DEFAULTS, TRAIN_Q, lockPointer, type TrainCfg, type TrainSpawn } from "./state";
+import { G, TRAIN, TRAIN_CMD, TRAIN_DEFAULTS, TRAIN_Q, TUNE, TUNE_DEFS, lockPointer, maxCharges, resetTune, setTune, type TrainCfg, type TrainSpawn } from "./state";
 
 function useTick(ms: number) {
   const [, tick] = useState(0);
@@ -47,11 +47,13 @@ const btn = "rounded px-6 py-3 font-black uppercase";
 function AbilityTab() {
   useProgress();
   const cur = useAbility();
+  const [, redraw] = useState(0);
+  const [openTune, setOpenTune] = useState<string | null>(null);
   const choose = (id: (typeof ABILITY_LIST)[number]["id"], mastered: boolean) => {
     if (getAbility() !== id) {
       setAbility(id);
       G.abilityCd = 0;
-      G.abilityCharges = id === "wall" ? 6 : id === "trampoline" ? 3 : 1;
+      G.abilityCharges = maxCharges(id);
     }
     setTrainMastery(id, mastered); // training-only: works even if not earned, never saved
   };
@@ -61,23 +63,54 @@ function AbilityTab() {
       {ABILITY_LIST.map((a) => {
         const on = cur === a.id && masteryOn(a.id);
         const base = cur === a.id && !on;
+        const defs = TUNE_DEFS[a.id];
+        const tuning = openTune === a.id;
         return (
-          <div key={a.id} className="flex items-center gap-4 rounded border-2 border-hud/30 p-3">
-            <div className="text-3xl">{a.icon}</div>
-            <div className="min-w-0 flex-1">
-              <div className="text-lg font-black uppercase">{a.name}</div>
-              <div className="text-xs opacity-70">{a.desc}</div>
-            </div>
-            <button className={`${btn} border-2 py-2 ${base ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"}`} onClick={() => choose(a.id, false)}>
-              Normal
-            </button>
-            {a.id !== "boss" && (
-              <button
-                className={`${btn} border-2 py-2 ${on ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"}`}
-                onClick={() => choose(a.id, true)}
-              >
-                Mastered
+          <div key={a.id} className="rounded border-2 border-hud/30 p-3">
+            <div className="flex items-center gap-4">
+              <div className="text-3xl">{a.icon}</div>
+              <div className="min-w-0 flex-1">
+                <div className="text-lg font-black uppercase">{a.name}</div>
+                <div className="text-xs opacity-70">{a.desc}</div>
+              </div>
+              <button className={`${btn} border-2 py-2 ${base ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"}`} onClick={() => choose(a.id, false)}>
+                Normal
               </button>
+              {a.id !== "boss" && (
+                <button
+                  className={`${btn} border-2 py-2 ${on ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"}`}
+                  onClick={() => choose(a.id, true)}
+                >
+                  Mastered
+                </button>
+              )}
+              <button className={`${btn} border-2 py-2 ${tuning ? "border-crosshair text-crosshair" : "border-hud/40"}`} onClick={() => setOpenTune(tuning ? null : a.id)}>
+                Tune {tuning ? "▲" : "▼"}
+              </button>
+            </div>
+            {tuning && (
+              <div className="mt-3 border-t border-hud/20 pt-2">
+                <p className="mb-1 text-[10px] uppercase tracking-widest opacity-60">Training only — other modes always use the defaults. Saved on this device.</p>
+                {defs.map((d) => (
+                  <Slider
+                    key={d.k}
+                    label={d.label}
+                    value={TUNE[d.k]}
+                    min={d.min}
+                    max={d.max}
+                    step={d.step}
+                    unit={d.unit ? ` ${d.unit}` : ""}
+                    onChange={(v) => {
+                      setTune(d.k, v);
+                      if (cur === a.id) { G.abilityCd = 0; G.abilityCharges = maxCharges(a.id); }
+                      redraw((n) => n + 1);
+                    }}
+                  />
+                ))}
+                <button className={`${btn} mt-2 border-2 border-hud/40`} onClick={() => { resetTune(defs); redraw((n) => n + 1); }}>
+                  Reset {a.name} to defaults
+                </button>
+              </div>
             )}
           </div>
         );

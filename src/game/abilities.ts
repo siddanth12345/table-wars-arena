@@ -38,7 +38,7 @@ export const ABILITY_LIST: AbilityDef[] = [
     id: "boss",
     name: "Boss",
     icon: "🔴",
-    desc: "Hardcore unlock. Ground: aim a quarter-room strike (25 damage, 1s warning, 4s cooldown). Max-area slams release a non-damaging stun ring. No mastery.",
+    desc: "Hardcore unlock. 3 charges, 5s cooldown once they run out. Ground: aimed quarter-room strike, 25 dmg (2 charges). Air: throw a bouncing spinning sword (1 charge). Max-area slams release a 3s stun ring. No mastery.",
   },
 ];
 

@@ -1908,47 +1908,35 @@ const kd = (e: KeyboardEvent) => {
       else if (slamStun.current.exp <= 0) slamStun.current.dur = 0;
     }
     if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
-    // Boss sword: horizontal spin, spherical 26-unit hitbox, and real solid-object bounces.
+    // Boss sword: horizontal spin, spherical 26-unit hitbox, and solid-object bounces.
     {
       const sword = bossSword.current;
-      sword.hitCooldown = Math.max(0, sword.hitCooldown - dt);
       if (sword.active) {
         const radius = 13;
         const travelVec = sword.vel.clone().multiplyScalar(dt);
         const travel = travelVec.length();
         const dir = travel > 1e-6 ? travelVec.clone().normalize() : new THREE.Vector3(1, 0, 0);
-        const solids: THREE.Object3D[] = [];
-        if (staticRef.current) solids.push(staticRef.current);
-        for (const m of wallMeshRefs.current) if (m && m.visible) solids.push(m);
-        const offsets = [
-          new THREE.Vector3(), new THREE.Vector3(radius, 0, 0), new THREE.Vector3(-radius, 0, 0),
-          new THREE.Vector3(0, radius, 0), new THREE.Vector3(0, -radius, 0),
-          new THREE.Vector3(0, 0, radius), new THREE.Vector3(0, 0, -radius),
-        ];
-        let nearest: { hit: THREE.Intersection; offset: THREE.Vector3 } | null = null;
-        if (!sword.returning && sword.hitCooldown <= 0 && travel > 0) {
-          for (const offset of offsets) {
-            const ray = new THREE.Raycaster(sword.pos.clone().add(offset), dir, 0, travel + 0.25);
-            const hit = ray.intersectObjects(solids, true).find((h) => h.object.visible && h.distance > 0.02);
-            if (hit && (!nearest || hit.distance < nearest.hit.distance)) nearest = { hit, offset };
-          }
-        }
-        if (nearest && !sword.returning) {
-          const hit = nearest.hit;
-          const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize() : dir.clone().negate();
-          if (normal.dot(sword.vel) > 0) normal.negate();
-          sword.pos.addScaledVector(dir, Math.max(0, hit.distance - 0.05));
-          sword.pos.addScaledVector(normal, 0.2);
-          sword.vel.addScaledVector(normal, -2 * sword.vel.dot(normal)).normalize().multiplyScalar(300);
-          sword.solidHits++;
-          sword.hitCooldown = 0.08;
-          if (sword.solidHits >= 3) sword.returning = true;
-        } else if (sword.returning) {
+        if (sword.returning) {
           const to = cam.position.clone().sub(sword.pos);
           if (to.length() < 5) sword.active = false;
           else { sword.vel.copy(to.normalize()).multiplyScalar(300); sword.pos.addScaledVector(sword.vel, dt); }
-        } else {
-          sword.pos.add(travelVec);
+        } else if (travel > 0) {
+          const solids: THREE.Object3D[] = [];
+          if (staticRef.current) solids.push(staticRef.current);
+          for (const m of wallMeshRefs.current) if (m && m.visible) solids.push(m);
+          const ray = new THREE.Raycaster(sword.pos.clone(), dir, 0, travel + radius);
+          const hit = ray.intersectObjects(solids, true).find((h) => h.object.visible && h.distance > 0.02);
+          if (hit) {
+            const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize() : dir.clone().negate();
+            if (normal.dot(sword.vel) > 0) normal.negate();
+            sword.pos.addScaledVector(dir, Math.max(0, hit.distance - radius - 0.05));
+            sword.pos.addScaledVector(normal, radius + 0.2);
+            sword.vel.addScaledVector(normal, -2 * sword.vel.dot(normal)).normalize().multiplyScalar(300);
+            sword.solidHits++;
+            if (sword.solidHits >= 3) sword.returning = true;
+          } else {
+            sword.pos.add(travelVec);
+          }
         }
         const hitRadius = radius;
         for (let ti = 0; ti < tables.length; ti++) {
@@ -1983,7 +1971,6 @@ const kd = (e: KeyboardEvent) => {
         mesh.visible = sword.active;
         if (sword.active) {
           mesh.position.copy(sword.pos);
-          // Keep the sword horizontal; rotate around the vertical axis through its center.
           mesh.rotation.set(0, performance.now() / 80, 0);
         }
       }

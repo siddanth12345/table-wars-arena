@@ -89,6 +89,8 @@ export const NET_HOOKS = {
   onWon: () => {},
   onRevive: (_id: string) => {},
   onVfx: (_p: Record<string, unknown>) => {},
+  /** Lobby / party: someone new joined — rebroadcast props & bots so they can see the room. */
+  onPeerJoined: (_id: string) => {},
 };
 export type EntSnap = { t: number[]; b: number[]; boss: number[] | null; stage: string; bh: number; bm: number; s: number[] };
 /** Ability-mastery extras on a hit: teleport the victim, or pull them toward a point. */
@@ -119,7 +121,14 @@ const send = (event: string, payload: Record<string, unknown>) => {
 
 // ---------------------------------------------------------------- rooms
 
-type Meta = { name: string; host: boolean; id: string };
+type Meta = { name: string; host: boolean; id: string; accountKey?: string };
+
+/** Same logged-in user or same guest tag across tabs. */
+export function myAccountKey() {
+  const a = getAccount();
+  if (a.status === "user" && a.userId) return `u:${a.userId}`;
+  return `g:${displayName()}`;
+}
 
 // Realtime payloads are client-controlled. Reject malformed values before they
 // reach the simulation or mutate shared game state.
@@ -269,11 +278,14 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
   ch.on("presence", { event: "sync" }, () => {
     const state = ch.presenceState<Meta>();
     const ids = new Set<string>();
+    const prev = new Set(NET.peers.keys());
+    const nextKeys: Record<string, string> = { [id]: myAccountKey() };
     for (const [key, metas] of Object.entries(state)) {
       const m = metas[0];
       if (!m) continue;
       ids.add(key);
       NET.names[key] = m.name ?? key.slice(0, 6);
+      if (m.accountKey) nextKeys[key] = m.accountKey;
       if (m.host) NET.hostId = key;
       if (key === id) continue;
       // Seed a peer as soon as presence sees them (before first pose) so mobile↔PC both show up
@@ -289,8 +301,16 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
         });
       }
     }
+    NET.accountKeys = nextKeys;
     for (const k of [...NET.peers.keys()]) if (!ids.has(k) || k === id) NET.peers.delete(k);
     NET.peers.delete(id);
+    // Late joiners: ask everyone to re-broadcast props/bots
+    if (NET.kind === "lobby" || NET.kind === "coop") {
+      for (const jid of ids) {
+        if (jid === id || prev.has(jid)) continue;
+        try { NET_HOOKS.onPeerJoined?.(jid); } catch { /* ignore */ }
+      }
+    }
     onPresence(ids);
     bump();
   });
@@ -300,7 +320,7 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
       if (done) return;
       done = true;
       try {
-        await ch.track({ name: displayName(), host, id } satisfies Meta);
+        await ch.track({ name: displayName(), host, id, accountKey: myAccountKey() } satisfies Meta);
       } catch { /* ignore */ }
       bump();
       resolve(ch);
@@ -572,7 +592,12 @@ function onOver(m: OverMsg) {
   // Career 1v1 wins — leave only counts if you already have ≥1 point
   if (m.winner === myId()) {
     const myScore = m.scores[myId()] ?? 0;
-    recordPvpWin({ opponentLeft: NET.opponentLeft, myScore });
+    const opp = Object.keys(m.scores).find((k) => k !== myId()) ?? opponentId();
+    const mine = myAccountKey();
+    const theirs = NET.accountKeys[opp] ?? "";
+    // Same account / same guest tag in another tab → practice match, no career win
+    const selfMatch = !!(mine && theirs && mine === theirs);
+    if (!selfMatch) recordPvpWin({ opponentLeft: NET.opponentLeft, myScore });
   }
   NET.opponentLeft = false;
   bump();

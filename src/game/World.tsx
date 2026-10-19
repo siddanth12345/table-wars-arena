@@ -1522,6 +1522,23 @@ const kd = (e: KeyboardEvent) => {
     else trainSpawn({ kind: q.kind as TrainSpawn["kind"], n: q.n, t: 0 });
   };
   NET_HOOKS.onWon = () => { G.phase = "won"; onCampaignWin(NET.kind === "coop" || !!(NET.party && NET.party.members.length > 0)); document.exitPointerLock?.(); };
+  // Late joiner: re-send my ability props so they appear on their client; host also pushes enemy snap soon via normal ents stream
+  NET_HOOKS.onPeerJoined = (_id) => {
+    if (!NET.online || (NET.kind !== "lobby" && NET.kind !== "coop")) return;
+    const mine = `${myId()}-`;
+    for (const w of abilityWalls) {
+      if (!w.active || !w.netId.startsWith(mine)) continue;
+      sendNet("vfx", { k: "wall", m: w.m ? 1 : 0, id: w.netId, cx: w.cx, cy: w.cy, cz: w.cz, yaw: w.yaw, pitch: w.pitch, hw: w.hw, hh: w.hh, hd: w.hd, life: Math.max(0.5, w.t) });
+    }
+    for (const pad of abilityPads) {
+      if (!pad.active || !pad.netId.startsWith(mine)) continue;
+      sendNet("vfx", { k: "pad", m: pad.m ? 1 : 0, id: pad.netId, cx: pad.cx, cy: pad.cy, cz: pad.cz, yaw: pad.yaw, pitch: pad.pitch, hw: pad.hw, hh: pad.hh, hd: pad.hd, nx: pad.nx, ny: pad.ny, nz: pad.nz, life: 9999 });
+    }
+    for (const f of abilityFires) {
+      if (!f.active || !f.netId.startsWith(mine)) continue;
+      sendNet("vfx", { k: "fire", m: f.m ? 1 : 0, id: f.netId, ax: f.ax, ay: f.ay, az: f.az, bx: f.bx, by: f.by, bz: f.bz, life: Math.max(0.5, f.t) });
+    }
+  };
   NET_HOOKS.onHit = (d, stun, stunT, extra) => {
     if (d > 0) damagePlayer(d);
     if (extra?.tp && !G.pvpDead && !G.campaignDead) pos.current.set(extra.tp[0]!, extra.tp[1]!, extra.tp[2]!);

@@ -135,7 +135,7 @@ function MiniMap() {
   const t: React.ReactNode[] = [];
   for (let i = 0; i < MAP.tables.length; i += 2) t.push(dot(MAP.tables[i]!, MAP.tables[i + 1]!, "#22c55e", 7, "t" + i));
   for (let i = 0; i < MAP.blues.length; i += 2) t.push(dot(MAP.blues[i]!, MAP.blues[i + 1]!, "#60a5fa", 6, "u" + i));
-  // Peers: in 1v1 use assigned red/blue on the minimap only; elsewhere keep amber
+  // Peers: in 1v1 use assigned red/blue on the minimap only; elsewhere keep amber /* PREVIEW_BUMP 2 */
   if (NET.kind === "pvp" && Object.keys(NET.colors).length) {
     for (const pr of NET.peers.values()) {
       if (pr.dead || pr.id === myId()) continue;

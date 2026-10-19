@@ -12,7 +12,7 @@ function RemoteTable({ peer }: { peer: Peer }) {
   const botHost = useRef<THREE.Group>(null);
   const ropeRef = useRef<THREE.Mesh>(null);
   const big = NET.kind === "pvp" || NET.kind === "lobby" ? PVP_SCALE : 1;
-  // Use each player's saved skin (no forced red/blue table colors in 1v1)
+  // Use each player's saved skin (no forced red/blue table colors in 1v1) /* PREVIEW_BUMP 2 */
   const skin: Skin = {
     ...DEFAULT_SKIN,
     ...(peer.skin ?? {}),

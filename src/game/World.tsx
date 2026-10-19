@@ -2031,21 +2031,27 @@ const kd = (e: KeyboardEvent) => {
           if (!grounded.current) {
             const look = new THREE.Vector3();
             cam.getWorldDirection(look);
-            const sword = bossSword.current;
-            if (!sword.active) {
-              sword.active = true; sword.returning = false; sword.solidHits = 0; sword.hitCooldown = 0; sword.solidObjects.clear(); sword.hitTargets.clear(); sword.returnHitTargets.clear(); sword.stuck.clear();
-              sword.pos.copy(cam.position).addScaledVector(look, 2);
-              sword.vel.copy(look).normalize().multiplyScalar(350);
-              G.abilityCd = 3; G.abilityCharges = 0; playSfx("fire_ground");
+            if (G.abilityCharges >= 1) {
+              const sword = bossSwords.current.find((candidate) => !candidate.active);
+              if (sword) {
+                sword.active = true; sword.returning = false; sword.solidHits = 0; sword.hitCooldown = 0; sword.solidObjects.clear(); sword.hitTargets.clear(); sword.returnHitTargets.clear(); sword.stuck.clear();
+                sword.pos.copy(cam.position).addScaledVector(look, 2);
+                sword.vel.copy(look).normalize().multiplyScalar(350);
+                G.abilityCharges--;
+                if (G.abilityCharges <= 0) G.abilityCd = 5;
+                playSfx("fire_ground");
+              }
             }
           } else {
           const look = new THREE.Vector3();
           cam.getWorldDirection(look);
           // The quarter's origin stays at the room center; its middle follows the crosshair direction.
           const aimAngle = Math.atan2(-look.z, look.x);
-          addHazard("quarter", 0, 0, 1, aimAngle - Math.PI / 4, 25, "player");
-          G.abilityCd = 4;
-          G.abilityCharges = 0;
+          if (G.abilityCharges >= 2) {
+            addHazard("quarter", 0, 0, 1, aimAngle - Math.PI / 4, 25, "player");
+            G.abilityCharges -= 2;
+            if (G.abilityCharges <= 0) G.abilityCd = 5;
+          }
           playSfx("stun");
           G.shake = Math.max(G.shake, 0.2);
           }

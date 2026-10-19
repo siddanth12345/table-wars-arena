@@ -21,7 +21,7 @@ import { LoadingScreen } from "./LoadingScreen";
 import { HomeBounceTable } from "./HomeBounceTable";
 import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
 import { ChatBar, ChatResumeCatcher } from "./ChatBar";
-import { NET, opponentId } from "./net";
+import { NET, opponentId, myId , myId } from "./net";
 import { useAccount } from "./account";
 
 const LIGHT = {
@@ -135,7 +135,16 @@ function MiniMap() {
   const t: React.ReactNode[] = [];
   for (let i = 0; i < MAP.tables.length; i += 2) t.push(dot(MAP.tables[i]!, MAP.tables[i + 1]!, "#22c55e", 7, "t" + i));
   for (let i = 0; i < MAP.blues.length; i += 2) t.push(dot(MAP.blues[i]!, MAP.blues[i + 1]!, "#60a5fa", 6, "u" + i));
-  for (let i = 0; i < MAP.peers.length; i += 2) t.push(dot(MAP.peers[i]!, MAP.peers[i + 1]!, "#f59e0b", 9, "p" + i));
+  // Peers: in 1v1 use assigned red/blue on the minimap only; elsewhere keep amber
+  if (NET.kind === "pvp" && Object.keys(NET.colors).length) {
+    for (const pr of NET.peers.values()) {
+      if (pr.dead || pr.id === myId()) continue;
+      const c = NET.colors[pr.id] === "red" ? "#d43a3a" : "#3a7bd4";
+      t.push(dot(pr.x, pr.z, c, 9, "p" + pr.id));
+    }
+  } else {
+    for (let i = 0; i < MAP.peers.length; i += 2) t.push(dot(MAP.peers[i]!, MAP.peers[i + 1]!, "#f59e0b", 9, "p" + i));
+  }
   const blink = Math.floor(Date.now() / 250) % 2 === 0;
   const partyShards = NET.online && NET.kind === "coop" && G.mode === "game";
   for (let i = 0; i < MAP.health.length; i += 2) {
@@ -159,8 +168,8 @@ function MiniMap() {
           ))}
           {t}
           {MAP.boss && dot(MAP.boss.x, MAP.boss.z, "#ef4444", 16, "boss")}
-          <line x1={MAP.px} y1={MAP.pz} x2={hx} y2={hz} stroke="#1d4ed8" strokeWidth={5} />
-          {dot(MAP.px, MAP.pz, "#1d4ed8", 9, "me")}
+          <line x1={MAP.px} y1={MAP.pz} x2={hx} y2={hz} stroke={NET.kind === "pvp" && NET.colors[myId()] === "red" ? "#d43a3a" : "#1d4ed8"} strokeWidth={5} />
+          {dot(MAP.px, MAP.pz, NET.kind === "pvp" && NET.colors[myId()] === "red" ? "#d43a3a" : NET.kind === "pvp" && NET.colors[myId()] === "blue" ? "#3a7bd4" : "#1d4ed8", 9, "me")}
         </svg>
       </div>
       {showShardHud && (

@@ -5,6 +5,7 @@ import { setTodOverride, type TimeOfDay } from "./settings";
 import { displayName, getAccount, lookupUsername } from "./account";
 import { G, goHome, resetGame, type Mode } from "./state";
 import { recordPvpWin } from "./mastery";
+import { setAbility } from "./abilities";
 import { SKIN, type Skin } from "./skins";
 import { onRemoteChat, clearChat } from "./chat";
 
@@ -40,6 +41,14 @@ const empty = () => ({
   stage: "idle" as "idle" | "queue" | "pick" | "playing" | "roundEnd" | "over",
   pickEnds: 0,
   myPick: null as TimeOfDay | null,
+  pickPhase: "tod" as "tod" | "ban" | "ability",
+  myBan: null as null | "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss",
+  myAbilityChoice: null as null | string,
+  myPhaseLocked: false,
+  bans: {} as Record<string, "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss">,
+  abilityChoices: {} as Record<string, string>,
+  phaseLocked: {} as Record<string, boolean>,
+  pvpLoadout: null as null | { ability: "wall" | "trampoline" | "fire" | "teleport" | "boss"; mastery: boolean },
   tod: "evening" as TimeOfDay,
   colors: {} as Record<string, "red" | "blue">,
   accountKeys: {} as Record<string, string>,
@@ -416,11 +425,11 @@ function onPresence(ids: Set<string>) {
   const opp = [...ids].find((k) => k !== myId());
   if (NET.stage === "pick" && NET.isHost && opp) {
     if (NET.pickEnds === 0) {
-      send("pickstart", { ms: 10000 });
-      beginPick(10000);
-    } else send("pickstart", { ms: Math.max(500, NET.pickEnds - Date.now()) }); // late joiner catch-up
+      send("pickstart", { ms: 10000, phase: "tod" });
+      beginPickPhase("tod", 10000);
+    } else send("pickstart", { ms: Math.max(500, NET.pickEnds - Date.now()), phase: NET.pickPhase }); // late joiner catch-up
     // re-send a couple of times in case the opponent wasn't listening yet
-    for (const d of [800, 2000]) later(d, () => { if (NET.stage === "pick" && NET.pickEnds) send("pickstart", { ms: Math.max(500, NET.pickEnds - Date.now()) }); });
+    for (const d of [800, 2000]) later(d, () => { if ((NET.stage === "pick" || NET.stage === "ban" || NET.stage === "abilityPick") && NET.pickEnds) send("pickstart", { ms: Math.max(500, NET.pickEnds - Date.now()), phase: NET.pickPhase }); });
   }
   if (!opp && NET.stage !== "idle" && NET.stage !== "over" && NET.pickEnds !== 0) {
     // opponent left mid-match: you win
@@ -491,41 +500,190 @@ export async function startPvp(name: string, host: boolean, partyMatch = false) 
   bump();
 }
 
-function beginPick(ms: number) {
-  if (!NET.isHost && NET.pickEnds !== 0) return; // already counting down
-  if (NET.stage !== "pick" && NET.stage !== "idle") return;
+function stageForPhase(phase: "tod" | "ban" | "ability") {
+  return phase === "tod" ? "pick" : phase === "ban" ? "ban" : "abilityPick";
+}
+
+function beginPickPhase(phase: "tod" | "ban" | "ability", ms: number) {
+  const st = stageForPhase(phase);
+  // Followers accept phase changes; hosts may restart timer
+  if (!NET.isHost && NET.pickPhase === phase && NET.pickEnds !== 0 && NET.stage === st) return;
+  NET.pickPhase = phase;
   NET.pickEnds = Date.now() + ms;
-  NET.stage = "pick";
+  NET.stage = st;
+  NET.myPhaseLocked = false;
+  // clear locks for this phase only
+  for (const k of Object.keys(phaseLocked)) {
+    if (k.startsWith(phase + ":")) delete phaseLocked[k];
+  }
+  NET.phaseLocked = { ...phaseLocked };
+  if (phase === "tod") {
+    picks = {};
+    NET.myPick = null;
+  }
+  if (phase === "ban") {
+    bans = {};
+    NET.bans = {};
+    NET.myBan = null;
+  }
+  if (phase === "ability") {
+    abilityChoices = {};
+    NET.abilityChoices = {};
+    NET.myAbilityChoice = null;
+  }
   bump();
   if (NET.isHost) {
     if (pickTimer) clearTimeout(pickTimer);
-    pickTimer = setTimeout(resolvePick, ms + 300);
+    pickTimer = setTimeout(() => resolveCurrentPhase(phase), ms + 300);
   }
 }
 
+function bothLocked(phase: string) {
+  const me = myId(), opp = opponentId();
+  if (!opp) return false;
+  return !!(phaseLocked[`${phase}:${me}`] && phaseLocked[`${phase}:${opp}`]);
+}
+
+function tryResolvePhaseEarly(phase: string) {
+  if (!NET.isHost) return;
+  if (!bothLocked(phase)) return;
+  if (pickTimer) clearTimeout(pickTimer);
+  pickTimer = null;
+  resolveCurrentPhase(phase as "tod" | "ban" | "ability");
+}
+
+function resolveCurrentPhase(phase: "tod" | "ban" | "ability") {
+  if (!NET.isHost) return;
+  if (phase === "tod") {
+    resolveTodThenBan();
+  } else if (phase === "ban") {
+    resolveBanThenAbility();
+  } else {
+    resolveAbilityAndStart();
+  }
+}
+
+function resolveTodThenBan() {
+  const me = myId(), opp = opponentId();
+  const chosen = [picks[me], picks[opp]].filter(Boolean) as TimeOfDay[];
+  const tod = chosen.length === 0 ? pickOne<TimeOfDay>(["day", "evening", "night"]) : chosen.length === 1 || chosen[0] === chosen[1] ? chosen[0]! : pickOne(chosen);
+  NET.tod = tod;
+  send("pickstart", { ms: 10000, phase: "ban", tod });
+  beginPickPhase("ban", 10000);
+  // also tell followers the resolved tod early
+  send("todpick", { tod });
+}
+
+function resolveBanThenAbility() {
+  send("pickstart", { ms: 10000, phase: "ability" });
+  beginPickPhase("ability", 10000);
+}
+
+function bannedSet() {
+  const s = new Set<string>();
+  for (const v of Object.values(bans)) {
+    if (v && v !== "none") s.add(v);
+  }
+  return s;
+}
+
+function resolveAbilityAndStart() {
+  const me = myId(), opp = opponentId();
+  const banned = bannedSet();
+  const pool = (["wall", "trampoline", "fire", "teleport", "boss"] as const).filter((a) => !banned.has(a));
+  const fallback = pool.length ? pool : (["wall", "trampoline", "fire", "teleport"] as const);
+  const resolveChoice = (raw: string | undefined) => {
+    let choice = raw || "random";
+    let mastery = false;
+    if (choice.endsWith(":m")) {
+      mastery = true;
+      choice = choice.slice(0, -2);
+    }
+    if (choice === "random" || banned.has(choice) || !(fallback as readonly string[]).includes(choice)) {
+      choice = pickOne([...fallback]);
+      mastery = false;
+    }
+    return { ability: choice as "wall" | "trampoline" | "fire" | "teleport" | "boss", mastery };
+  };
+  const loadouts: Record<string, { ability: "wall" | "trampoline" | "fire" | "teleport" | "boss"; mastery: boolean }> = {
+    [me]: resolveChoice(abilityChoices[me]),
+    [opp]: resolveChoice(abilityChoices[opp]),
+  };
+  const red = pickOne([me, opp].filter(Boolean));
+  const colors = { [red]: "red", [red === me ? opp : me]: "blue" } as Record<string, "red" | "blue">;
+  const msg: StartMsg = {
+    tod: NET.tod,
+    colors,
+    scores: { [me]: 0, [opp]: 0 },
+    loadouts,
+    banned: [...banned],
+  };
+  send("start", msg);
+  onStart(msg);
+}
+
 export function choosePick(tod: TimeOfDay) {
+  if (NET.myPhaseLocked || NET.stage !== "pick") return;
   NET.myPick = tod;
   picks[myId()] = tod;
   send("pick", { id: myId(), tod });
   bump();
 }
 
-type StartMsg = { tod: TimeOfDay; colors: Record<string, "red" | "blue">; scores: Record<string, number> };
+export function confirmTodPick() {
+  if (NET.stage !== "pick" || !NET.myPick || NET.myPhaseLocked) return;
+  NET.myPhaseLocked = true;
+  phaseLocked[`tod:${myId()}`] = true;
+  send("phaselock", { id: myId(), phase: "tod" });
+  bump();
+  if (NET.isHost) tryResolvePhaseEarly("tod");
+}
+
+export function chooseBan(ban: "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss") {
+  if (NET.myPhaseLocked || NET.stage !== "ban") return;
+  NET.myBan = ban;
+  bans[myId()] = ban;
+  send("ban", { id: myId(), ban });
+  bump();
+}
+
+export function confirmBan() {
+  if (NET.stage !== "ban" || !NET.myBan || NET.myPhaseLocked) return;
+  NET.myPhaseLocked = true;
+  phaseLocked[`ban:${myId()}`] = true;
+  send("phaselock", { id: myId(), phase: "ban" });
+  bump();
+  if (NET.isHost) tryResolvePhaseEarly("ban");
+}
+
+export function chooseAbilityPick(choice: string) {
+  if (NET.myPhaseLocked || NET.stage !== "abilityPick") return;
+  NET.myAbilityChoice = choice;
+  abilityChoices[myId()] = choice;
+  send("abilitypick", { id: myId(), choice });
+  bump();
+}
+
+export function confirmAbilityPick() {
+  if (NET.stage !== "abilityPick" || !NET.myAbilityChoice || NET.myPhaseLocked) return;
+  NET.myPhaseLocked = true;
+  phaseLocked[`ability:${myId()}`] = true;
+  send("phaselock", { id: myId(), phase: "ability" });
+  bump();
+  if (NET.isHost) tryResolvePhaseEarly("ability");
+}
+
+type StartMsg = {
+  tod: TimeOfDay;
+  colors: Record<string, "red" | "blue">;
+  scores: Record<string, number>;
+  loadouts?: Record<string, { ability: "wall" | "trampoline" | "fire" | "teleport" | "boss"; mastery: boolean }>;
+  banned?: string[];
+};
 type RoundMsg = { scores: Record<string, number>; dead: string };
 type OverMsg = { winner: string; scores: Record<string, number> };
 
 const pickOne = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)]!;
-
-function resolvePick() {
-  const me = myId(), opp = opponentId();
-  const chosen = [picks[me], picks[opp]].filter(Boolean) as TimeOfDay[];
-  const tod = chosen.length === 0 ? pickOne<TimeOfDay>(["day", "evening", "night"]) : chosen.length === 1 || chosen[0] === chosen[1] ? chosen[0]! : pickOne(chosen);
-  const red = pickOne([me, opp]);
-  const colors = { [red]: "red", [red === me ? opp : me]: "blue" } as Record<string, "red" | "blue">;
-  const msg: StartMsg = { tod, colors, scores: { [me]: 0, [opp]: 0 } };
-  send("start", msg);
-  onStart(msg);
-}
 
 function onStart(m: StartMsg) {
   NET.tod = m.tod;
@@ -533,9 +691,19 @@ function onStart(m: StartMsg) {
   NET.scores = m.scores;
   NET.stage = "playing";
   NET.roundMsg = "";
+  NET.pvpLoadout = m.loadouts?.[myId()] ?? NET.pvpLoadout;
   roundLocked = false;
   setTodOverride(m.tod);
   resetGame("pvp");
+  // Apply 1v1 loadout
+  if (NET.pvpLoadout) {
+    setAbility(NET.pvpLoadout.ability, "training"); // match pick may include Boss
+    G.pvpMastery = !!NET.pvpLoadout.mastery;
+    G.pvpMasteryAbility = NET.pvpLoadout.ability;
+  } else {
+    G.pvpMastery = false;
+    G.pvpMasteryAbility = null;
+  }
   G.countdown = 3.6;
   bump();
 }
@@ -555,7 +723,16 @@ function onDeath(id: string) {
   send("round", m);
   onRound(m);
   later(2500, () => {
-    const s: StartMsg = { tod: NET.tod, colors: NET.colors, scores };
+    const s: StartMsg = {
+      tod: NET.tod,
+      colors: NET.colors,
+      scores,
+      loadouts: {
+        [myId()]: NET.pvpLoadout ?? { ability: "wall", mastery: false },
+        [opponentId()]: NET.pvpLoadout ?? { ability: "wall", mastery: false },
+      },
+    };
+    // Keep each player's chosen loadout from match start (stored on NET per client)
     send("start", s);
     onStart(s);
   });

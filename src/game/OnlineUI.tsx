@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
-  NET, PVP_WIN, useNet, queue1v1, leaveQueue, choosePick, sendRematch, answerRematch, requeue, goHomeOnline,
+  NET, PVP_WIN, useNet, queue1v1, leaveQueue, choosePick, confirmTodPick, chooseBan, confirmBan,
+  chooseAbilityPick, confirmAbilityPick, sendRematch, answerRematch, requeue, goHomeOnline,
   createLobby, joinLobby, sendInvite, acceptInvite, dismissInvite, partyGo, kickMember, disbandParty, leaveParty,
   isPartyLeader, inParty, myId, opponentId, startInbox, stopInbox,
 } from "./net";
 import { useAccount, signIn, signUp, playAsGuest, signOut, logoutGuest, transferGuestProgress, isProgressTransferPending, clearProgressTransfer } from "./account";
 import { G, resetGame, lockPointer } from "./state";
-import { getPvpWins, useProgress } from "./mastery";
+import { getPvpWins, useProgress, hasMastery, hasAchievement } from "./mastery";
+import { ABILITY_LIST, type AbilityId } from "./abilities";
 import type { TimeOfDay } from "./settings";
 
 const btnMain = "pointer-events-auto rounded bg-crosshair px-6 py-3 text-base font-black uppercase text-hud-ink disabled:opacity-40";
@@ -330,26 +332,140 @@ export function QueueOverlay() {
 
 const TODS: { id: TimeOfDay; label: string }[] = [{ id: "day", label: "Day" }, { id: "evening", label: "Evening" }, { id: "night", label: "Night" }];
 
+const BAN_OPTIONS: { id: "none" | AbilityId; label: string; icon: string }[] = [
+  { id: "none", label: "None", icon: "—" },
+  ...ABILITY_LIST.map((a) => ({ id: a.id, label: a.name, icon: a.icon })),
+];
+
 export function MapPick() {
   const net = useNet();
   useTick(200);
-  if (net.kind !== "pvp" || net.stage !== "pick") return null;
+  useProgress();
+  if (net.kind !== "pvp") return null;
+  if (net.stage !== "pick" && net.stage !== "ban" && net.stage !== "abilityPick") return null;
   const left = net.pickEnds ? Math.max(0, Math.ceil((net.pickEnds - Date.now()) / 1000)) : 10;
   const opp = net.names[opponentId()];
+  const locked = net.myPhaseLocked;
+
+  // Combined bans for ability phase
+  const banned = new Set<string>();
+  for (const v of Object.values(net.bans)) if (v && v !== "none") banned.add(v);
+
+  // Choose phase: show everything non-banned; lock mastery/boss you don't own ("Not available"). Ban phase stays unrestricted.
+  const abilityChoices: { key: string; label: string; icon: string; available: boolean }[] = [];
+  for (const a of ABILITY_LIST) {
+    if (banned.has(a.id)) continue;
+    if (a.id === "boss") {
+      const own = hasAchievement("hardcore");
+      abilityChoices.push({
+        key: "boss",
+        label: own ? a.name : `${a.name} — Not available`,
+        icon: a.icon,
+        available: own,
+      });
+      continue;
+    }
+    // base ability always free
+    abilityChoices.push({ key: a.id, label: a.name, icon: a.icon, available: true });
+    // mastered variant always listed; locked if not owned
+    const ownM = hasMastery(a.id);
+    abilityChoices.push({
+      key: `${a.id}:m`,
+      label: ownM ? `${a.name} (Mastered)` : `${a.name} (Mastered) — Not available`,
+      icon: a.icon,
+      available: ownM,
+    });
+  }
+  abilityChoices.push({ key: "random", label: "Random", icon: "🎲", available: true });
+
   return (
     <div className="gui fixed inset-0 z-40 flex items-center justify-center bg-hud-scrim p-6 font-mono text-hud">
       <div className="w-full max-w-2xl rounded-lg border-2 border-hud/30 bg-hud-panel p-8 text-center">
         <div className="text-xs uppercase tracking-widest opacity-70">{opp ? `vs ${opp}` : "Waiting for opponent…"}</div>
-        <h1 className="mt-2 text-4xl font-black uppercase">Choose the arena</h1>
-        <div className="mt-2 text-6xl font-black text-crosshair">{left}</div>
-        <div className="mt-6 grid grid-cols-3 gap-3">
-          {TODS.map((t) => (
-            <button key={t.id} onClick={() => choosePick(t.id)} className={`tod-card tod-${t.id} rounded-xl border-2 p-6 text-lg font-black uppercase ${net.myPick === t.id ? "tod-active" : "border-transparent"}`}>
-              {t.label}
+
+        {net.stage === "pick" && (
+          <>
+            <h1 className="mt-2 text-4xl font-black uppercase">Choose the arena</h1>
+            <div className="mt-2 text-6xl font-black text-crosshair">{left}</div>
+            <div className="mt-6 grid grid-cols-3 gap-3">
+              {TODS.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  disabled={locked}
+                  onClick={() => choosePick(t.id)}
+                  className={`tod-card tod-${t.id} rounded-xl border-2 p-6 text-lg font-black uppercase ${net.myPick === t.id ? "tod-active" : "border-transparent"} disabled:opacity-50`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-4 text-xs opacity-70">Same pick wins. Different picks: one is chosen at random. Both choose → skip timer.</p>
+            <button type="button" className={`${btnMain} mt-4`} disabled={!net.myPick || locked} onClick={() => confirmTodPick()}>
+              {locked ? "Waiting for opponent…" : "Choose"}
             </button>
-          ))}
-        </div>
-        <p className="mt-4 text-xs opacity-70">Same pick wins. Different picks: one is chosen at random.</p>
+          </>
+        )}
+
+        {net.stage === "ban" && (
+          <>
+            <h1 className="mt-2 text-4xl font-black uppercase">Ban an ability</h1>
+            <div className="mt-2 text-6xl font-black text-crosshair">{left}</div>
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {BAN_OPTIONS.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  disabled={locked}
+                  onClick={() => chooseBan(o.id)}
+                  className={`rounded-xl border-2 p-4 text-left transition ${net.myBan === o.id ? "border-crosshair bg-crosshair/15" : "border-white/15 bg-black/30"} disabled:opacity-50`}
+                >
+                  <div className="text-2xl">{o.icon}</div>
+                  <div className="mt-1 text-sm font-black uppercase">{o.label}</div>
+                </button>
+              ))}
+            </div>
+            <p className="mt-4 text-xs opacity-70">Both bans apply. Pick None to ban nothing. Both ban → skip timer.</p>
+            <button type="button" className={`${btnMain} mt-4`} disabled={!net.myBan || locked} onClick={() => confirmBan()}>
+              {locked ? "Waiting for opponent…" : "Ban ability"}
+            </button>
+          </>
+        )}
+
+        {net.stage === "abilityPick" && (
+          <>
+            <h1 className="mt-2 text-4xl font-black uppercase">Choose ability</h1>
+            <div className="mt-2 text-6xl font-black text-crosshair">{left}</div>
+            {banned.size > 0 && (
+              <p className="mt-2 text-xs opacity-60">Banned: {[...banned].join(", ")}</p>
+            )}
+            <div className="mt-6 grid max-h-[40vh] grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3">
+              {abilityChoices.map((o) => (
+                <button
+                  key={o.key}
+                  type="button"
+                  disabled={locked || !o.available}
+                  onClick={() => o.available && chooseAbilityPick(o.key)}
+                  className={`rounded-xl border-2 p-4 text-left transition ${
+                    !o.available
+                      ? "cursor-not-allowed border-white/10 bg-black/20 opacity-40"
+                      : net.myAbilityChoice === o.key
+                        ? "border-crosshair bg-crosshair/15"
+                        : "border-white/15 bg-black/30"
+                  } disabled:opacity-50`}
+                >
+                  <div className="text-2xl">{o.icon}</div>
+                  <div className="mt-1 text-sm font-black uppercase">{o.label}</div>
+                </button>
+              ))}
+            </div>
+            <p className="mt-4 text-xs opacity-70">Random picks from non-banned abilities. Both ready → skip timer.</p>
+            <button type="button" className={`${btnMain} mt-4`} disabled={!net.myAbilityChoice || locked} onClick={() => confirmAbilityPick()}>
+              {locked ? "Waiting for opponent…" : "Ready"}
+            </button>
+          </>
+        )}
+
         <button className={`${btnAlt} mt-6`} onClick={goHomeOnline}>Leave</button>
       </div>
     </div>

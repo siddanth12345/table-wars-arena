@@ -175,7 +175,7 @@ export function resetGame(mode: Mode = G.mode) {
     crosshair: "normal", canGrapple: false, mobileTut: false, mobileTutStep: 0, mobilePaused: false,
     trainMenu: false, userPaused: false, chatOpen: false, bossMax: BOSS_HITS, pvpDead: false, frozen: false,
     campaignDead: false, shardProgress: 0, reviveQueue: [], freecam: false, freecamSpeedIdx: 0, lobbyRespawnT: 0, onlineTut: false, diedThisRun: [],
-    combo: 0, comboTimer: 0, abilityCd: 0, abilityCharges: 4, abilitySlow: 0, abilityLocked: false, burnBuff: 0,
+    combo: 0, comboTimer: 0, pvpMastery: false, pvpMasteryAbility: null as null | string, abilityCd: 0, abilityCharges: 4, abilitySlow: 0, abilityLocked: false, burnBuff: 0,
     dmgFloat: { amount: 0, targetId: "", x: 0.5, y: 0.4, t: 0, pop: 0 },
   });
   TRAIN_Q.length = 0;

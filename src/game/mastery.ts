@@ -203,6 +203,8 @@ export function getTrainMastery(ab: AbilityId) { return !!trainPick[ab]; }
 export function setTrainMastery(ab: AbilityId, on: boolean) { trainPick[ab] = on; bump(); }
 
 export const masteryOn = (ab: AbilityId) => {
+  // 1v1 loadout from map-pick phases
+  if (G.mode === "pvp" && G.pvpMasteryAbility) return ab === G.pvpMasteryAbility && !!G.pvpMastery;
   if (G.mode === "training" && ab in trainPick) return !!trainPick[ab];
   return hasMastery(ab) && !progress.off[ab];
 };

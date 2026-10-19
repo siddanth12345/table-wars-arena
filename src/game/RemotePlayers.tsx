@@ -75,8 +75,11 @@ function RemoteTable({ peer }: { peer: Peer }) {
         <cylinderGeometry args={[1, 1, 1, 6]} />
         <meshStandardMaterial color="#c8d0d8" metalness={0.4} roughness={0.45} />
       </mesh>
-      <Html position={[0, 4.2 * big, 0]} center distanceFactor={60} zIndexRange={[5, 0]}>
-        <div className="pointer-events-none whitespace-nowrap rounded bg-hud-panel px-2 py-0.5 font-mono text-xs font-black text-hud">
+      <Html position={[0, 5.2 * big, 0]} center distanceFactor={60} zIndexRange={[5, 0]}>
+        <div
+          className="pointer-events-none whitespace-nowrap rounded bg-hud-panel px-3 py-1 font-mono font-black text-hud"
+          style={{ fontSize: "2.45rem", lineHeight: 1.1 }} /* ~3.5× text-xs */
+        >
           {NET.names[peer.id] ?? peer.name}
         </div>
       </Html>

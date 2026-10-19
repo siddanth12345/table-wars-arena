@@ -359,7 +359,7 @@ export function World() {
   const bomb = useRef({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), tele: null as THREE.Vector3 | null, netId: "" });
   const booms = useMemo(() => Array.from({ length: 24 }, () => ({ t: 0, pos: new THREE.Vector3(), r: BOMB_R, col: "#ffb347", dur: 0.5, hold: false, ring: false, ringCol: "#ffffff", rx: 0, ry: 0, rz: 0 })), []);
   const hazards = useMemo<Hazard[]>(() => Array.from({ length: 8 }, () => ({ active: false, kind: "aoe", t: 0, total: 1, fx: 0, x: 0, z: 0, a0: 0 })), []);
-  const blues = useMemo(() => Array.from({ length: BLUE_N }, () => ({ alive: false, pos: new THREE.Vector3(), dash: new THREE.Vector3(), hp: BLUE_HP, hitCd: 0, dashT: 8, yaw: 0 })), []);
+  const blues = useMemo(() => Array.from({ length: BLUE_N }, () => ({ alive: false, pos: new THREE.Vector3(), dash: new THREE.Vector3(), vy: 0, hp: BLUE_HP, hitCd: 0, dashT: 8, yaw: 0 })), []);
   const blueT = useRef(6);
   const summonT = useRef(10);
   const healthT = useRef(HEALTH_INTERVAL);
@@ -378,7 +378,7 @@ export function World() {
     stung: new Set<string>(), tickAcc: new Map<string, number>(), netId: "" as string, m: false,
   })), []);
   // Air fireballs (fire ability while airborne) + remote visual bullets
-  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>() });
+  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), returnHitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>() });
   const bossSwordMesh = useRef<THREE.Group | null>(null);
   const lastAbilityMode = useRef(G.mode);
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
@@ -519,7 +519,7 @@ export function World() {
     if (slam.current.on) { slam.current.on = false; G.slamming = false; vy.current = 0; } // hit mid-air cancels the slam
     if (G.mode === "pvp" && (G.pvpDead || G.frozen)) return;
     if (NET.kind === "lobby" && G.pvpDead) return;
-    if (G.mode === "game" && d > 0) G.campaignHardcoreEligible = false;
+    if (G.mode === "game" && !sharesEnemies() && G.stage === "boss" && d > 0) G.campaignHardcoreEligible = false;
     G.playerHp = Math.max(0, G.playerHp - d);
     G.hurtFlash = 0.25;
     if (!quiet && d > 0) playSfx("player_hurt");
@@ -575,7 +575,7 @@ export function World() {
       if (G.stage !== "tables") {
         // checkpoint: back to the boss warning, parry stays compromised
         onPlayerDeath(G.mode, NET.kind);
-        Object.assign(G, { playerHp: MAX_HP, stage: "incoming", bossWarn: BOSS_WARN, bossHits: 0, bossTime: 0, respawnMsg: 2.5, stun: 0 });
+        Object.assign(G, { playerHp: MAX_HP, stage: "incoming", bossWarn: BOSS_WARN, bossHits: 0, bossTime: 0, respawnMsg: 2.5, stun: 0, campaignHardcoreEligible: true });
         G.respawnToken++;
         return;
       }
@@ -3092,6 +3092,9 @@ const kd = (e: KeyboardEvent) => {
         G.bossWarn -= dt;
         if (G.bossWarn <= 0) {
           G.stage = "boss";
+          // Hardcore tracks only the boss encounter: heal and start a fresh damage-free attempt.
+          G.playerHp = MAX_HP;
+          G.campaignHardcoreEligible = true;
           b.y = ROOM.h - 30;
           b.vy = -350;
           b.landed = false;

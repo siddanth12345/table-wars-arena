@@ -508,7 +508,7 @@ export function World() {
   const addWave = (x: number, z: number, stunOnly = false) => {
     const w = waves.find((q) => !q.active) ?? waves[0]!;
     w.hitPeers.clear();
-    Object.assign(w, { active: true, r: BOSS_S * 3, x, z, hit: false, stunOnly });
+    Object.assign(w, { active: true, r: stunOnly ? 0 : BOSS_S * 3, x, z, hit: false, stunOnly });
   };
   const damagePlayer = (d: number, force = false, quiet = false) => {
     if (G.campaignDead) return;
@@ -1896,7 +1896,7 @@ const kd = (e: KeyboardEvent) => {
       const ab = getAbility();
       const tp = teleportRef.current;
       if (ab === "boss") {
-        if (hasAchievement("hardcore") && grounded.current && G.abilityCd <= 0 && !G.pvpDead && !G.campaignDead) {
+        if ((hasAchievement("hardcore") || G.mode === "training") && grounded.current && G.abilityCd <= 0 && !G.pvpDead && !G.campaignDead) {
           const look = new THREE.Vector3();
           cam.getWorldDirection(look);
           // The quarter's origin stays at the room center; its middle follows the crosshair direction.
@@ -3154,8 +3154,16 @@ const kd = (e: KeyboardEvent) => {
           if (h.t <= 0) {
             h.fx = 0.5;
             if (h.kind === "quarter") {
-              const ang = (Math.atan2(-p.z, p.x) - h.a0 + Math.PI * 4) % (Math.PI * 2);
-              if (ang <= Math.PI / 2) damagePlayer(h.dmg ?? BIG_DMG);
+              const inQuarter = (x: number, z: number) => {
+                const ang = (Math.atan2(-z, x) - h.a0 + Math.PI * 4) % (Math.PI * 2);
+                return Math.hypot(x, z) <= R && ang <= Math.PI / 2;
+              };
+              if (inQuarter(p.x, p.z)) damagePlayer(h.dmg ?? BIG_DMG);
+              for (const t of tables) if (t.alive && inQuarter(t.pos.x, t.pos.z)) hitTable(t, h.dmg ?? BIG_DMG);
+              for (const u of blues) if (u.alive && inQuarter(u.pos.x, u.pos.z)) hitBlue(u, h.dmg ?? BIG_DMG);
+              if (NET.online && (NET.kind === "pvp" || NET.kind === "lobby")) {
+                for (const peer of NET.peers.values()) if (!peer.dead && inQuarter(peer.x, peer.z)) hitPeer(peer.id, h.dmg ?? BIG_DMG);
+              }
             } else if (h.kind === "sword") {
               if (Math.hypot(p.x - h.x, p.z - h.z) < SWORD_R && p.y < 40) {
                 G.stun = STUN_TIME;
@@ -3212,21 +3220,38 @@ const kd = (e: KeyboardEvent) => {
         w.r += WAVE_SPEED * dt;
         if (w.r > R * 2) { w.active = false; continue; }
         const d = Math.hypot(p.x - w.x, p.z - w.z);
-        if (!w.hit && d >= r0 - PLAYER_R - 1 && d <= w.r + PLAYER_R + 1 && p.y < WAVE_H) {
+        if (!w.stunOnly && !w.hit && d >= r0 - PLAYER_R - 1 && d <= w.r + PLAYER_R + 1 && p.y < WAVE_H) {
           w.hit = true;
-          if (w.stunOnly) { G.stun = Math.max(G.stun, 3); playSfx("stun"); }
-          else {
-            // Campaign boss stomps hit harder; training/lobby keep base WAVE_DMG
-            damagePlayer(G.mode === "game" ? 40 : WAVE_DMG);
-          }
+          damagePlayer(G.mode === "game" ? 40 : WAVE_DMG);
         }
-        if (w.stunOnly && NET.online && (NET.kind === "pvp" || NET.kind === "lobby")) {
-          for (const peer of NET.peers.values()) {
-            if (w.hitPeers.has(peer.id) || peer.dead) continue;
-            const pd = Math.hypot(peer.x - w.x, peer.z - w.z);
-            if (pd >= r0 - PLAYER_R - 1 && pd <= w.r + PLAYER_R + 1 && peer.y < WAVE_H) {
-              w.hitPeers.add(peer.id);
-              hitPeer(peer.id, 0, true, 3);
+        if (w.stunOnly) {
+          // Freeze training bots as well as networked opponents when the ring crosses them.
+          for (let ti = 0; ti < tables.length; ti++) {
+            const t = tables[ti]!;
+            const id = `t${ti}`;
+            const td = Math.hypot(t.pos.x - w.x, t.pos.z - w.z);
+            if (t.alive && !w.hitPeers.has(id) && td >= r0 - 2 && td <= w.r + 2 && t.pos.y < WAVE_H) {
+              w.hitPeers.add(id);
+              abilityStun.current.set(id, 3);
+            }
+          }
+          for (let bi = 0; bi < blues.length; bi++) {
+            const u = blues[bi]!;
+            const id = `b${bi}`;
+            const bd = Math.hypot(u.pos.x - w.x, u.pos.z - w.z);
+            if (u.alive && !w.hitPeers.has(id) && bd >= r0 - 2 && bd <= w.r + 2 && u.pos.y < WAVE_H) {
+              w.hitPeers.add(id);
+              abilityStun.current.set(id, 3);
+            }
+          }
+          if (NET.online && (NET.kind === "pvp" || NET.kind === "lobby")) {
+            for (const peer of NET.peers.values()) {
+              if (w.hitPeers.has(peer.id) || peer.dead) continue;
+              const pd = Math.hypot(peer.x - w.x, peer.z - w.z);
+              if (pd >= r0 - PLAYER_R - 1 && pd <= w.r + PLAYER_R + 1 && peer.y < WAVE_H) {
+                w.hitPeers.add(peer.id);
+                hitPeer(peer.id, 0, true, 3);
+              }
             }
           }
         }

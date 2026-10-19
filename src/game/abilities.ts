@@ -43,6 +43,7 @@ export const ABILITY_LIST: AbilityDef[] = [
 ];
 
 const STORE = "tw-ability";
+const LAST_UNLOCKED_STORE = "tw-last-unlocked-ability";
 let selected: AbilityId = "wall";
 const subs = new Set<() => void>();
 

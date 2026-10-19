@@ -74,11 +74,12 @@ const WALLRUN_TIME = 3;
 const WALLRUN_RECHARGE = 1;
 const WORLD_UNITS_PER_METER = 10;
 // ground pound tiers by drop height (diameters; max = 1.5 boss-table lengths)
+const SLAM_RADIUS_MULT = 3; // every slam radius is 3× bigger
 const SLAM_TIERS = [
-  { maxH: BOSS_H / 2, d: TABLE_W * 1.5, dmg: 5, cd: 1 },
-  { maxH: BOSS_H, d: TABLE_W * 3, dmg: 5, cd: 2 },
-  { maxH: BOSS_H * 2, d: TABLE_W * 4, dmg: 10, cd: 5 },
-  { maxH: Infinity, d: 6 * BOSS_S * 1.5, dmg: 25, cd: 10 },
+  { maxH: BOSS_H / 2, d: TABLE_W * 1.5 * SLAM_RADIUS_MULT, dmg: 5, cd: 1 },
+  { maxH: BOSS_H, d: TABLE_W * 3 * SLAM_RADIUS_MULT, dmg: 5, cd: 2 },
+  { maxH: BOSS_H * 2, d: TABLE_W * 4 * SLAM_RADIUS_MULT, dmg: 10, cd: 5 },
+  { maxH: Infinity, d: 6 * BOSS_S * 1.5 * SLAM_RADIUS_MULT, dmg: 25, cd: 10 },
 ];
 const R = ROOM.r;
 // 1v1 storm: starts 60s into a round, closes in from the arena edge at 30 u/s, 5 dmg every 0.6s while inside

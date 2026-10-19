@@ -21,7 +21,7 @@ import { LoadingScreen } from "./LoadingScreen";
 import { HomeBounceTable } from "./HomeBounceTable";
 import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
 import { ChatBar, ChatResumeCatcher } from "./ChatBar";
-import { NET, opponentId, myId , myId } from "./net";
+import { NET, opponentId, myId } from "./net";
 import { useAccount } from "./account";
 
 const LIGHT = {
@@ -135,7 +135,7 @@ function MiniMap() {
   const t: React.ReactNode[] = [];
   for (let i = 0; i < MAP.tables.length; i += 2) t.push(dot(MAP.tables[i]!, MAP.tables[i + 1]!, "#22c55e", 7, "t" + i));
   for (let i = 0; i < MAP.blues.length; i += 2) t.push(dot(MAP.blues[i]!, MAP.blues[i + 1]!, "#60a5fa", 6, "u" + i));
-  // Peers: in 1v1 use assigned red/blue on the minimap only; elsewhere keep amber /* PREVIEW_BUMP 2 */
+  // Peers: in 1v1 use assigned red/blue on the minimap only; elsewhere keep amber
   if (NET.kind === "pvp" && Object.keys(NET.colors).length) {
     for (const pr of NET.peers.values()) {
       if (pr.dead || pr.id === myId()) continue;

@@ -42,6 +42,7 @@ const empty = () => ({
   myPick: null as TimeOfDay | null,
   tod: "evening" as TimeOfDay,
   colors: {} as Record<string, "red" | "blue">,
+  accountKeys: {} as Record<string, string>,
   scores: {} as Record<string, number>,
   roundMsg: "",
   winner: "",

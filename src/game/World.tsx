@@ -378,6 +378,8 @@ export function World() {
     stung: new Set<string>(), tickAcc: new Map<string, number>(), netId: "" as string, m: false,
   })), []);
   // Air fireballs (fire ability while airborne) + remote visual bullets
+  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hits: 0, hitCooldown: 0, hitTargets: new Set<string>(), solidHits: 0, lastSolid: "" });
+  const bossSwordMesh = useRef<THREE.Group | null>(null);
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
     active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string, m: false, b: 0, idle: 0,
   })), []);
@@ -1495,6 +1497,7 @@ const kd = (e: KeyboardEvent) => {
   NET_HOOKS.onHit = (d, stun, stunT, extra) => {
     if (d > 0) damagePlayer(d);
     if (extra?.tp && !G.pvpDead && !G.campaignDead) pos.current.set(extra.tp[0]!, extra.tp[1]!, extra.tp[2]!);
+    if (extra?.push && !G.pvpDead && !G.campaignDead) { hv.current.set(extra.push[0]!, 0, extra.push[2]!); grounded.current = false; }
     if (extra?.slam && !G.pvpDead && !G.campaignDead && G.playerHp > 0) {
       // slammed straight down: cancel every other velocity; the stun starts once I touch the ground
       hv.current.set(0, 0, 0);
@@ -1891,12 +1894,84 @@ const kd = (e: KeyboardEvent) => {
       else if (slamStun.current.exp <= 0) slamStun.current.dur = 0;
     }
     if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
+    // Boss sword: constant 300 u/s flight, three solid contacts before returning, then home to player.
+    {
+      const sword = bossSword.current;
+      sword.hitCooldown = Math.max(0, sword.hitCooldown - dt);
+      if (sword.active) {
+        const dir = sword.vel.clone().normalize();
+        const travel = 300 * dt;
+        const ray = new THREE.Raycaster(sword.pos.clone(), dir, 0, travel + 0.8);
+        const solidHit = staticRef.current ? ray.intersectObject(staticRef.current, true).find((h) => h.object.visible) : undefined;
+        if (solidHit && !sword.returning && sword.hitCooldown <= 0) {
+          sword.solidHits++;
+          sword.hitCooldown = 0.12;
+          sword.lastSolid = solidHit.object.uuid;
+          sword.pos.copy(solidHit.point).addScaledVector(dir, 1.5);
+          if (sword.solidHits >= 3) sword.returning = true;
+        }
+        const targetPos = sword.returning ? cam.position : null;
+        if (targetPos) {
+          const to = targetPos.clone().sub(sword.pos);
+          if (to.length() < 5) sword.active = false;
+          else { sword.vel.copy(to.normalize()).multiplyScalar(300); sword.pos.addScaledVector(sword.vel, dt); }
+        } else if (!solidHit || sword.hitCooldown <= 0) sword.pos.addScaledVector(sword.vel, dt);
+        const hitRadius = 15;
+        for (let ti = 0; ti < tables.length; ti++) {
+          const t = tables[ti]!; const id = `t${ti}`;
+          if (t.alive && !sword.hitTargets.has(id) && sword.pos.distanceTo(tmpV.copy(t.pos).setY(t.pos.y + 2 * t.s)) <= hitRadius + 2 * t.s) {
+            sword.hitTargets.add(id); hitTable(t, 10);
+            const away = tmpV.copy(t.pos).sub(sword.pos).setY(0); if (away.lengthSq() < 0.01) away.set(Math.random() - 0.5, 0, Math.random() - 0.5); away.normalize();
+            t.dash.copy(away).multiplyScalar(300); t.dashT = Math.max(t.dashT, 0.25);
+          }
+        }
+        for (let bi = 0; bi < blues.length; bi++) {
+          const u = blues[bi]!; const id = `b${bi}`;
+          if (u.alive && !sword.hitTargets.has(id) && sword.pos.distanceTo(tmpV.copy(u.pos).setY(u.pos.y + 2)) <= hitRadius + 2) {
+            sword.hitTargets.add(id); hitBlue(u, 10);
+            const away = tmpV.copy(u.pos).sub(sword.pos).setY(0); if (away.lengthSq() < 0.01) away.set(Math.random() - 0.5, 0, Math.random() - 0.5); away.normalize();
+            u.dash.copy(away).multiplyScalar(300); u.dashT = Math.max(u.dashT, 0.25);
+          }
+        }
+        if (NET.online && (NET.kind === "pvp" || NET.kind === "lobby")) {
+          for (const peer of NET.peers.values()) {
+            if (peer.dead || sword.hitTargets.has(peer.id) || Math.hypot(peer.x - sword.pos.x, peer.z - sword.pos.z) > hitRadius + 1.5 || Math.abs(peer.y - sword.pos.y) > hitRadius + 2) continue;
+            sword.hitTargets.add(peer.id);
+            let dx = peer.x - sword.pos.x, dz = peer.z - sword.pos.z; const len = Math.hypot(dx, dz);
+            if (len < 0.01) { const a = Math.random() * Math.PI * 2; dx = Math.cos(a); dz = Math.sin(a); } else { dx /= len; dz /= len; }
+            hitPeer(peer.id, 10, false, undefined, { push: [dx * 300, 0, dz * 300] });
+          }
+        }
+        if (sword.pos.length() > R * 2.5) sword.returning = true;
+      }
+      const mesh = bossSwordMesh.current;
+      if (mesh) {
+        mesh.visible = sword.active;
+        if (sword.active) {
+          mesh.position.copy(sword.pos);
+          const d = sword.vel.clone().normalize();
+          mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+          mesh.rotateY(performance.now() / 80);
+        }
+      }
+    }
     if (abilityReq.current && G.phase === "playing" && G.locked && !G.freecam && G.countdown <= 0.6 && G.stun <= 0 && !G.pvpDead && !G.campaignDead) {
       abilityReq.current = false;
       const ab = getAbility();
       const tp = teleportRef.current;
       if (ab === "boss") {
-        if ((hasAchievement("hardcore") || G.mode === "training") && grounded.current && G.abilityCd <= 0 && !G.pvpDead && !G.campaignDead) {
+        if ((hasAchievement("hardcore") || G.mode === "training") && G.abilityCd <= 0 && !G.pvpDead && !G.campaignDead) {
+          if (!grounded.current) {
+            const look = new THREE.Vector3();
+            cam.getWorldDirection(look);
+            const sword = bossSword.current;
+            if (!sword.active) {
+              sword.active = true; sword.returning = false; sword.hits = 0; sword.solidHits = 0; sword.hitCooldown = 0; sword.lastSolid = ""; sword.hitTargets.clear();
+              sword.pos.copy(cam.position).addScaledVector(look, 2);
+              sword.vel.copy(look).normalize().multiplyScalar(300);
+              G.abilityCd = 3; G.abilityCharges = 0; playSfx("fire_ground");
+            }
+          } else {
           const look = new THREE.Vector3();
           cam.getWorldDirection(look);
           // The quarter's origin stays at the room center; its middle follows the crosshair direction.
@@ -1906,6 +1981,7 @@ const kd = (e: KeyboardEvent) => {
           G.abilityCharges = 0;
           playSfx("stun");
           G.shake = Math.max(G.shake, 0.2);
+          }
         }
       } else if (ab === "teleport" && !G.abilityLocked && !G.parryLocked) {
         if (tp.active) {
@@ -4313,6 +4389,20 @@ const kd = (e: KeyboardEvent) => {
           visible={false}
         />
       ))}
+      <group ref={(m) => { bossSwordMesh.current = m; }} visible={false}>
+        <mesh castShadow>
+          <boxGeometry args={[2.2, 26, 1.2]} />
+          <meshStandardMaterial color="#cbd5e1" metalness={0.9} roughness={0.2} emissive="#64748b" emissiveIntensity={1.5} />
+        </mesh>
+        <mesh position={[0, -3, 0]}>
+          <boxGeometry args={[9, 1.5, 2]} />
+          <meshStandardMaterial color="#7f1d1d" metalness={0.7} roughness={0.25} />
+        </mesh>
+        <mesh position={[0, -9, 0]}>
+          <cylinderGeometry args={[1.1, 1.1, 6, 8]} />
+          <meshStandardMaterial color="#991b1b" metalness={0.8} roughness={0.2} />
+        </mesh>
+      </group>
       {fireballs.map((_, i) => (
         <mesh key={`fb${i}`} ref={(m) => { fireballMeshRefs.current[i] = m; }} visible={false}>
           <sphereGeometry args={[0.8, 12, 10]} />

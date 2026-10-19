@@ -71,12 +71,14 @@ function AbilityTab() {
             <button className={`${btn} border-2 py-2 ${base ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"}`} onClick={() => choose(a.id, false)}>
               Normal
             </button>
-            <button
-              className={`${btn} border-2 py-2 ${on ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"}`}
-              onClick={() => choose(a.id, true)}
-            >
-              Mastered
-            </button>
+            {a.id !== "boss" && (
+              <button
+                className={`${btn} border-2 py-2 ${on ? "border-crosshair bg-crosshair text-hud-ink" : "border-hud/40"}`}
+                onClick={() => choose(a.id, true)}
+              >
+                Mastered
+              </button>
+            )}
           </div>
         );
       })}

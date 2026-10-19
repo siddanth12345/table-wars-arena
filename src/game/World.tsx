@@ -390,7 +390,7 @@ export function World() {
     stung: new Set<string>(), tickAcc: new Map<string, number>(), netId: "" as string, m: false,
   })), []);
   // Air fireballs (fire ability while airborne) + remote visual bullets
-  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), returnHitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>(), stuck: new Map<string, { kind: "t" | "b" | "p"; offset: THREE.Vector3; acc: number; netAcc: number; nextDamage: number }>() });
+  const bossSword = useRef({ active: false, returning: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), hitCooldown: 0, hitTargets: new Set<string>(), returnHitTargets: new Set<string>(), solidHits: 0, solidObjects: new Set<string>(), stuck: new Map<string, { kind: "t" | "b" | "p"; offset: THREE.Vector3; netAcc: number }>() });
   const bossSwordMesh = useRef<THREE.Group | null>(null);
   const lastAbilityMode = useRef(G.mode);
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
@@ -1926,18 +1926,16 @@ const kd = (e: KeyboardEvent) => {
     {
       const sword = bossSword.current;
       for (const [id, stuck] of sword.stuck) {
-        stuck.acc += dt;
-        if (stuck.acc >= 0.4) { stuck.acc -= 0.4; stuck.nextDamage = 2; }
         if (stuck.kind === "t") {
           const t = tables[Number(id.slice(1))];
           if (!t?.alive) { sword.stuck.delete(id); continue; }
           t.pos.copy(sword.pos).add(stuck.offset);
-          if (stuck.nextDamage) { hitTable(t, stuck.nextDamage); stuck.nextDamage = 0; }
+          
         } else if (stuck.kind === "b") {
           const u = blues[Number(id.slice(1))];
           if (!u?.alive) { sword.stuck.delete(id); continue; }
           u.pos.copy(sword.pos).add(stuck.offset);
-          if (stuck.nextDamage) { hitBlue(u, stuck.nextDamage); stuck.nextDamage = 0; }
+          
         } else {
           const peer = NET.peers.get(id);
           if (!peer || peer.dead) { sword.stuck.delete(id); continue; }
@@ -1945,8 +1943,7 @@ const kd = (e: KeyboardEvent) => {
           if (stuck.netAcc >= 0.1 || stuck.nextDamage) {
             stuck.netAcc %= 0.1;
             const extra = { stick: [sword.pos.x + stuck.offset.x, sword.pos.y + stuck.offset.y, sword.pos.z + stuck.offset.z] };
-            hitPeer(id, stuck.nextDamage ? 2 : 0, false, undefined, extra);
-            stuck.nextDamage = 0;
+            hitPeer(id, 0, false, undefined, extra);
           }
         }
       }
@@ -1973,7 +1970,26 @@ const kd = (e: KeyboardEvent) => {
             sword.pos.addScaledVector(normal, radius + 0.2);
             sword.vel.addScaledVector(normal, -2 * sword.vel.dot(normal)).normalize().multiplyScalar(350);
             const surfaceId = hit.object.uuid;
-            if (!sword.solidObjects.has(surfaceId)) { sword.solidObjects.add(surfaceId); sword.solidHits++; }
+            if (!sword.solidObjects.has(surfaceId)) { sword.solidObjects.add(surfaceId); }
+            sword.solidHits++;
+            // Every solid bounce deals 2 damage to anything currently attached to the sword.
+            for (const [id, stuck] of sword.stuck) {
+              if (stuck.kind === "t") {
+                const target = tables[Number(id.slice(1))];
+                if (target?.alive) hitTable(target, 2);
+                else sword.stuck.delete(id);
+              } else if (stuck.kind === "b") {
+                const target = blues[Number(id.slice(1))];
+                if (target?.alive) hitBlue(target, 2);
+                else sword.stuck.delete(id);
+              } else {
+                const peer = NET.peers.get(id);
+                if (peer && !peer.dead) {
+                  const extra = { stick: [sword.pos.x + stuck.offset.x, sword.pos.y + stuck.offset.y, sword.pos.z + stuck.offset.z] };
+                  hitPeer(id, 2, false, undefined, extra);
+                } else sword.stuck.delete(id);
+              }
+            }
             if (sword.solidHits >= 5) sword.returning = true;
           } else sword.pos.add(travelVec);
         }
@@ -1981,7 +1997,7 @@ const kd = (e: KeyboardEvent) => {
         const attach = (id: string, kind: "t" | "b" | "p", center: THREE.Vector3) => {
           if (sword.stuck.has(id) || contactTargets.has(id) || sword.pos.distanceTo(center) > radius) return;
           contactTargets.add(id);
-          sword.stuck.set(id, { kind, offset: center.clone().sub(sword.pos), acc: 0, netAcc: 0, nextDamage: 0 });
+          sword.stuck.set(id, { kind, offset: center.clone().sub(sword.pos), netAcc: 0 });
           if (kind === "t") hitTable(tables[Number(id.slice(1))]!, 15);
           else if (kind === "b") hitBlue(blues[Number(id.slice(1))]!, 15);
           else hitPeer(id, 15, false, undefined, { stick: [sword.pos.x, sword.pos.y, sword.pos.z] });
@@ -3187,19 +3203,7 @@ const kd = (e: KeyboardEvent) => {
             b.quarterT = 4 * cfg.bossCdK();
             addHazard("quarter", 0, 0, 2.5);
           }
-          blueT.current -= dt;
-          if (blueT.current <= 0) {
-            blueT.current = 6 * cfg.bossCdK();
-            for (let k = 0; k < 2; k++) {
-              const u = blues.find((x) => !x.alive);
-              if (!u) break;
-              Object.assign(u, { alive: true, hp: G.mode === "training" ? TRAIN.blueHp : BLUE_HP, hitCd: 0, dashT: 6 + Math.random() * 8 });
-              const a = Math.random() * Math.PI * 2;
-              u.pos.set(b.pos.x + Math.cos(a) * (BOSS_S * 4), 0, b.pos.z + Math.sin(a) * (BOSS_S * 4));
-              clampCircle(u.pos, 3 * TABLE_S);
-              u.dash.set(0, 0, 0);
-            }
-          }
+          // Boss no longer summons blue tables.
           summonT.current -= dt;
           if (summonT.current <= 0) {
             summonT.current = 10 * cfg.bossCdK();

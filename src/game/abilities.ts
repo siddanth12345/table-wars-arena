@@ -57,7 +57,17 @@ load();
 function bump() { subs.forEach((f) => f()); }
 
 export function getAbility() { return selected; }
+export function getLastUnlockedAbility(): AbilityId {
+  try {
+    const v = localStorage.getItem(LAST_UNLOCKED_STORE);
+    if (v === "wall" || v === "trampoline" || v === "fire" || v === "teleport") return v;
+  } catch { /* ignore */ }
+  return "wall";
+}
 export function setAbility(id: AbilityId) {
+  if (id !== "boss") {
+    try { localStorage.setItem(LAST_UNLOCKED_STORE, id); } catch { /* ignore */ }
+  }
   selected = id;
   try { localStorage.setItem(STORE, id); } catch { /* ignore */ }
   bump();

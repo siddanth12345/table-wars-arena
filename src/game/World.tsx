@@ -14,7 +14,7 @@ import {
 } from "./state";
 import { SKIN, useSkin } from "./skins";
 import { getAbility } from "./abilities";
-import { masteryOn, onCampaignWin, onPlayerDeath } from "./mastery";
+import { hasAchievement, masteryOn, onCampaignWin, onPlayerDeath } from "./mastery";
 import { createTableBot, skinKey } from "./tableBotFactory";
 import { Room, ROOM, SOLIDS } from "./Room";
 import { tableWood } from "./textures";
@@ -93,7 +93,7 @@ type Table = {
   jumpT: number; jumpsLeft: number; dashT: number; dash: THREE.Vector3; bob: number; s: number; yaw: number; summoned: boolean; passive: boolean;
 };
 type Splinter = { pos: THREE.Vector3; vel: THREE.Vector3; rot: THREE.Euler; spin: THREE.Vector3; life: number; size: number };
-type Hazard = { active: boolean; kind: "quarter" | "sword" | "stomp" | "aoe"; t: number; total: number; fx: number; x: number; z: number; a0: number };
+type Hazard = { active: boolean; kind: "quarter" | "sword" | "stomp" | "aoe"; t: number; total: number; fx: number; x: number; z: number; a0: number; dmg?: number };
 
 const FX_LIGHTS = 5;
 const BOT_LIGHTS = 6;
@@ -410,7 +410,7 @@ export function World() {
   const blueTop = useRef<THREE.InstancedMesh>(null);
   const blueLeg = useRef<THREE.InstancedMesh>(null);
   const boss = useRef({ landed: false, y: ROOM.h, vy: 0, pos: new THREE.Vector3(), bulletT: 1, specialT: 2, next: "sword" as "sword" | "stomp", quarterT: 3, aoeT: 5, yaw: 0, lockT: 0 });
-  const waves = useMemo(() => Array.from({ length: 6 }, () => ({ active: false, r: 0, x: 0, z: 0, hit: false })), []);
+  const waves = useMemo(() => Array.from({ length: 6 }, () => ({ active: false, r: 0, x: 0, z: 0, hit: false, stunOnly: false, hitPeers: new Set<string>() })), []);
   const waveRefs = useRef<(THREE.Mesh | null)[]>([]);
   const lastRespawn = useRef(0);
   const tutSetup = useRef(-1);
@@ -505,9 +505,10 @@ export function World() {
     clampCircle(u.pos, 3 * TABLE_S);
     u.dash.set(0, 0, 0);
   };
-  const addWave = (x: number, z: number) => {
+  const addWave = (x: number, z: number, stunOnly = false) => {
     const w = waves.find((q) => !q.active) ?? waves[0]!;
-    Object.assign(w, { active: true, r: BOSS_S * 3, x, z, hit: false });
+    w.hitPeers.clear();
+    Object.assign(w, { active: true, r: BOSS_S * 3, x, z, hit: false, stunOnly });
   };
   const damagePlayer = (d: number, force = false, quiet = false) => {
     if (G.campaignDead) return;
@@ -515,6 +516,7 @@ export function World() {
     if (slam.current.on) { slam.current.on = false; G.slamming = false; vy.current = 0; } // hit mid-air cancels the slam
     if (G.mode === "pvp" && (G.pvpDead || G.frozen)) return;
     if (NET.kind === "lobby" && G.pvpDead) return;
+    if (G.mode === "game" && d > 0) G.campaignHardcoreEligible = false;
     G.playerHp = Math.max(0, G.playerHp - d);
     G.hurtFlash = 0.25;
     if (!quiet && d > 0) playSfx("player_hurt");
@@ -994,10 +996,10 @@ export function World() {
     if (any) G.hits++;
     boomFx(at, BULLET_AOE_R, 0.25, true, "none");
   };
-  const addHazard = (kind: Hazard["kind"], x: number, z: number, t: number) => {
+  const addHazard = (kind: Hazard["kind"], x: number, z: number, t: number, a0?: number, dmg?: number) => {
     const h = hazards.find((q) => !q.active);
     if (!h) return;
-    Object.assign(h, { active: true, kind, t, total: t, fx: 0, x, z, a0: Math.floor(Math.random() * 4) * (Math.PI / 2) });
+    Object.assign(h, { active: true, kind, t, total: t, fx: 0, x, z, a0: a0 ?? Math.floor(Math.random() * 4) * (Math.PI / 2), dmg });
   };
 
   useEffect(() => {
@@ -1893,7 +1895,19 @@ const kd = (e: KeyboardEvent) => {
       abilityReq.current = false;
       const ab = getAbility();
       const tp = teleportRef.current;
-      if (ab === "teleport" && !G.abilityLocked && !G.parryLocked) {
+      if (ab === "boss") {
+        if (hasAchievement("hardcore") && grounded.current && G.abilityCd <= 0 && !G.pvpDead && !G.campaignDead) {
+          const look = new THREE.Vector3();
+          cam.getWorldDirection(look);
+          // The quarter's origin stays at the room center; its middle follows the crosshair direction.
+          const aimAngle = Math.atan2(-look.z, look.x);
+          addHazard("quarter", 0, 0, 1, aimAngle - Math.PI / 4, 25);
+          G.abilityCd = 4;
+          G.abilityCharges = 0;
+          playSfx("stun");
+          G.shake = Math.max(G.shake, 0.2);
+        }
+      } else if (ab === "teleport" && !G.abilityLocked && !G.parryLocked) {
         if (tp.active) {
           // Cancel free during fly/expand — no cooldown
           tp.active = false;
@@ -2825,6 +2839,7 @@ const kd = (e: KeyboardEvent) => {
             if (tier === SLAM_TIERS.length - 1) b.lockT = 2; // next boss attack waits 2s
           }
           pvpBlast(_pvpAt.copy(p).setY(p.y + 0.5), r, PVP_DMG.slam, true);
+          if (tier === SLAM_TIERS.length - 1) addWave(p.x, p.z, true);
           ringsIn(p, r);
           boomFx(tmpV.copy(p).setY(p.y + 0.5), r, 0.4, true, "none");
           // Surface under feet: couch → bounce, no crack; raised solid → dark crack; floor → normal crack
@@ -3140,7 +3155,7 @@ const kd = (e: KeyboardEvent) => {
             h.fx = 0.5;
             if (h.kind === "quarter") {
               const ang = (Math.atan2(-p.z, p.x) - h.a0 + Math.PI * 4) % (Math.PI * 2);
-              if (ang <= Math.PI / 2) damagePlayer(BIG_DMG);
+              if (ang <= Math.PI / 2) damagePlayer(h.dmg ?? BIG_DMG);
             } else if (h.kind === "sword") {
               if (Math.hypot(p.x - h.x, p.z - h.z) < SWORD_R && p.y < 40) {
                 G.stun = STUN_TIME;
@@ -3199,8 +3214,21 @@ const kd = (e: KeyboardEvent) => {
         const d = Math.hypot(p.x - w.x, p.z - w.z);
         if (!w.hit && d >= r0 - PLAYER_R - 1 && d <= w.r + PLAYER_R + 1 && p.y < WAVE_H) {
           w.hit = true;
-          // Campaign boss stomps hit harder; training/lobby keep base WAVE_DMG
-          damagePlayer(G.mode === "game" ? 40 : WAVE_DMG);
+          if (w.stunOnly) { G.stun = Math.max(G.stun, 3); playSfx("stun"); }
+          else {
+            // Campaign boss stomps hit harder; training/lobby keep base WAVE_DMG
+            damagePlayer(G.mode === "game" ? 40 : WAVE_DMG);
+          }
+        }
+        if (w.stunOnly && NET.online && (NET.kind === "pvp" || NET.kind === "lobby")) {
+          for (const peer of NET.peers.values()) {
+            if (w.hitPeers.has(peer.id) || peer.dead) continue;
+            const pd = Math.hypot(peer.x - w.x, peer.z - w.z);
+            if (pd >= r0 - PLAYER_R - 1 && pd <= w.r + PLAYER_R + 1 && peer.y < WAVE_H) {
+              w.hitPeers.add(peer.id);
+              hitPeer(peer.id, 0, true, 3);
+            }
+          }
         }
       }
 
@@ -3785,6 +3813,7 @@ const kd = (e: KeyboardEvent) => {
       m.visible = w.active;
       m.position.set(w.x, WAVE_H / 2, w.z);
       m.scale.set(w.r, WAVE_H, w.r);
+      (m.material as THREE.MeshBasicMaterial).color.set(w.stunOnly ? "#a879ff" : "#ff2a2a");
     });
     health.forEach((h, i) => {
       const ring = healthRefs.current[i];

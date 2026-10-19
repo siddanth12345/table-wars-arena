@@ -175,7 +175,7 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                   onClick={() => { if (detail !== "boss" || hasAchievement("hardcore") || G.mode === "training") setAbility(detail); }}
                   disabled={detail === "boss" && !hasAchievement("hardcore") && G.mode !== "training"}
                 >
-                  {detail === "boss" && !hasAchievement("hardcore") ? "Locked 🔒" : selected === detail ? "Selected" : "Select this ability"}
+                  {detail === "boss" && !hasAchievement("hardcore") && G.mode !== "training" ? "Locked 🔒" : selected === detail ? "Selected" : "Select this ability"}
                 </button>
               </div>
             </div>

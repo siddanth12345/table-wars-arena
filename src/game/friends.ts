@@ -2,8 +2,9 @@ import { useSyncExternalStore } from "react";
 import { getAccount, displayName } from "./account";
 
 export type Friend = { name: string; addedAt: number };
-export type FriendRequest = { id: string; from: string; to: string; t: number };
+export type FriendRequest = { id: string; from: string; to: string; t: number; splintered?: boolean };
 
+export const MAX_TBLES = 75;
 const LS_FRIENDS = "tble-friends-guest";
 const LS_OUT = "tble-friend-out-guest";
 const LS_IN = "tble-friend-in-guest";
@@ -12,7 +13,6 @@ let friends: Friend[] = [];
 let outgoing: FriendRequest[] = [];
 let incoming: FriendRequest[] = [];
 let version = 0;
-/** Stable snapshots for useSyncExternalStore (must be same reference if data unchanged). */
 let friendsSnap: Friend[] = friends;
 let reqSnap = { incoming, outgoing };
 const subs = new Set<() => void>();
@@ -49,7 +49,6 @@ function readList<T>(key: string, map: (x: unknown) => T | null): T[] {
     return [];
   }
 }
-
 function write(key: string, data: unknown) {
   try { localStorage.setItem(key, JSON.stringify(data)); } catch { /* ignore */ }
 }
@@ -64,13 +63,39 @@ function mapReq(x: unknown): FriendRequest | null {
   if (!x || typeof x !== "object") return null;
   const o = x as Record<string, unknown>;
   if (typeof o.id !== "string" || typeof o.from !== "string" || typeof o.to !== "string") return null;
-  return { id: o.id, from: o.from, to: o.to, t: typeof o.t === "number" ? o.t : Date.now() };
+  return {
+    id: o.id, from: o.from, to: o.to,
+    t: typeof o.t === "number" ? o.t : Date.now(),
+    splintered: !!o.splintered,
+  };
+}
+
+export function isGuestName(name: string) {
+  return /^guest\d{6}$/i.test(name.trim());
+}
+
+/** Guest requests older than 2 minutes are treated as splintered (account likely gone). */
+export function markSplinteredRequests() {
+  const now = Date.now();
+  let changed = false;
+  incoming = incoming.map((r) => {
+    if (!r.splintered && isGuestName(r.from) && now - r.t > 120_000) {
+      changed = true;
+      return { ...r, splintered: true };
+    }
+    return r;
+  });
+  if (changed) {
+    write(inKey(), incoming);
+    bump();
+  }
 }
 
 export function loadFriends() {
   friends = readList(friendsKey(), mapFriend);
   outgoing = readList(outKey(), mapReq);
   incoming = readList(inKey(), mapReq);
+  markSplinteredRequests();
   bump();
 }
 
@@ -79,7 +104,6 @@ function persistAll() {
   write(outKey(), outgoing);
   write(inKey(), incoming);
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const acc = require("./account") as { persistFriendsToProfile?: (f: Friend[]) => void };
     acc.persistFriendsToProfile?.(friends);
   } catch { /* ignore */ }
@@ -88,6 +112,7 @@ function persistAll() {
 export function getFriends() { return friends; }
 export function getOutgoingRequests() { return outgoing; }
 export function getIncomingRequests() { return incoming; }
+export function friendCount() { return friends.length; }
 
 export function useFriends() {
   return useSyncExternalStore(
@@ -117,9 +142,9 @@ export function hydrateFriends(raw: unknown, merge = false) {
     for (const f of incomingF) {
       if (!map.has(f.name.toLowerCase())) map.set(f.name.toLowerCase(), f);
     }
-    friends = [...map.values()];
+    friends = [...map.values()].slice(0, MAX_TBLES);
   } else {
-    friends = incomingF;
+    friends = incomingF.slice(0, MAX_TBLES);
   }
   persistAll();
   bump();
@@ -152,15 +177,17 @@ export function isFriend(name: string) {
   return friends.some((f) => f.name.toLowerCase() === name.trim().toLowerCase());
 }
 
-/** Local accept after network confirmation */
-export function addFriendDirect(name: string) {
+export function addFriendDirect(name: string): { ok: boolean; msg: string } {
   const n = name.trim();
-  if (n.length < 3 || isSelfName(n) || isFriend(n)) return;
+  if (n.length < 3 || isSelfName(n)) return { ok: false, msg: "Can't add that tble." };
+  if (isFriend(n)) return { ok: true, msg: "Already tbles." };
+  if (friends.length >= MAX_TBLES) return { ok: false, msg: "Too many tbles." };
   friends = [...friends, { name: n, addedAt: Date.now() }];
   outgoing = outgoing.filter((r) => r.to.toLowerCase() !== n.toLowerCase());
   incoming = incoming.filter((r) => r.from.toLowerCase() !== n.toLowerCase());
   persistAll();
   bump();
+  return { ok: true, msg: `Added ${n}.` };
 }
 
 export function removeFriend(name: string) {
@@ -179,7 +206,8 @@ export function noteOutgoingRequest(req: FriendRequest) {
 export function noteIncomingRequest(req: FriendRequest) {
   if (isSelfName(req.from) || isFriend(req.from)) return;
   if (incoming.some((r) => r.id === req.id || r.from.toLowerCase() === req.from.toLowerCase())) return;
-  incoming = [...incoming, req];
+  const splintered = isGuestName(req.from) && Date.now() - req.t > 120_000;
+  incoming = [...incoming, { ...req, splintered }];
   persistAll();
   bump();
 }
@@ -194,6 +222,10 @@ export function removeOutgoing(id: string) {
   outgoing = outgoing.filter((r) => r.id !== id);
   persistAll();
   bump();
+}
+
+export function dismissSplintered(id: string) {
+  removeIncoming(id);
 }
 
 try { loadFriends(); } catch { /* ignore */ }

@@ -6,12 +6,16 @@ import {
   chooseAbilityPick, confirmAbilityPick, sendRematch, answerRematch, requeue, goHomeOnline,
   createLobby, joinLobby, sendInvite, acceptInvite, dismissInvite, partyGo, kickMember, disbandParty, leaveParty,
   isPartyLeader, inParty, myId, opponentId, startInbox, stopInbox,
-  sendFriendRequest, acceptFriendRequest, declineFriendRequest, cancelFriendRequest,
+  sendFriendRequest, acceptFriendRequest, declineFriendRequest, cancelFriendRequest, sendPlayInvite,
 } from "./net";
-import { useAccount, signIn, signUp, playAsGuest, signOut, logoutGuest, transferGuestProgress, isProgressTransferPending, clearProgressTransfer } from "./account";
+import { useAccount, signIn, signUp, playAsGuest, signOut, logoutGuest, transferGuestProgress, isProgressTransferPending, clearProgressTransfer, displayName } from "./account";
 import { G, resetGame, lockPointer } from "./state";
-import { getPvpWins, useProgress, hasMastery, hasAchievement } from "./mastery";
-import { useFriends, useFriendRequests, removeFriend, type FriendRequest } from "./friends";
+import { getPvpWins, useProgress, hasMastery, hasAchievement, ACHIEVEMENTS } from "./mastery";
+import {
+  useFriends, useFriendRequests, removeFriend, dismissSplintered, markSplinteredRequests,
+  isFriend, MAX_TBLES, friendCount, type FriendRequest,
+} from "./friends";
+import { DEFAULT_SKIN, type Skin } from "./skins";
 import { ABILITY_LIST, type AbilityId } from "./abilities";
 import type { TimeOfDay } from "./settings";
 
@@ -127,69 +131,35 @@ export function AccountBadge({ onLogin }: { onLogin: () => void }) {
 
   if (acc.status === "guest") {
     return (
-      <div className="mt-6 space-y-2 text-xs">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      <>
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-2 text-xs">
           <span className="opacity-80">Signed in as guest <b className="text-crosshair">{acc.username}</b></span>
           <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              className="pointer-events-auto font-bold text-crosshair underline"
-              onClick={() => {
-                transferGuestProgress();
-                onLogin();
-              }}
-            >
+            <button type="button" className="pointer-events-auto font-bold text-crosshair underline" onClick={() => { transferGuestProgress(); onLogin(); }}>
               Transfer progress
             </button>
-            <button
-              type="button"
-              className="pointer-events-auto underline opacity-80"
-              onClick={() => setConfirmGuestOut(true)}
-            >
+            <button type="button" className="pointer-events-auto underline opacity-80" onClick={() => setConfirmGuestOut(true)}>
               Log out
             </button>
           </div>
         </div>
         {confirmGuestOut && (
-          <div className="rounded-lg border border-white/20 bg-black/60 p-3 text-[11px] leading-relaxed">
-            <p className="opacity-90">
-              Are you sure you want to log out? This could delete your current progress if you log in to another account.
-              Instead you can click <b className="text-crosshair">Transfer progress</b> to keep your progress and log in or create an account.
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="rounded bg-crosshair px-3 py-1 font-bold uppercase text-hud-ink"
-                onClick={() => {
-                  setConfirmGuestOut(false);
-                  logoutGuest();
-                  onLogin();
-                }}
-              >
-                Log out anyway
-              </button>
-              <button
-                type="button"
-                className="rounded border border-white/25 px-3 py-1 font-bold uppercase"
-                onClick={() => {
-                  setConfirmGuestOut(false);
-                  transferGuestProgress();
-                  onLogin();
-                }}
-              >
-                Transfer progress
-              </button>
-              <button
-                type="button"
-                className="rounded border border-white/25 px-3 py-1 opacity-80"
-                onClick={() => setConfirmGuestOut(false)}
-              >
-                Cancel
-              </button>
+          <div className="gui fixed inset-0 z-[90] flex items-center justify-center bg-hud-scrim p-6 font-mono text-hud">
+            <div className="w-full max-w-md rounded-lg border-2 border-hud/30 bg-hud-panel p-8 text-center">
+              <h2 className="text-2xl font-black uppercase tracking-widest text-crosshair">Log out?</h2>
+              <p className="mt-4 text-sm leading-relaxed opacity-90">
+                Are you sure you want to log out? This could delete your current progress if you log in to another account.
+                Instead you can click <b className="text-crosshair">Transfer progress</b> to keep your progress and log in or create an account.
+              </p>
+              <div className="mt-6 flex flex-col gap-3">
+                <button type="button" className={btnMain} onClick={() => { setConfirmGuestOut(false); logoutGuest(); onLogin(); }}>Log out anyway</button>
+                <button type="button" className={btnAlt} onClick={() => { setConfirmGuestOut(false); transferGuestProgress(); onLogin(); }}>Transfer progress</button>
+                <button type="button" className={btnAlt} onClick={() => setConfirmGuestOut(false)}>Cancel</button>
+              </div>
             </div>
           </div>
         )}
-      </div>
+      </>
     );
   }
 
@@ -240,19 +210,25 @@ function InviteBox({ kind, label }: { kind: "party" | "lobby"; label: string }) 
   );
 }
 
-function FriendInviteRow({ kind, label }: { kind: "party" | "lobby"; label: string }) {
+function FriendInviteRow({
+  kind, label,
+}: { kind: "party" | "lobby" | "play_party" | "play_1v1"; label: string }) {
   const friends = useFriends();
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
   if (!friends.length) return null;
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-2">
+    <div className="mt-1 flex flex-col gap-1">
       <select
-        className={`${input} max-w-[14rem] py-1 text-xs`}
+        className={`${input} max-h-40 py-1 text-xs`}
+        size={Math.min(6, friends.length + 1)}
         defaultValue=""
         onChange={async (e) => {
           const v = e.target.value;
           if (!v) return;
-          setMsg(await sendInvite(v, kind));
+          const r = kind === "play_party" || kind === "play_1v1"
+            ? await sendPlayInvite(v, kind)
+            : await sendInvite(v, kind);
+          setMsg(r);
           e.target.value = "";
         }}
       >
@@ -273,6 +249,10 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [unadd, setUnadd] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<string | null>(null);
+  useTick(2000);
+  useEffect(() => { markSplinteredRequests(); }, []);
 
   if (acc.status !== "user" && acc.status !== "guest") {
     return (
@@ -294,7 +274,7 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="mb-6">
-        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Add tble</h4>
+        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Add tble · {friendCount()}/{MAX_TBLES}</h4>
         <form
           className="flex gap-2"
           onSubmit={async (e) => {
@@ -306,9 +286,9 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
           }}
         >
           <input className={input} placeholder="Exact username" value={name} maxLength={20} onChange={(e) => setName(e.target.value)} />
-          <button className={btnMain} disabled={busy || name.trim().length < 3}>Send request</button>
+          <button className={btnMain} disabled={busy || name.trim().length < 3 || friendCount() >= MAX_TBLES}>Send request</button>
         </form>
-        <p className="mt-1 text-[10px] opacity-50">They must be online (home screen) to receive it. Guests use guest + 6 digits.</p>
+        <p className="mt-1 text-[10px] opacity-50">Online players get a 10s toast. Offline requests wait in this tab.</p>
         {msg && <p className={`mt-2 text-xs font-bold ${msg.ok ? "text-crosshair" : "text-destructive"}`}>{msg.msg}</p>}
       </div>
 
@@ -322,10 +302,16 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
           <ul className="space-y-2">
             {incoming.map((r: FriendRequest) => (
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-white/15 bg-black/30 px-3 py-2 text-sm">
-                <span><b className="text-crosshair">{r.from}</b> wants to be tbles</span>
+                <span>
+                  <b className="text-crosshair">{r.from}</b>
+                  {r.splintered ? <span className="ml-1 opacity-60">(splintered)</span> : null}
+                  {!r.splintered && " wants to be tbles"}
+                </span>
                 <span className="flex gap-2">
-                  <button type="button" className="rounded bg-crosshair px-3 py-1 text-xs font-black uppercase text-hud-ink" onClick={async () => setMsg(await acceptFriendRequest(r))}>Accept</button>
-                  <button type="button" className="rounded border border-white/25 px-3 py-1 text-xs font-bold uppercase" onClick={() => declineFriendRequest(r)}>Decline</button>
+                  {!r.splintered && (
+                    <button type="button" className="rounded bg-crosshair px-3 py-1 text-xs font-black uppercase text-hud-ink" onClick={async () => setMsg(await acceptFriendRequest(r))}>Accept</button>
+                  )}
+                  <button type="button" className="rounded border border-white/25 px-3 py-1 text-xs font-bold uppercase" onClick={() => { dismissSplintered(r.id); declineFriendRequest(r); }}>Dismiss</button>
                 </span>
               </li>
             ))}
@@ -347,17 +333,19 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div>
-        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">
-          Your tbles ({friends.length})
-        </h4>
+        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Your tbles ({friends.length})</h4>
         {friends.length === 0 ? (
           <p className="text-sm opacity-60">No tbles yet. Send a request above.</p>
         ) : (
           <ul className="space-y-2">
             {friends.map((f) => (
-              <li key={f.name} className="flex items-center justify-between rounded border border-white/10 bg-black/20 px-3 py-2 text-sm">
-                <b>{f.name}</b>
-                <button type="button" className="text-xs uppercase text-destructive underline" onClick={() => removeFriend(f.name)}>Remove</button>
+              <li key={f.name} className="flex flex-wrap items-center justify-between gap-2 rounded border border-white/10 bg-black/20 px-3 py-2 text-sm">
+                <button type="button" className="font-bold underline decoration-crosshair/40" onClick={() => setProfileName(f.name)}>{f.name}</button>
+                <button
+                  type="button"
+                  className="rounded bg-orange-500 px-3 py-1 text-xs font-black uppercase text-black"
+                  onClick={() => setUnadd(f.name)}
+                >Unadd</button>
               </li>
             ))}
           </ul>
@@ -366,10 +354,32 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
           <p className="mt-3 text-[10px] opacity-50">Guest tbles are temporary. Transfer progress when creating an account to keep them.</p>
         )}
       </div>
+
+      {unadd && (
+        <div className="gui fixed inset-0 z-[90] flex items-center justify-center bg-hud-scrim p-6">
+          <div className="w-full max-w-sm rounded-lg border-2 border-hud/30 bg-hud-panel p-6 text-center">
+            <h2 className="text-xl font-black uppercase text-crosshair">Unadd tble?</h2>
+            <p className="mt-3 text-sm opacity-90">This will remove <b>{unadd}</b> from your tbles.</p>
+            <div className="mt-5 flex flex-col gap-2">
+              <button type="button" className={btnMain} onClick={() => { removeFriend(unadd); setUnadd(null); }}>Unadd</button>
+              <button type="button" className={btnAlt} onClick={() => setUnadd(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {profileName && (
+        <div className="gui fixed inset-0 z-[90] flex items-center justify-center bg-hud-scrim p-6" onClick={() => setProfileName(null)}>
+          <div className="w-full max-w-md rounded-lg border-2 border-hud/30 bg-hud-panel p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-xl font-black uppercase text-crosshair">{profileName}</h2>
+            <p className="mt-2 text-xs opacity-60">Profile details from match data appear when you open this in an online room.</p>
+            <button type="button" className={`${btnAlt} mt-4`} onClick={() => setProfileName(null)}>Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
 
 export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onClose: () => void }) {
   useProgress();
@@ -418,8 +428,8 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
         {!party && !waiting && (
           <div className="rounded border border-hud/20 bg-black/20 p-2">
             <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Play campaign with tbles</p>
-            <FriendInviteRow kind="party" label="Invite tble to party…" />
-            <p className="mt-1 text-[10px] opacity-50">Creates/joins a party invite so you can run campaign together.</p>
+            <FriendInviteRow kind="play_party" label="Invite tble to party campaign…" />
+            <p className="mt-1 text-[10px] opacity-50">5s invite · 7s resend cooldown · party max players.</p>
           </div>
         )}
         {party && <button className={btnAlt} disabled={waiting || !!busy} onClick={() => void go("training")}>Training with party</button>}
@@ -429,8 +439,8 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
         {!party && !waiting && (
           <div className="rounded border border-hud/20 bg-black/20 p-2">
             <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Play 1v1 with tbles</p>
-            <FriendInviteRow kind="party" label="Invite tble to party 1v1…" />
-            <p className="mt-1 text-[10px] opacity-50">Invite to party, then start 1v1 with party.</p>
+            <FriendInviteRow kind="play_1v1" label="Invite tble to 1v1…" />
+            <p className="mt-1 text-[10px] opacity-50">Only you + 1 other · 5s invite · 7s cooldown.</p>
           </div>
         )}
         <div className="text-center text-xs font-bold uppercase tracking-widest opacity-70">
@@ -748,7 +758,83 @@ export function OnlinePause({ onSettings }: { onSettings: () => void }) {
           <button type="button" className={btnAlt} onClick={onSettings}>Settings</button>
           <button type="button" className={btnAlt} onClick={goHomeOnline}>Return to home</button>
         </div>
+        <OnlineRoster />
       </div>
+    </div>
+  );
+}
+
+function OnlineRoster() {
+  const net = useNet();
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [reqMsg, setReqMsg] = useState<string | null>(null);
+  const [reqCooldown, setReqCooldown] = useState<Record<string, number>>({});
+  useTick(500);
+  const me = { id: myId(), name: displayName(), skin: undefined as Skin | undefined, ability: undefined as string | undefined, mastery: undefined as boolean | undefined, achList: undefined as string[] | undefined };
+  const peers = [...net.peers.values()].filter((p) => p.id && p.id !== myId());
+  const rows = [me, ...peers];
+  const profile = profileId === myId() || profileId === "me"
+    ? me
+    : peers.find((p) => p.id === profileId);
+
+  return (
+    <div className="mt-6 border-t border-hud/20 pt-4 text-left">
+      <h3 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Players</h3>
+      <ul className="max-h-48 space-y-2 overflow-y-auto text-sm">
+        {rows.map((p) => {
+          const name = p.name || "player";
+          const already = isFriend(name);
+          const cd = reqCooldown[name.toLowerCase()] ?? 0;
+          const cooling = Date.now() < cd;
+          const isMe = p.id === myId() || p.id === "me";
+          return (
+            <li key={p.id} className="flex items-center justify-between gap-2 rounded border border-white/10 bg-black/25 px-2 py-1.5">
+              <button type="button" className="truncate font-bold underline decoration-crosshair/30" onClick={() => setProfileId(p.id)}>
+                {name}{isMe ? " (you)" : ""}
+              </button>
+              {!isMe && (
+                <button
+                  type="button"
+                  title={already ? "Already tbles" : cooling ? "Wait 1 min" : "Add tble"}
+                  disabled={already || cooling}
+                  className={`relative flex h-8 w-8 items-center justify-center rounded ${
+                    already ? "bg-orange-500" : cooling ? "bg-neutral-500" : "bg-emerald-500"
+                  }`}
+                  onClick={async () => {
+                    if (already || cooling) return;
+                    const r = await sendFriendRequest(name);
+                    setReqMsg(r.msg);
+                    if (r.ok) setReqCooldown((m) => ({ ...m, [name.toLowerCase()]: Date.now() + 60_000 }));
+                    else if (r.msg.includes("Too many")) setReqMsg("They likely have too many tbles.");
+                  }}
+                >
+                  <span className="text-[10px] font-black text-black">▦</span>
+                  <span className="absolute -right-0.5 -top-0.5 text-[9px] font-black text-black">+</span>
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {reqMsg && <p className="mt-2 text-[10px] font-bold text-crosshair">{reqMsg}</p>}
+      {profile && (
+        <div className="mt-3 rounded border border-white/15 bg-black/40 p-3 text-xs">
+          <div className="flex items-center justify-between">
+            <b className="text-sm text-crosshair">{profile.name}</b>
+            <button type="button" className="underline opacity-70" onClick={() => setProfileId(null)}>Close</button>
+          </div>
+          <p className="mt-2 opacity-70">Skin: {profile.skin?.tablePrimary ? `table ${profile.skin.tablePrimary}` : "default / saved"}</p>
+          {net.kind !== "pvp" && (
+            <p className="mt-1 opacity-70">
+              Ability: {profile.ability ?? "—"}
+              {profile.mastery ? " (mastered)" : profile.ability ? " (normal)" : ""}
+            </p>
+          )}
+          <p className="mt-1 opacity-70">
+            Achievements: {(profile.achList && profile.achList.length) ? profile.achList.join(", ") : "—"}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -782,9 +868,33 @@ export function Invites() {
   const net = useNet();
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  useTick(1000);
-  const list = net.invites.filter((i) => Date.now() - i.t < 60000);
+  useTick(400);
+  // Expire short-lived invites (friend 10s, play 5s) — friend still stays in home requests
+  const now = Date.now();
+  const list = net.invites.filter((i) => {
+    if (i.expires && now > i.expires) {
+      // leave in friends incoming if friend kind
+      return false;
+    }
+    if (!i.expires && now - i.t > 60000) return false;
+    return true;
+  });
+  useEffect(() => {
+    const expired = NET.invites.filter((i) => (i.expires && Date.now() > i.expires) || (!i.expires && Date.now() - i.t > 60000));
+    if (expired.length) {
+      NET.invites = NET.invites.filter((i) => !expired.includes(i));
+    }
+  }, [now, net.invites.length]);
   if (list.length === 0 && !err && !busy) return null;
+
+  const labelFor = (i: typeof list[0]) => {
+    if (i.kind === "friend") return <> wants to be <b className="text-crosshair">tbles</b></>;
+    if (i.kind === "play_party") return <> invited you to <b>party campaign</b></>;
+    if (i.kind === "play_1v1") return <> invited you to <b>1v1</b></>;
+    if (i.kind === "lobby") return <> invited you to lobby <b>{i.target}</b></>;
+    return <> invited you to their party</>;
+  };
+
   return (
     <>
       {busy && <ConnectingOverlay label={busy} />}
@@ -792,7 +902,10 @@ export function Invites() {
         {err && <div className="rounded bg-hud-panel p-3 text-sm font-bold text-destructive">{err}</div>}
         {list.map((i) => (
           <div key={i.id} className="rounded-lg border-2 border-crosshair bg-hud-panel p-4 shadow-xl">
-            <p className="text-sm"><b>{i.from}</b> invited you to {i.kind === "party" ? "their party" : `lobby ${i.target}`}.</p>
+            <p className="text-sm"><b>{i.from}</b>{labelFor(i)}.</p>
+            {i.expires && (
+              <p className="mt-1 text-[10px] opacity-50">{Math.max(0, Math.ceil((i.expires - now) / 1000))}s</p>
+            )}
             <div className="mt-2 flex gap-2">
               <button
                 className={btnMain}
@@ -800,6 +913,15 @@ export function Invites() {
                 onClick={async () => {
                   if (busy) return;
                   setErr("");
+                  if (i.kind === "friend") {
+                    setBusy("Accepting…");
+                    try {
+                      const r = await acceptFriendRequest({ id: i.id, from: i.from, to: "", t: i.t });
+                      if (!r.ok) setErr(r.msg);
+                      dismissInvite(i.id);
+                    } finally { setBusy(null); }
+                    return;
+                  }
                   setBusy(i.kind === "lobby" ? "Joining lobby…" : "Joining party…");
                   try {
                     const e = await acceptInvite(i);
@@ -810,9 +932,20 @@ export function Invites() {
                   }
                 }}
               >
-                Yes
+                {i.kind === "friend" ? "Accept" : "Yes"}
               </button>
-              <button className={btnAlt} disabled={!!busy} onClick={() => dismissInvite(i.id)}>No</button>
+              <button
+                className={btnAlt}
+                disabled={!!busy}
+                onClick={() => {
+                  if (i.kind === "friend") {
+                    declineFriendRequest({ id: i.id, from: i.from, to: "", t: i.t });
+                  }
+                  dismissInvite(i.id);
+                }}
+              >
+                {i.kind === "friend" ? "Dismiss" : "No"}
+              </button>
             </div>
           </div>
         ))}

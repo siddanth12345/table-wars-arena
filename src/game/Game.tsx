@@ -578,7 +578,7 @@ function Home() {
           <button className={btnAlt} onClick={() => setSkinsOpen(true)}>Skins</button>
           <button className={btnAlt} onClick={() => setAbilitiesOpen(true)}>Abilities</button>
           <button className={btnAlt} onClick={() => setAchievementsOpen(true)}>Achievements</button>
-          <button className={btnAlt} onClick={() => setFriendsOpen(true)}>Tbles</button>
+          <button className={friendsOpen ? btnMain : btnAlt} onClick={() => setFriendsOpen((o) => !o)}>Tbles</button>
           <button className={tab === "settings" ? btnMain : btnAlt} onClick={() => setTab(tab === "settings" ? "main" : "settings")}>Settings</button>
         </div>
         <AccountBadge onLogin={() => setAuthOpen(true)} />
@@ -588,7 +588,7 @@ function Home() {
       {skinsOpen && <SkinsPanel onClose={() => setSkinsOpen(false)} />}
       {abilitiesOpen && <AbilitiesPanel onClose={() => setAbilitiesOpen(false)} />}
       {achievementsOpen && <AchievementsPanel onClose={() => setAchievementsOpen(false)} />}
-      {friendsOpen && <FriendsPanel onClose={() => setFriendsOpen(false)} />}
+      {friendsOpen && !skinsOpen && !abilitiesOpen && !achievementsOpen && tab === "main" && <FriendsPanel onClose={() => setFriendsOpen(false)} />}
       {tab === "play" && <PlayMenu onCampaign={playGame} onClose={() => setTab("main")} />}
       {tab !== "main" && tab !== "play" && (
         <div className="m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">

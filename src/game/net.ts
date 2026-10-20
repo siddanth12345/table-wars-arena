@@ -7,8 +7,10 @@ import { G, goHome, resetGame, type Mode } from "./state";
 import { recordPvpWin } from "./mastery";
 import {
   noteIncomingRequest, noteOutgoingRequest, removeIncoming, removeOutgoing,
-  addFriendDirect, isSelfName, isFriend, type FriendRequest,
+  addFriendDirect, isSelfName, isFriend, friendCount, MAX_TBLES, type FriendRequest,
 } from "./friends";
+import { getAbility } from "./abilities";
+import { masteryOn, getProgress } from "./mastery";
 import { setAbility } from "./abilities";
 import { SKIN, type Skin } from "./skins";
 import { onRemoteChat, clearChat } from "./chat";
@@ -19,9 +21,13 @@ import { onRemoteChat, clearChat } from "./chat";
  * (map pick, colours, scoring, rounds) and everyone follows the host's calls.
  */
 
-export type Peer = { id: string; name: string; x: number; y: number; z: number; yaw: number; hp: number; dead: boolean; t: number; skin?: Skin; grappling?: boolean; gx?: number; gy?: number; gz?: number };
+export type Peer = {
+  id: string; name: string; x: number; y: number; z: number; yaw: number; hp: number; dead: boolean; t: number;
+  skin?: Skin; grappling?: boolean; gx?: number; gy?: number; gz?: number;
+  ability?: string; mastery?: boolean; achList?: string[];
+};
 export type Kind = "pvp" | "lobby" | "coop";
-export type Invite = { id: string; kind: "party" | "lobby"; from: string; target: string; t: number };
+export type Invite = { id: string; kind: "party" | "lobby" | "friend" | "play_party" | "play_1v1"; from: string; target: string; t: number; expires?: number };
 export type PartyMember = { id: string; name: string; leader: boolean };
 
 export const PVP_WIN = 3;
@@ -192,6 +198,9 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
     const cur = NET.peers.get(p.id);
     const skin = isRecord(p.skin) ? p.skin as unknown as Skin : cur?.skin;
     const skinChanged = !!p.skin && (!cur?.skin || p.skinVer !== (cur as { skinVer?: number } | undefined)?.skinVer);
+    const ability = isText(p.ability, 20) ? p.ability : cur?.ability;
+    const mastery = typeof p.mastery === "boolean" ? p.mastery : cur?.mastery;
+    const achList = Array.isArray(p.achList) ? p.achList.filter((x): x is string => typeof x === "string").slice(0, 40) : cur?.achList;
     NET.peers.set(p.id, {
       id: p.id, name: cur?.name ?? NET.names[p.id] ?? p.name ?? "player",
       x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: p.hp, dead: p.dead === true,
@@ -199,6 +208,7 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
       gx: isFiniteIn(p.gx) ? p.gx : undefined,
       gy: isFiniteIn(p.gy) ? p.gy : undefined,
       gz: isFiniteIn(p.gz) ? p.gz : undefined,
+      ability, mastery, achList,
       ...(p.skin && isRecord(p.skin) ? { skinVer: isFiniteIn(p.skinVer, 0, 1000000) ? p.skinVer : undefined } : cur ? { skinVer: (cur as { skinVer?: number }).skinVer } : {}),
     } as Peer);
     if (!cur || skinChanged) bump();
@@ -406,6 +416,13 @@ export function sendPose(x: number, y: number, z: number, yaw: number, extra?: {
     payload.skin = { ...SKIN };
     payload.skinVer = lastSkinVer;
   }
+  // Profile snapshot for pause roster (every ~3s with skin or always light fields)
+  try {
+    payload.ability = getAbility();
+    payload.mastery = (() => { try { return masteryOn(getAbility() as "wall" | "trampoline" | "fire" | "teleport" | "boss"); } catch { return false; } })();
+    const earned = Object.keys(getProgress().earned || {});
+    payload.achList = earned.slice(0, 24);
+  } catch { /* ignore */ }
   send("pose", payload);
 }
 
@@ -889,9 +906,14 @@ export function startInbox() {
     const inv = payload as Invite & { to?: string };
     const to = (inv.to ?? "").trim().toLowerCase();
     if (!to || to !== uname) return;
+    const kind = inv.kind as Invite["kind"];
+    if (kind !== "party" && kind !== "lobby" && kind !== "friend" && kind !== "play_party" && kind !== "play_1v1") return;
     NET.invites = [
-      ...NET.invites.filter((i) => i.from !== inv.from || i.kind !== inv.kind),
-      { id: crypto.randomUUID(), kind: inv.kind, from: inv.from, target: inv.target, t: Date.now() },
+      ...NET.invites.filter((i) => i.from !== inv.from || i.kind !== kind),
+      {
+        id: crypto.randomUUID(), kind, from: inv.from, target: inv.target, t: Date.now(),
+        expires: typeof inv.expires === "number" ? inv.expires : (kind === "play_party" || kind === "play_1v1" ? Date.now() + 5000 : kind === "friend" ? Date.now() + 10000 : undefined),
+      },
     ];
     bump();
   });
@@ -906,6 +928,10 @@ export function startInbox() {
       t: Date.now(),
     };
     noteIncomingRequest(req);
+    NET.invites = [
+      ...NET.invites.filter((i) => !(i.kind === "friend" && i.from === req.from)),
+      { id: req.id, kind: "friend", from: req.from, target: "", t: Date.now(), expires: Date.now() + 10000 },
+    ];
     bump();
   });
   ch.on("broadcast", { event: "friend_accept" }, ({ payload }) => {
@@ -935,6 +961,7 @@ export async function sendFriendRequest(username: string): Promise<{ ok: boolean
   if (!name) return { ok: false, msg: "Enter a username." };
   if (isSelfName(name)) return { ok: false, msg: "You can't add yourself as a tble." };
   if (isFriend(name)) return { ok: false, msg: "Already tbles." };
+  if (friendCount() >= MAX_TBLES) return { ok: false, msg: "Too many tbles." };
   if (Date.now() - NET.inviteSentAt < 2000) return { ok: false, msg: "Wait a moment before sending another tble request." };
   const guestName = /^guest\d{6}$/i.test(name);
   if (!guestName && !(await lookupUsername(name))) return { ok: false, msg: "No player with that exact username." };
@@ -956,7 +983,9 @@ export async function sendFriendRequest(username: string): Promise<{ ok: boolean
 }
 
 export async function acceptFriendRequest(req: FriendRequest): Promise<{ ok: boolean; msg: string }> {
-  addFriendDirect(req.from);
+  if (friendCount() >= MAX_TBLES) return { ok: false, msg: "Too many tbles." };
+  const added = addFriendDirect(req.from);
+  if (!added.ok) return added;
   removeIncoming(req.id);
   if (!inbox) startInbox();
   const payload = { from: displayName(), to: req.from.trim().toLowerCase(), id: req.id };
@@ -977,6 +1006,36 @@ export function cancelFriendRequest(req: FriendRequest) {
   bump();
 }
 
+
+const playInviteCooldown: Record<string, number> = {};
+
+/** Party campaign / 1v1 play invite to a tble (5s on their end, 7s resend cooldown). */
+export async function sendPlayInvite(username: string, kind: "play_party" | "play_1v1"): Promise<{ ok: boolean; msg: string }> {
+  const name = username.trim();
+  const acc = getAccount();
+  if (acc.status !== "user" && acc.status !== "guest") return { ok: false, msg: "Log in or play as guest first." };
+  if (!name) return { ok: false, msg: "Pick a tble." };
+  if (isSelfName(name)) return { ok: false, msg: "That's you!" };
+  const cdKey = `${kind}:${name.toLowerCase()}`;
+  if (Date.now() < (playInviteCooldown[cdKey] ?? 0)) return { ok: false, msg: "Wait before sending another invite." };
+  if (kind === "play_1v1" && NET.party && NET.party.members.length > 1) {
+    return { ok: false, msg: "1v1 is only you + one other player." };
+  }
+  if (!NET.party) await createParty();
+  if (NET.party!.leaderId !== myId()) return { ok: false, msg: "Only the party leader can invite." };
+  if (NET.party!.members.length >= PARTY_MAX) return { ok: false, msg: "Error, too many players." };
+  if (kind === "play_1v1" && NET.party!.members.length >= 2) return { ok: false, msg: "1v1 is only you + one other player." };
+  playInviteCooldown[cdKey] = Date.now() + 7000;
+  if (!inbox) startInbox();
+  const payload = {
+    kind, from: displayName(), target: NET.party!.id, to: name.trim().toLowerCase(), expires: Date.now() + 5000,
+  };
+  for (let i = 0; i < 4; i++) {
+    try { if (inbox) await inbox.send({ type: "broadcast", event: "invite", payload }); } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return { ok: true, msg: `Invite sent to ${name}.` };
+}
 
 /** Sends a party or lobby invite to an exact username. Returns a status message. */
 export async function sendInvite(username: string, kind: "party" | "lobby"): Promise<{ ok: boolean; msg: string }> {
@@ -1016,6 +1075,8 @@ export function dismissInvite(id: string) {
 export async function acceptInvite(inv: Invite): Promise<string | null> {
   dismissInvite(inv.id);
   if (inv.kind === "lobby") return joinLobby(inv.target);
+  if (inv.kind === "friend") return null;
+  // party, play_party, play_1v1
   return joinParty(inv.target);
 }
 

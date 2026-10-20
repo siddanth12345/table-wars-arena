@@ -6,7 +6,7 @@ import { displayName, getAccount, lookupUsername } from "./account";
 import { G, goHome, resetGame, type Mode } from "./state";
 import {
   noteIncomingRequest, noteOutgoingRequest, removeIncoming, removeOutgoing,
-  addFriendDirect, isSelfName, isFriend, friendCount, MAX_TBLES, markSplinteredFrom,
+  addFriendDirect, isSelfName, isFriend, friendCount, MAX_TBLES, markSplinteredFrom, setOnlineNames,
   cacheProfile, type FriendRequest,
 } from "./friends";
 import { getAbility, setAbility } from "./abilities";
@@ -948,7 +948,7 @@ export function startInbox() {
   stopInbox();
   if (acc.status !== "user" && acc.status !== "guest") return;
   const uname = (acc.username && acc.username !== "guest" ? acc.username : displayName()).trim().toLowerCase();
-  const ch = supabase.channel(INVITE_BUS, { config: { broadcast: { self: false } } });
+  const ch = supabase.channel(INVITE_BUS, { config: { broadcast: { self: false }, presence: { key: myId() } } });
   inbox = ch;
   ch.on("broadcast", { event: "invite" }, ({ payload }) => {
     if (!isRecord(payload) || !isText(payload.from, 40) || !isText(payload.to, 40) || !isText(payload.target, 100)) return;
@@ -1024,13 +1024,24 @@ export function startInbox() {
     bump();
   });
   ch.on("broadcast", { event: "party-left" }, () => bump());
+  // Presence on the shared bus = "who is online" for the tble list (green dot)
+  ch.on("presence", { event: "sync" }, () => {
+    const st = ch.presenceState() as unknown as Record<string, { name?: unknown }[]>;
+    const names = new Set<string>();
+    for (const metas of Object.values(st)) for (const m of metas) if (typeof m?.name === "string") names.add(m.name.toLowerCase());
+    setOnlineNames(names);
+  });
   ch.subscribe((status) => {
-    if (status === "SUBSCRIBED") bump();
+    if (status === "SUBSCRIBED") {
+      bump();
+      void ch.track({ name: uname }).catch(() => { /* ignore */ });
+    }
   });
 }
 export function stopInbox() {
   if (inbox) void supabase.removeChannel(inbox);
   inbox = null;
+  setOnlineNames(new Set());
 }
 
 

@@ -157,6 +157,24 @@ function persistAll() {
   try { friendsPersister?.(friends); } catch { /* ignore */ }
 }
 
+// --- Online presence (who of my tbles is online right now) ---
+let onlineNames = new Set<string>();
+const subsOnline = new Set<() => void>();
+/** Replace the online set (lowercase usernames). Only notifies when it actually changed. */
+export function setOnlineNames(next: Set<string>) {
+  if (next.size === onlineNames.size && [...next].every((n) => onlineNames.has(n))) return;
+  onlineNames = next;
+  subsOnline.forEach((f) => f());
+}
+export function isOnline(name: string) { return onlineNames.has(name.trim().toLowerCase()); }
+export function useOnlineNames() {
+  return useSyncExternalStore(
+    (cb) => { subsOnline.add(cb); return () => { subsOnline.delete(cb); }; },
+    () => onlineNames,
+    () => onlineNames,
+  );
+}
+
 export function getFriends() { return friends; }
 export function getOutgoingRequests() { return outgoing; }
 export function getIncomingRequests() { return incoming; }

@@ -12,7 +12,7 @@ import { useAccount, signIn, signUp, playAsGuest, signOut, logoutGuest, transfer
 import { G, resetGame, lockPointer } from "./state";
 import { getPvpWins, useProgress, hasMastery, hasAchievement, ACHIEVEMENTS, getProgress } from "./mastery";
 import {
-  useFriends, useFriendRequests, removeFriend, dismissSplintered, markSplinteredRequests,
+  useFriends, useFriendRequests, useOnlineNames, removeFriend, dismissSplintered, markSplinteredRequests,
   isFriend, MAX_TBLES, friendCount, getCachedProfile, type FriendRequest,
 } from "./friends";
 import { DEFAULT_SKIN, SKIN, type Skin } from "./skins";
@@ -181,6 +181,18 @@ export function AccountBadge({ onLogin }: { onLogin: () => void }) {
 const selectTheme = "w-full rounded-lg border-2 border-hud/40 bg-hud-panel font-mono text-sm text-hud shadow-inner";
 
 /** Scrollable tble picker matching HUD theme (no native OS select). */
+/** Discord-style presence: filled green = online, empty ring = offline. */
+function OnlineDot({ name }: { name: string }) {
+  const online = useOnlineNames().has(name.trim().toLowerCase());
+  return (
+    <span
+      aria-label={online ? "online" : "offline"}
+      title={online ? "Online" : "Offline"}
+      className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2 ${online ? "border-green-500 bg-green-500" : "border-hud/50 bg-transparent"}`}
+    />
+  );
+}
+
 function TblePickList({
   label,
   onPick,
@@ -210,7 +222,7 @@ function TblePickList({
                 className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm font-bold transition hover:bg-crosshair/15"
                 onClick={() => void onPick(f.name)}
               >
-                <span className="rounded border border-hud/25 bg-black/30 px-2 py-0.5">{f.name}</span>
+                <span className="flex items-center gap-2 rounded border border-hud/25 bg-black/30 px-2 py-0.5"><OnlineDot name={f.name} />{f.name}</span>
                 <span className="text-[10px] uppercase opacity-50">Invite</span>
               </button>
             </li>
@@ -479,7 +491,7 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
                 f.splintered ? "border-red-500/70 bg-red-950/50" : "border-hud/30 bg-black/30"
               }`}>
                 <button type="button" className={`rounded border border-hud/25 bg-black/40 px-2 py-0.5 font-bold underline decoration-crosshair/40 ${f.splintered ? "text-red-400" : "text-crosshair"}`} onClick={() => setProfileName(f.name)}>
-                  {f.name}{f.splintered ? " (splintered)" : ""}
+                  <span className="inline-flex items-center gap-2"><OnlineDot name={f.name} />{f.name}{f.splintered ? " (splintered)" : ""}</span>
                 </button>
                 {f.splintered ? (
                   <button type="button" className="rounded border-2 border-red-400/80 bg-red-900/40 px-3 py-1 text-xs font-black uppercase text-red-100" onClick={() => removeFriend(f.name)}>

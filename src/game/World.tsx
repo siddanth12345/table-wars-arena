@@ -1152,6 +1152,12 @@ const kd = (e: KeyboardEvent) => {
       const wasDown = keys.current[e.code];
       keys.current[e.code] = true;
       // Esc → pause in one shot (PC pointer-lock exit is handled in onLock the same way)
+      if (e.code === "Semicolon" && !wasDown) {
+        e.preventDefault();
+        const el = document.documentElement;
+        if (!document.fullscreenElement) void el.requestFullscreen?.();
+        else void document.exitFullscreen?.();
+      }
       if (e.code === "Escape" && !wasDown && G.phase === "playing") {
         pauseGame();
         return;

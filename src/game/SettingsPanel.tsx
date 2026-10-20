@@ -53,6 +53,12 @@ function Switch({ on, onChange, a, b }: { on: boolean; onChange: (v: boolean) =>
   );
 }
 
+function toggleFullscreen() {
+  const el = document.documentElement;
+  if (!document.fullscreenElement) void el.requestFullscreen?.();
+  else void document.exitFullscreen?.();
+}
+
 export function SettingsPanel() {
   const applied = useSettings();
   const [draft, setDraft] = useState<Settings>(() => structuredClone(applied));
@@ -111,6 +117,12 @@ export function SettingsPanel() {
       )}
 
       <div className="mt-4">
+        <Row label="Fullscreen">
+          <div className="flex flex-col items-end gap-1">
+            <button type="button" className="rounded border-2 border-hud/40 px-4 py-2 text-xs font-black uppercase" onClick={toggleFullscreen}>Toggle</button>
+            <span className="text-[10px] opacity-60">Or press <b>;</b> to enter / exit</span>
+          </div>
+        </Row>
         <Row label={`Mouse sensitivity · ${draft.sensitivity.toFixed(2)}x`}>
           <input type="range" min={0.1} max={3} step={0.05} value={draft.sensitivity} onChange={(e) => set("sensitivity", Number(e.target.value))} className="w-56 accent-[var(--crosshair)]" />
         </Row>

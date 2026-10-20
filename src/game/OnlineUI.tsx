@@ -10,12 +10,15 @@ import {
 } from "./net";
 import { useAccount, signIn, signUp, playAsGuest, signOut, logoutGuest, transferGuestProgress, isProgressTransferPending, clearProgressTransfer, displayName } from "./account";
 import { G, resetGame, lockPointer } from "./state";
-import { getPvpWins, useProgress, hasMastery, hasAchievement, ACHIEVEMENTS } from "./mastery";
+import { getPvpWins, useProgress, hasMastery, hasAchievement, ACHIEVEMENTS, getProgress } from "./mastery";
 import {
   useFriends, useFriendRequests, removeFriend, dismissSplintered, markSplinteredRequests,
   isFriend, MAX_TBLES, friendCount, type FriendRequest,
 } from "./friends";
-import { DEFAULT_SKIN, type Skin } from "./skins";
+import { DEFAULT_SKIN, SKIN, type Skin } from "./skins";
+import { createTableBot } from "./tableBotFactory";
+import { getAbility } from "./abilities";
+import { hasAchievement } from "./mastery";
 import { ABILITY_LIST, type AbilityId } from "./abilities";
 import type { TimeOfDay } from "./settings";
 
@@ -175,36 +178,54 @@ export function AccountBadge({ onLogin }: { onLogin: () => void }) {
 
 // ---------------------------------------------------------------- play menu
 
+
+const selectTheme = "w-full rounded-lg border-2 border-hud/40 bg-hud-panel font-mono text-sm text-hud shadow-inner";
+
+/** Scrollable tble picker matching HUD theme (no native OS select). */
+function TblePickList({
+  label,
+  onPick,
+  maxH = "max-h-36",
+}: {
+  label: string;
+  onPick: (name: string) => void | Promise<void>;
+  maxH?: string;
+}) {
+  const friends = useFriends();
+  if (!friends.length) return null;
+  return (
+    <div className={`${selectTheme} ${maxH} overflow-y-auto`}>
+      <div className="sticky top-0 border-b border-hud/30 bg-hud-track px-3 py-2 text-[10px] font-black uppercase tracking-widest text-crosshair/90">
+        {label}
+      </div>
+      <ul className="divide-y divide-hud/20">
+        {friends.map((f) => (
+          <li key={f.name}>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm font-bold transition hover:bg-crosshair/15"
+              onClick={() => void onPick(f.name)}
+            >
+              <span className="rounded border border-hud/25 bg-black/30 px-2 py-0.5">{f.name}</span>
+              <span className="text-[10px] uppercase opacity-50">Invite</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function InviteBox({ kind, label }: { kind: "party" | "lobby"; label: string }) {
   const [name, setName] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
-  const friends = useFriends();
   return (
     <div className="mt-2 space-y-2">
       <div className="flex gap-2">
         <input className={input} placeholder="Exact username" value={name} onChange={(e) => setName(e.target.value)} />
         <button className={btnAlt} onClick={async () => setMsg(await sendInvite(name, kind))}>{label}</button>
       </div>
-      {friends.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] uppercase opacity-60">Tbles</span>
-          <select
-            className={`${input} max-w-[12rem] py-1 text-xs`}
-            defaultValue=""
-            onChange={async (e) => {
-              const v = e.target.value;
-              if (!v) return;
-              setMsg(await sendInvite(v, kind));
-              e.target.value = "";
-            }}
-          >
-            <option value="">Invite tble…</option>
-            {friends.map((f) => (
-              <option key={f.name} value={f.name}>{f.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
+      <TblePickList label="Invite tble…" onPick={async (n) => setMsg(await sendInvite(n, kind))} />
       {msg && <p className={`mt-1 text-xs font-bold ${msg.ok ? "text-crosshair" : "text-destructive"}`}>{msg.msg}</p>}
     </div>
   );
@@ -218,26 +239,119 @@ function FriendInviteRow({
   if (!friends.length) return null;
   return (
     <div className="mt-1 flex flex-col gap-1">
-      <select
-        className={`${input} max-h-40 py-1 text-xs`}
-        size={Math.min(6, friends.length + 1)}
-        defaultValue=""
-        onChange={async (e) => {
-          const v = e.target.value;
-          if (!v) return;
+      <TblePickList
+        label={label}
+        onPick={async (n) => {
           const r = kind === "play_party" || kind === "play_1v1"
-            ? await sendPlayInvite(v, kind)
-            : await sendInvite(v, kind);
+            ? await sendPlayInvite(n, kind)
+            : await sendInvite(n, kind);
           setMsg(r);
-          e.target.value = "";
         }}
-      >
-        <option value="">{label}</option>
-        {friends.map((f) => (
-          <option key={f.name} value={f.name}>{f.name}</option>
-        ))}
-      </select>
+      />
       {msg && <span className={`text-xs font-bold ${msg.ok ? "text-crosshair" : "text-destructive"}`}>{msg.msg}</span>}
+    </div>
+  );
+}
+
+function SkinSpinPreview({ skin }: { skin: Skin }) {
+  const group = useRef<THREE.Group>(null);
+  const bot = useRef(createTableBot({ skin, scale: 0.55, emitLight: true }));
+  useEffect(() => {
+    bot.current = createTableBot({ skin, scale: 0.55, emitLight: true });
+  }, [skin]);
+  useFrame((_, dt) => {
+    if (group.current) group.current.rotation.y += dt * 0.7;
+  });
+  return (
+    <group ref={group}>
+      <primitive object={bot.current} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]} receiveShadow>
+        <circleGeometry args={[1.6, 32]} />
+        <meshStandardMaterial color="#1a1e28" metalness={0.2} roughness={0.8} />
+      </mesh>
+    </group>
+  );
+}
+
+export type ProfileData = {
+  name: string;
+  skin?: Skin;
+  ability?: string;
+  mastery?: boolean;
+  achList?: string[];
+  isSelf?: boolean;
+};
+
+/** Full profile tab (home or in-game). */
+export function ProfileTab({
+  data,
+  onClose,
+  onUnadd,
+}: {
+  data: ProfileData;
+  onClose: () => void;
+  onUnadd?: () => void;
+}) {
+  const skin = data.skin ?? DEFAULT_SKIN;
+  const achIds = data.achList ?? [];
+  const achs = ACHIEVEMENTS.filter((a) => achIds.includes(a.id));
+  return (
+    <div className="gui fixed inset-0 z-[95] flex items-center justify-center bg-hud-scrim p-4 font-mono text-hud">
+      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border-2 border-hud/30 bg-hud-panel shadow-2xl">
+        <div className="flex items-center justify-between border-b border-hud/30 px-5 py-3">
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-black uppercase tracking-widest text-crosshair">{data.name}</h2>
+            {onUnadd && !data.isSelf && (
+              <button type="button" className="rounded bg-orange-500 px-3 py-1 text-xs font-black uppercase text-black" onClick={onUnadd}>Unadd</button>
+            )}
+          </div>
+          <button type="button" className="text-xs uppercase underline opacity-80" onClick={onClose}>Close</button>
+        </div>
+        <div className="grid flex-1 gap-4 overflow-y-auto p-5 md:grid-cols-2">
+          <div className="rounded-lg border-2 border-hud/25 bg-black/40">
+            <div className="border-b border-hud/20 px-3 py-2 text-[10px] font-black uppercase tracking-widest opacity-70">Skin</div>
+            <div className="h-48">
+              <Canvas camera={{ position: [0, 2.2, 5.5], fov: 40 }} gl={{ antialias: true }}>
+                <ambientLight intensity={0.45} />
+                <directionalLight position={[4, 8, 3]} intensity={1.2} />
+                <SkinSpinPreview skin={skin} />
+              </Canvas>
+            </div>
+          </div>
+          <div className="flex flex-col gap-3">
+            <div className="rounded-lg border-2 border-hud/25 bg-black/40 p-3">
+              <div className="text-[10px] font-black uppercase tracking-widest opacity-70">Ability</div>
+              <div className="mt-2 flex items-center gap-3">
+                <span className="text-2xl">{ABILITY_LIST.find((a) => a.id === data.ability)?.icon ?? "—"}</span>
+                <div>
+                  <div className="text-lg font-black uppercase text-crosshair">
+                    {ABILITY_LIST.find((a) => a.id === data.ability)?.name ?? (data.ability || "None shown")}
+                  </div>
+                  <div className="text-xs opacity-70">
+                    {data.ability === "boss" ? "Boss" : data.mastery ? "Mastered" : data.ability ? "Normal" : "—"}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col rounded-lg border-2 border-hud/25 bg-black/40">
+              <div className="border-b border-hud/20 px-3 py-2 text-[10px] font-black uppercase tracking-widest opacity-70">
+                Achievements ({achs.length || achIds.length})
+              </div>
+              <ul className="max-h-48 flex-1 space-y-1 overflow-y-auto p-2">
+                {(achs.length ? achs : achIds.map((id) => ({ id, name: id, summary: "" }))).map((a) => (
+                  <li key={a.id} className="rounded border border-hud/20 bg-hud-panel/80 px-3 py-2">
+                    <div className="text-xs font-black uppercase text-crosshair">{a.name}</div>
+                    {"summary" in a && a.summary ? <div className="text-[10px] opacity-60">{a.summary}</div> : null}
+                  </li>
+                ))}
+                {!achs.length && !achIds.length && (
+                  <li className="px-2 py-3 text-xs opacity-50">No achievements shared.</li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -301,11 +415,12 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
         ) : (
           <ul className="space-y-2">
             {incoming.map((r: FriendRequest) => (
-              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-white/15 bg-black/30 px-3 py-2 text-sm">
-                <span>
-                  <b className="text-crosshair">{r.from}</b>
-                  {r.splintered ? <span className="ml-1 opacity-60">(splintered)</span> : null}
-                  {!r.splintered && " wants to be tbles"}
+              <li key={r.id} className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border-2 px-3 py-2 text-sm ${
+                r.splintered ? "border-red-500/70 bg-red-950/50" : "border-hud/30 bg-black/30"
+              }`}>
+                <span className="rounded border border-hud/25 bg-black/40 px-2 py-0.5">
+                  <b className={r.splintered ? "text-red-400" : "text-crosshair"}>{r.from}</b>
+                  {r.splintered ? <span className="ml-1 text-red-300/90">(splintered)</span> : <span className="ml-1 opacity-70"> wants to be tbles</span>}
                 </span>
                 <span className="flex gap-2">
                   {!r.splintered && (
@@ -339,13 +454,9 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
         ) : (
           <ul className="space-y-2">
             {friends.map((f) => (
-              <li key={f.name} className="flex flex-wrap items-center justify-between gap-2 rounded border border-white/10 bg-black/20 px-3 py-2 text-sm">
-                <button type="button" className="font-bold underline decoration-crosshair/40" onClick={() => setProfileName(f.name)}>{f.name}</button>
-                <button
-                  type="button"
-                  className="rounded bg-orange-500 px-3 py-1 text-xs font-black uppercase text-black"
-                  onClick={() => setUnadd(f.name)}
-                >Unadd</button>
+              <li key={f.name} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border-2 border-hud/30 bg-black/30 px-3 py-2 text-sm">
+                <button type="button" className="rounded border border-hud/25 bg-black/40 px-2 py-0.5 font-bold text-crosshair underline decoration-crosshair/40" onClick={() => setProfileName(f.name)}>{f.name}</button>
+                <button type="button" className="rounded bg-orange-500 px-3 py-1 text-xs font-black uppercase text-black" onClick={() => setUnadd(f.name)}>Unadd</button>
               </li>
             ))}
           </ul>
@@ -369,13 +480,11 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
       )}
 
       {profileName && (
-        <div className="gui fixed inset-0 z-[90] flex items-center justify-center bg-hud-scrim p-6" onClick={() => setProfileName(null)}>
-          <div className="w-full max-w-md rounded-lg border-2 border-hud/30 bg-hud-panel p-6" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-xl font-black uppercase text-crosshair">{profileName}</h2>
-            <p className="mt-2 text-xs opacity-60">Profile details from match data appear when you open this in an online room.</p>
-            <button type="button" className={`${btnAlt} mt-4`} onClick={() => setProfileName(null)}>Close</button>
-          </div>
-        </div>
+        <ProfileTab
+          data={{ name: profileName, skin: DEFAULT_SKIN }}
+          onClose={() => setProfileName(null)}
+          onUnadd={() => { setUnadd(profileName); setProfileName(null); }}
+        />
       )}
     </div>
   );
@@ -766,46 +875,65 @@ export function OnlinePause({ onSettings }: { onSettings: () => void }) {
 
 function OnlineRoster() {
   const net = useNet();
-  const [profileId, setProfileId] = useState<string | null>(null);
+  const [profile, setProfile] = useState<ProfileData | null>(null);
   const [reqMsg, setReqMsg] = useState<string | null>(null);
   const [reqCooldown, setReqCooldown] = useState<Record<string, number>>({});
   useTick(500);
-  const me = { id: myId(), name: displayName(), skin: undefined as Skin | undefined, ability: undefined as string | undefined, mastery: undefined as boolean | undefined, achList: undefined as string[] | undefined };
+  const meName = displayName();
+  const me: ProfileData = {
+    name: meName,
+    skin: SKIN,
+    ability: (() => { try { return getAbility(); } catch { return undefined; } })(),
+    mastery: false,
+    achList: Object.keys(getProgress().earned || {}),
+    isSelf: true,
+  };
   const peers = [...net.peers.values()].filter((p) => p.id && p.id !== myId());
-  const rows = [me, ...peers];
-  const profile = profileId === myId() || profileId === "me"
-    ? me
-    : peers.find((p) => p.id === profileId);
+  const rows: { id: string; data: ProfileData }[] = [
+    { id: "me", data: me },
+    ...peers.map((p) => ({
+      id: p.id,
+      data: {
+        name: p.name || "player",
+        skin: p.skin,
+        ability: net.kind === "pvp" ? undefined : p.ability,
+        mastery: p.mastery,
+        achList: p.achList,
+        isSelf: false,
+      },
+    })),
+  ];
 
   return (
     <div className="mt-6 border-t border-hud/20 pt-4 text-left">
       <h3 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Players</h3>
-      <ul className="max-h-48 space-y-2 overflow-y-auto text-sm">
-        {rows.map((p) => {
-          const name = p.name || "player";
-          const already = isFriend(name);
-          const cd = reqCooldown[name.toLowerCase()] ?? 0;
+      <ul className="max-h-52 space-y-2 overflow-y-auto">
+        {rows.map(({ id, data }) => {
+          const already = isFriend(data.name);
+          const cd = reqCooldown[data.name.toLowerCase()] ?? 0;
           const cooling = Date.now() < cd;
-          const isMe = p.id === myId() || p.id === "me";
           return (
-            <li key={p.id} className="flex items-center justify-between gap-2 rounded border border-white/10 bg-black/25 px-2 py-1.5">
-              <button type="button" className="truncate font-bold underline decoration-crosshair/30" onClick={() => setProfileId(p.id)}>
-                {name}{isMe ? " (you)" : ""}
+            <li key={id} className="flex items-center justify-between gap-2 rounded-lg border-2 border-hud/30 bg-black/35 px-3 py-2">
+              <button
+                type="button"
+                className="truncate rounded border border-hud/25 bg-black/40 px-2 py-0.5 font-bold text-crosshair underline decoration-crosshair/30"
+                onClick={() => setProfile(data)}
+              >
+                {data.name}{data.isSelf ? " (you)" : ""}
               </button>
-              {!isMe && (
+              {!data.isSelf && (
                 <button
                   type="button"
                   title={already ? "Already tbles" : cooling ? "Wait 1 min" : "Add tble"}
                   disabled={already || cooling}
-                  className={`relative flex h-8 w-8 items-center justify-center rounded ${
+                  className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded ${
                     already ? "bg-orange-500" : cooling ? "bg-neutral-500" : "bg-emerald-500"
                   }`}
                   onClick={async () => {
                     if (already || cooling) return;
-                    const r = await sendFriendRequest(name);
-                    setReqMsg(r.msg);
-                    if (r.ok) setReqCooldown((m) => ({ ...m, [name.toLowerCase()]: Date.now() + 60_000 }));
-                    else if (r.msg.includes("Too many")) setReqMsg("They likely have too many tbles.");
+                    const r = await sendFriendRequest(data.name);
+                    setReqMsg(r.msg.includes("Too many") ? "They likely have too many tbles." : r.msg);
+                    if (r.ok) setReqCooldown((m) => ({ ...m, [data.name.toLowerCase()]: Date.now() + 60_000 }));
                   }}
                 >
                   <span className="text-[10px] font-black text-black">▦</span>
@@ -818,22 +946,11 @@ function OnlineRoster() {
       </ul>
       {reqMsg && <p className="mt-2 text-[10px] font-bold text-crosshair">{reqMsg}</p>}
       {profile && (
-        <div className="mt-3 rounded border border-white/15 bg-black/40 p-3 text-xs">
-          <div className="flex items-center justify-between">
-            <b className="text-sm text-crosshair">{profile.name}</b>
-            <button type="button" className="underline opacity-70" onClick={() => setProfileId(null)}>Close</button>
-          </div>
-          <p className="mt-2 opacity-70">Skin: {profile.skin?.tablePrimary ? `table ${profile.skin.tablePrimary}` : "default / saved"}</p>
-          {net.kind !== "pvp" && (
-            <p className="mt-1 opacity-70">
-              Ability: {profile.ability ?? "—"}
-              {profile.mastery ? " (mastered)" : profile.ability ? " (normal)" : ""}
-            </p>
-          )}
-          <p className="mt-1 opacity-70">
-            Achievements: {(profile.achList && profile.achList.length) ? profile.achList.join(", ") : "—"}
-          </p>
-        </div>
+        <ProfileTab
+          data={profile}
+          onClose={() => setProfile(null)}
+          onUnadd={!profile.isSelf && isFriend(profile.name) ? () => { removeFriend(profile.name); setProfile(null); } : undefined}
+        />
       )}
     </div>
   );

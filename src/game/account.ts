@@ -5,6 +5,7 @@ import { applySkin, setSkinPersister, SKIN, type Skin } from "./skins";
 import { TRAIN, type TrainCfg } from "./state";
 import { hydrateProgress, resetProgress, serializeProgress, setProgressPersister } from "./mastery";
 import { serializeFriends, hydrateFriends, clearFriends, loadFriends } from "./friends";
+// net import deferred to avoid cycle at module load
 
 export type Account = { status: "loading" | "signedOut" | "guest" | "user"; userId: string | null; username: string; email: string | null };
 
@@ -192,11 +193,14 @@ export function playAsGuest() {
 }
 
 export async function signOut() {
-  // Save account progress before leaving so alts / next login keep unlocks
   if (ACC.status === "user" && ACC.userId) {
     try { persistProfileSettings(SETTINGS); } catch { /* ignore */ }
   }
   pendingProgressTransfer = false;
+  try {
+    const net = require("./net") as { announceFriendSplinter?: () => void };
+    void net.announceFriendSplinter?.();
+  } catch { /* ignore */ }
   await supabase.auth.signOut();
   set({ status: "signedOut", userId: null, username: "guest", email: null });
   resetProgress();
@@ -206,6 +210,10 @@ export async function signOut() {
 /** Guest "log out": discard this tab's guest progress and open the login flow. */
 export function logoutGuest() {
   pendingProgressTransfer = false;
+  try {
+    const net = require("./net") as { announceFriendSplinter?: () => void };
+    void net.announceFriendSplinter?.();
+  } catch { /* ignore */ }
   resetProgress();
   clearFriends();
   set({ status: "signedOut", userId: null, username: "guest", email: null });

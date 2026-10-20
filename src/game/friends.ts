@@ -79,7 +79,7 @@ export function markSplinteredRequests() {
   const now = Date.now();
   let changed = false;
   incoming = incoming.map((r) => {
-    if (!r.splintered && isGuestName(r.from) && now - r.t > 120_000) {
+    if (!r.splintered && isGuestName(r.from) && now - r.t > 20_000) {
       changed = true;
       return { ...r, splintered: true };
     }
@@ -206,7 +206,7 @@ export function noteOutgoingRequest(req: FriendRequest) {
 export function noteIncomingRequest(req: FriendRequest) {
   if (isSelfName(req.from) || isFriend(req.from)) return;
   if (incoming.some((r) => r.id === req.id || r.from.toLowerCase() === req.from.toLowerCase())) return;
-  const splintered = isGuestName(req.from) && Date.now() - req.t > 120_000;
+  const splintered = isGuestName(req.from) && Date.now() - req.t > 20_000;
   incoming = [...incoming, { ...req, splintered }];
   persistAll();
   bump();
@@ -226,6 +226,24 @@ export function removeOutgoing(id: string) {
 
 export function dismissSplintered(id: string) {
   removeIncoming(id);
+}
+
+/** Mark all incoming requests from this username as splintered (sender left). */
+export function markSplinteredFrom(fromName: string) {
+  const key = fromName.trim().toLowerCase();
+  if (!key) return;
+  let changed = false;
+  incoming = incoming.map((r) => {
+    if (r.from.toLowerCase() === key && !r.splintered) {
+      changed = true;
+      return { ...r, splintered: true };
+    }
+    return r;
+  });
+  if (changed) {
+    write(inKey(), incoming);
+    bump();
+  }
 }
 
 try { loadFriends(); } catch { /* ignore */ }

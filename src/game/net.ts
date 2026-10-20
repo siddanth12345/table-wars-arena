@@ -7,7 +7,7 @@ import { G, goHome, resetGame, type Mode } from "./state";
 import { recordPvpWin } from "./mastery";
 import {
   noteIncomingRequest, noteOutgoingRequest, removeIncoming, removeOutgoing,
-  addFriendDirect, isSelfName, isFriend, friendCount, MAX_TBLES, type FriendRequest,
+  addFriendDirect, isSelfName, isFriend, friendCount, MAX_TBLES, markSplinteredFrom, type FriendRequest,
 } from "./friends";
 import { getAbility } from "./abilities";
 import { masteryOn, getProgress } from "./mastery";
@@ -934,6 +934,11 @@ export function startInbox() {
     ];
     bump();
   });
+  ch.on("broadcast", { event: "friend_splinter" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.from, 40)) return;
+    markSplinteredFrom(String(payload.from));
+    bump();
+  });
   ch.on("broadcast", { event: "friend_accept" }, ({ payload }) => {
     if (!isRecord(payload) || !isText(payload.from, 40) || !isText(payload.to, 40)) return;
     // payload.from accepted our request (we were the sender: payload.to is us)
@@ -954,6 +959,13 @@ export function stopInbox() {
 
 
 /** Send a friend request by exact username (or guest######). */
+export async function announceFriendSplinter() {
+  if (!inbox) startInbox();
+  for (let i = 0; i < 3; i++) {
+    try { if (inbox) await inbox.send({ type: "broadcast", event: "friend_splinter", payload: { from: displayName() } }); } catch { /* ignore */ }
+  }
+}
+
 export async function sendFriendRequest(username: string): Promise<{ ok: boolean; msg: string }> {
   const name = username.trim();
   const acc = getAccount();
@@ -1167,6 +1179,10 @@ function installUnloadLeave() {
   if (typeof window === "undefined") return;
   const bail = () => {
     try {
+      // Notify others so our pending tble requests show as splintered
+      if (inbox) {
+        void inbox.send({ type: "broadcast", event: "friend_splinter", payload: { from: displayName() } });
+      }
       leaveParty(false);
       leaveRoom(true);
       leaveQueue();

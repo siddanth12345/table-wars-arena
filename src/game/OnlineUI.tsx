@@ -217,7 +217,7 @@ function InviteBox({ kind, label }: { kind: "party" | "lobby"; label: string }) 
       </div>
       {friends.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] uppercase opacity-60">Friends</span>
+          <span className="text-[10px] uppercase opacity-60">Tbles</span>
           <select
             className={`${input} max-w-[12rem] py-1 text-xs`}
             defaultValue=""
@@ -228,7 +228,7 @@ function InviteBox({ kind, label }: { kind: "party" | "lobby"; label: string }) 
               e.target.value = "";
             }}
           >
-            <option value="">Invite friend…</option>
+            <option value="">Invite tble…</option>
             {friends.map((f) => (
               <option key={f.name} value={f.name}>{f.name}</option>
             ))}
@@ -278,10 +278,10 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
     return (
       <div className="relative m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">
         <div className="mb-4 flex items-center justify-between border-b border-hud/30 pb-2">
-          <h3 className="text-2xl font-black uppercase tracking-widest text-crosshair">Friends</h3>
+          <h3 className="text-2xl font-black uppercase tracking-widest text-crosshair">Tbles</h3>
           <button type="button" className="text-xs uppercase underline" onClick={onClose}>Close</button>
         </div>
-        <p className="text-sm opacity-80">Log in or play as guest to manage friends.</p>
+        <p className="text-sm opacity-80">Log in or play as guest to manage tbles.</p>
       </div>
     );
   }
@@ -289,12 +289,12 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
   return (
     <div className="relative m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">
       <div className="mb-4 flex items-center justify-between border-b border-hud/30 pb-2">
-        <h3 className="text-2xl font-black uppercase tracking-widest text-crosshair">Friends</h3>
+        <h3 className="text-2xl font-black uppercase tracking-widest text-crosshair">Tbles</h3>
         <button type="button" className="text-xs uppercase underline" onClick={onClose}>Close</button>
       </div>
 
       <div className="mb-6">
-        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Add friend</h4>
+        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Add tble</h4>
         <form
           className="flex gap-2"
           onSubmit={async (e) => {
@@ -314,15 +314,15 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
 
       <div className="mb-6">
         <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">
-          Friend requests {incoming.length > 0 ? `(${incoming.length})` : ""}
+          Tble requests {incoming.length > 0 ? `(${incoming.length})` : ""}
         </h4>
         {incoming.length === 0 ? (
-          <p className="text-sm opacity-60">No incoming requests.</p>
+          <p className="text-sm opacity-60">No incoming tble requests.</p>
         ) : (
           <ul className="space-y-2">
             {incoming.map((r: FriendRequest) => (
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-white/15 bg-black/30 px-3 py-2 text-sm">
-                <span><b className="text-crosshair">{r.from}</b> wants to be friends</span>
+                <span><b className="text-crosshair">{r.from}</b> wants to be tbles</span>
                 <span className="flex gap-2">
                   <button type="button" className="rounded bg-crosshair px-3 py-1 text-xs font-black uppercase text-hud-ink" onClick={async () => setMsg(await acceptFriendRequest(r))}>Accept</button>
                   <button type="button" className="rounded border border-white/25 px-3 py-1 text-xs font-bold uppercase" onClick={() => declineFriendRequest(r)}>Decline</button>
@@ -348,10 +348,10 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
 
       <div>
         <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">
-          Your friends ({friends.length})
+          Your tbles ({friends.length})
         </h4>
         {friends.length === 0 ? (
-          <p className="text-sm opacity-60">No friends yet. Send a request above.</p>
+          <p className="text-sm opacity-60">No tbles yet. Send a request above.</p>
         ) : (
           <ul className="space-y-2">
             {friends.map((f) => (
@@ -363,7 +363,7 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
           </ul>
         )}
         {acc.status === "guest" && (
-          <p className="mt-3 text-[10px] opacity-50">Guest friends are temporary. Transfer progress when creating an account to keep them.</p>
+          <p className="mt-3 text-[10px] opacity-50">Guest tbles are temporary. Transfer progress when creating an account to keep them.</p>
         )}
       </div>
     </div>
@@ -417,8 +417,8 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
         </button>
         {!party && !waiting && (
           <div className="rounded border border-hud/20 bg-black/20 p-2">
-            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Play campaign with friends</p>
-            <FriendInviteRow kind="party" label="Invite friend to party…" />
+            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Play campaign with tbles</p>
+            <FriendInviteRow kind="party" label="Invite tble to party…" />
             <p className="mt-1 text-[10px] opacity-50">Creates/joins a party invite so you can run campaign together.</p>
           </div>
         )}
@@ -428,8 +428,8 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
         </button>
         {!party && !waiting && (
           <div className="rounded border border-hud/20 bg-black/20 p-2">
-            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Play 1v1 with friends</p>
-            <FriendInviteRow kind="party" label="Invite friend to party 1v1…" />
+            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Play 1v1 with tbles</p>
+            <FriendInviteRow kind="party" label="Invite tble to party 1v1…" />
             <p className="mt-1 text-[10px] opacity-50">Invite to party, then start 1v1 with party.</p>
           </div>
         )}
@@ -441,8 +441,8 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
         </button>
         {net.code && (
           <div className="rounded border border-hud/20 bg-black/20 p-2">
-            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Lobby · invite friends</p>
-            <FriendInviteRow kind="lobby" label="Invite friend to lobby…" />
+            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Lobby · invite tbles</p>
+            <FriendInviteRow kind="lobby" label="Invite tble to lobby…" />
           </div>
         )}
         <div>

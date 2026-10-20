@@ -578,7 +578,7 @@ function Home() {
           <button className={btnAlt} onClick={() => setSkinsOpen(true)}>Skins</button>
           <button className={btnAlt} onClick={() => setAbilitiesOpen(true)}>Abilities</button>
           <button className={btnAlt} onClick={() => setAchievementsOpen(true)}>Achievements</button>
-          <button className={btnAlt} onClick={() => setFriendsOpen(true)}>Friends</button>
+          <button className={btnAlt} onClick={() => setFriendsOpen(true)}>Tbles</button>
           <button className={tab === "settings" ? btnMain : btnAlt} onClick={() => setTab(tab === "settings" ? "main" : "settings")}>Settings</button>
         </div>
         <AccountBadge onLogin={() => setAuthOpen(true)} />

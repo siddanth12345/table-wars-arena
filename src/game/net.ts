@@ -933,9 +933,9 @@ export async function sendFriendRequest(username: string): Promise<{ ok: boolean
   const acc = getAccount();
   if (acc.status !== "user" && acc.status !== "guest") return { ok: false, msg: "Log in or play as guest first." };
   if (!name) return { ok: false, msg: "Enter a username." };
-  if (isSelfName(name)) return { ok: false, msg: "You can't add yourself as a friend." };
-  if (isFriend(name)) return { ok: false, msg: "Already friends." };
-  if (Date.now() - NET.inviteSentAt < 2000) return { ok: false, msg: "Wait a moment before sending another request." };
+  if (isSelfName(name)) return { ok: false, msg: "You can't add yourself as a tble." };
+  if (isFriend(name)) return { ok: false, msg: "Already tbles." };
+  if (Date.now() - NET.inviteSentAt < 2000) return { ok: false, msg: "Wait a moment before sending another tble request." };
   const guestName = /^guest\d{6}$/i.test(name);
   if (!guestName && !(await lookupUsername(name))) return { ok: false, msg: "No player with that exact username." };
   NET.inviteSentAt = Date.now();
@@ -952,7 +952,7 @@ export async function sendFriendRequest(username: string): Promise<{ ok: boolean
     try { if (inbox) await inbox.send({ type: "broadcast", event: "friend_req", payload }); } catch { /* ignore */ }
     await new Promise((r) => setTimeout(r, 200));
   }
-  return { ok: true, msg: `Friend request sent to ${name}.` };
+  return { ok: true, msg: `Tble request sent to ${name}.` };
 }
 
 export async function acceptFriendRequest(req: FriendRequest): Promise<{ ok: boolean; msg: string }> {
@@ -964,7 +964,7 @@ export async function acceptFriendRequest(req: FriendRequest): Promise<{ ok: boo
     try { if (inbox) await inbox.send({ type: "broadcast", event: "friend_accept", payload }); } catch { /* ignore */ }
     await new Promise((r) => setTimeout(r, 200));
   }
-  return { ok: true, msg: `You and ${req.from} are now friends.` };
+  return { ok: true, msg: `You and ${req.from} are now tbles.` };
 }
 
 export function declineFriendRequest(req: FriendRequest) {

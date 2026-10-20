@@ -6,14 +6,14 @@ import {
   chooseAbilityPick, confirmAbilityPick, sendRematch, answerRematch, requeue, goHomeOnline,
   createLobby, joinLobby, sendInvite, acceptInvite, dismissInvite, partyGo, kickMember, disbandParty, leaveParty,
   isPartyLeader, inParty, myId, opponentId, startInbox, stopInbox,
-  sendFriendRequest, acceptFriendRequest, declineFriendRequest, cancelFriendRequest, sendPlayInvite,
+  sendFriendRequest, acceptFriendRequest, declineFriendRequest, cancelFriendRequest, sendPlayInvite, requestProfile,
 } from "./net";
 import { useAccount, signIn, signUp, playAsGuest, signOut, logoutGuest, transferGuestProgress, isProgressTransferPending, clearProgressTransfer, displayName } from "./account";
 import { G, resetGame, lockPointer } from "./state";
 import { getPvpWins, useProgress, hasMastery, hasAchievement, ACHIEVEMENTS, getProgress } from "./mastery";
 import {
   useFriends, useFriendRequests, removeFriend, dismissSplintered, markSplinteredRequests,
-  isFriend, MAX_TBLES, friendCount, type FriendRequest,
+  isFriend, MAX_TBLES, friendCount, getCachedProfile, type FriendRequest,
 } from "./friends";
 import { DEFAULT_SKIN, SKIN, type Skin } from "./skins";
 import { createTableBot } from "./tableBotFactory";
@@ -385,6 +385,9 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
   const [profileName, setProfileName] = useState<string | null>(null);
   useTick(2000);
   useEffect(() => { markSplinteredRequests(); }, []);
+  useEffect(() => {
+    if (profileName) void requestProfile(profileName);
+  }, [profileName]);
 
   if (acc.status !== "user" && acc.status !== "guest") {
     return (
@@ -509,9 +512,29 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
 
       {profileName && (
         <ProfileTab
-          data={{ name: profileName, skin: DEFAULT_SKIN }}
+          data={(() => {
+            const c = getCachedProfile(profileName);
+            return {
+              name: profileName,
+              skin: c?.skin ?? DEFAULT_SKIN,
+              ability: c?.ability,
+              mastery: c?.mastery,
+              achList: c?.achList,
+            };
+          })()}
           onClose={() => setProfileName(null)}
           onUnadd={() => { setUnadd(profileName); setProfileName(null); }}
+          live={() => {
+            void requestProfile(profileName);
+            const c = getCachedProfile(profileName);
+            return {
+              name: profileName,
+              skin: c?.skin ?? DEFAULT_SKIN,
+              ability: c?.ability,
+              mastery: c?.mastery,
+              achList: c?.achList,
+            };
+          }}
         />
       )}
     </div>

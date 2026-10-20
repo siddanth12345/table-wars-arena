@@ -1,8 +1,21 @@
 import { useSyncExternalStore } from "react";
 import { getAccount, displayName } from "./account";
+import type { Skin } from "./skins";
 
 export type Friend = { name: string; addedAt: number; splintered?: boolean };
 export type FriendRequest = { id: string; from: string; to: string; t: number; splintered?: boolean };
+
+export type ProfileCache = {
+  name: string;
+  skin?: Skin;
+  ability?: string;
+  mastery?: boolean;
+  achList?: string[];
+  updatedAt: number;
+};
+
+let profiles: Record<string, ProfileCache> = {};
+
 
 export const MAX_TBLES = 75;
 const LS_FRIENDS = "tble-friends-guest";
@@ -95,12 +108,42 @@ export function markSplinteredRequests() {
   }
 }
 
+function profilesKey() {
+  return accKey() === "guest" ? "tble-profile-cache-guest" : `tble-profile-cache-${accKey()}`;
+}
+
+function loadProfiles() {
+  try {
+    const raw = localStorage.getItem(profilesKey());
+    if (!raw) { profiles = {}; return; }
+    const o = JSON.parse(raw) as Record<string, ProfileCache>;
+    profiles = o && typeof o === "object" ? o : {};
+  } catch { profiles = {}; }
+}
+
+function saveProfiles() {
+  try { localStorage.setItem(profilesKey(), JSON.stringify(profiles)); } catch { /* ignore */ }
+}
+
 export function loadFriends() {
   friends = readList(friendsKey(), mapFriend);
   outgoing = readList(outKey(), mapReq);
   incoming = readList(inKey(), mapReq);
+  loadProfiles();
   markSplinteredRequests();
   bump();
+}
+
+export function cacheProfile(p: Omit<ProfileCache, "updatedAt"> & { updatedAt?: number }) {
+  const key = p.name.trim().toLowerCase();
+  if (!key) return;
+  profiles[key] = { ...p, name: p.name.trim(), updatedAt: p.updatedAt ?? Date.now() };
+  saveProfiles();
+  bump();
+}
+
+export function getCachedProfile(name: string): ProfileCache | null {
+  return profiles[name.trim().toLowerCase()] ?? null;
 }
 
 function persistAll() {
@@ -158,10 +201,12 @@ export function clearFriends() {
   friends = [];
   outgoing = [];
   incoming = [];
+  profiles = {};
   try {
     localStorage.removeItem(friendsKey());
     localStorage.removeItem(outKey());
     localStorage.removeItem(inKey());
+    localStorage.removeItem(profilesKey());
   } catch { /* ignore */ }
   bump();
 }

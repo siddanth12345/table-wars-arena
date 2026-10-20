@@ -4,14 +4,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { setTodOverride, type TimeOfDay } from "./settings";
 import { displayName, getAccount, lookupUsername } from "./account";
 import { G, goHome, resetGame, type Mode } from "./state";
-import { recordPvpWin } from "./mastery";
 import {
   noteIncomingRequest, noteOutgoingRequest, removeIncoming, removeOutgoing,
-  addFriendDirect, isSelfName, isFriend, friendCount, MAX_TBLES, markSplinteredFrom, type FriendRequest,
+  addFriendDirect, isSelfName, isFriend, friendCount, MAX_TBLES, markSplinteredFrom,
+  cacheProfile, type FriendRequest,
 } from "./friends";
-import { getAbility } from "./abilities";
-import { masteryOn, getProgress } from "./mastery";
-import { setAbility } from "./abilities";
+import { getAbility, setAbility } from "./abilities";
+import { masteryOn, getProgress, recordPvpWin } from "./mastery";
 import { SKIN, type Skin } from "./skins";
 import { onRemoteChat, clearChat } from "./chat";
 
@@ -211,6 +210,19 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
       ability, mastery, achList,
       ...(p.skin && isRecord(p.skin) ? { skinVer: isFiniteIn(p.skinVer, 0, 1000000) ? p.skinVer : undefined } : cur ? { skinVer: (cur as { skinVer?: number }).skinVer } : {}),
     } as Peer);
+    // Cache for home profile viewer (friends list outside a match)
+    try {
+      const nm = NET.peers.get(p.id)?.name ?? p.name;
+      if (typeof nm === "string" && nm) {
+        cacheProfile({
+          name: nm,
+          skin: isRecord(p.skin) ? p.skin as never : undefined,
+          ability: ability as string | undefined,
+          mastery: mastery as boolean | undefined,
+          achList: achList as string[] | undefined,
+        });
+      }
+    } catch { /* ignore */ }
     if (!cur || skinChanged) bump();
   });
   ch.on("broadcast", { event: "hit" }, ({ payload }) => {
@@ -934,6 +946,32 @@ export function startInbox() {
     ];
     bump();
   });
+  ch.on("broadcast", { event: "profile_req" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.to, 40) || !isText(payload.from, 40)) return;
+    if (String(payload.to).trim().toLowerCase() !== uname) return;
+    // Reply with our current skin / ability / achievements
+    const res = {
+      to: String(payload.from).trim().toLowerCase(),
+      from: displayName(),
+      skin: { ...SKIN },
+      ability: getAbility(),
+      mastery: (() => { try { return masteryOn(getAbility() as "wall"); } catch { return false; } })(),
+      achList: Object.keys(getProgress().earned || {}).slice(0, 40),
+    };
+    void ch.send({ type: "broadcast", event: "profile_res", payload: res });
+  });
+  ch.on("broadcast", { event: "profile_res" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.to, 40) || !isText(payload.from, 40)) return;
+    if (String(payload.to).trim().toLowerCase() !== uname) return;
+    cacheProfile({
+      name: String(payload.from),
+      skin: isRecord(payload.skin) ? payload.skin as never : undefined,
+      ability: isText(payload.ability, 20) ? payload.ability : undefined,
+      mastery: typeof payload.mastery === "boolean" ? payload.mastery : undefined,
+      achList: Array.isArray(payload.achList) ? payload.achList.filter((x): x is string => typeof x === "string") : undefined,
+    });
+    bump();
+  });
   ch.on("broadcast", { event: "friend_splinter" }, ({ payload }) => {
     if (!isRecord(payload) || !isText(payload.from, 40)) return;
     markSplinteredFrom(String(payload.from));
@@ -959,6 +997,17 @@ export function stopInbox() {
 
 
 /** Send a friend request by exact username (or guest######). */
+export async function requestProfile(username: string) {
+  const name = username.trim();
+  if (!name || isSelfName(name)) return;
+  if (!inbox) startInbox();
+  const payload = { from: displayName(), to: name.trim().toLowerCase() };
+  for (let i = 0; i < 3; i++) {
+    try { if (inbox) await inbox.send({ type: "broadcast", event: "profile_req", payload }); } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+}
+
 export async function announceFriendSplinter() {
   if (!inbox) startInbox();
   for (let i = 0; i < 3; i++) {

@@ -62,10 +62,8 @@ const SUMMON_HP = 2.5;
 const WAVE_H = 0.5 * 3.45 * TABLE_S; // half a table tall
 const WAVE_SPEED = 140;
 const WAVE_DMG = 20;
-const TELEPORT_CD = 2.5;
 const HEALTH_AMOUNT = 10;
 const HEALTH_INTERVAL = 5;
-const HEALTH_LIFE = 10;
 const HEALTH_R = (TABLE_W * 1.5) / 2; // ring diameter = 1.5 table lengths
 const SHARD_R = HEALTH_R * 3; // player shards are 3× health rings
 const BULLET_AOE_R = TABLE_W / 2; // splinter blast diameter = one brown table
@@ -422,10 +420,8 @@ export function World() {
   const FIRE_VFX_VER = 7; // sharper wider mastered zigzags
   const FIRE_SEGS = 22;
   const fireballMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
-  const fireParticleRefs = useRef<(THREE.Points | null)[]>([]);
   const slam = useRef({ on: false, fromY: 0, h: 0 });
   const bunnyHop = useRef(0); // time window to auto-jump on land after dash
-  const doDashRef = useRef<(dirs: () => { f: THREE.Vector3; r: THREE.Vector3 }) => void>(() => {});
   const bounce = useRef({ t: 0, y: 0 });
   const demoAng = useRef(0);
   const healthRefs = useRef<(THREE.Group | null)[]>([]);
@@ -2266,8 +2262,6 @@ const kd = (e: KeyboardEvent) => {
       } else {
       const can = G.abilityCd <= 0 && G.abilityCharges > 0 && !G.abilityLocked && !G.parryLocked;
       if (can) {
-        const yaw = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ").y;
-        const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
         if (ab === "wall" || ab === "trampoline") {
           const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ");
           const yaw = euler.y;
@@ -2461,7 +2455,6 @@ const kd = (e: KeyboardEvent) => {
     }
     // Fire lines — 5× wider/taller, no self-dmg, can hit boss if under it
     const FIRE_W = 20; // was ~4, then 8; now 5× original
-    const FIRE_H = 8; // 5× taller zone
     for (const fire of abilityFires) {
       if (!fire.active) continue;
       if (offlinePaused) continue; // offline menu freezes fire line timer + damage
@@ -2837,7 +2830,6 @@ const kd = (e: KeyboardEvent) => {
 
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
     const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;
-    const canControl = active && !G.pvpDead && !G.campaignDead && !freecamOn;
 
     // --- 1v1 storm: 60s into a round a wall closes in from the arena edge at 30 u/s ---
     {
@@ -3912,7 +3904,6 @@ const kd = (e: KeyboardEvent) => {
       // enemy aim (tables, blues, boss, pvp peers when attackable)
       if (mode === "normal" && !G.freecam) {
         const aimDist = 400;
-        const tip = origin.clone().addScaledVector(dir, aimDist);
         const check = (px: number, py: number, pz: number, r: number) => {
           const to = new THREE.Vector3(px, py, pz).sub(origin);
           const t = to.dot(dir);

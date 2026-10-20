@@ -942,7 +942,6 @@ async function joinCoop(name: string, mode: Mode, host: boolean) {
 // ---------------------------------------------------------------- invites (personal inbox)
 
 const INVITE_BUS = "tble:invite-bus";
-const inboxName = (u: string) => INVITE_BUS; // shared bus; filter by payload.to
 
 export function startInbox() {
   const acc = getAccount();
@@ -1036,9 +1035,14 @@ export function stopInbox() {
 
 
 /** Send a friend request by exact username (or guest######). */
+const profileReqAt: Record<string, number> = {};
 export async function requestProfile(username: string) {
   const name = username.trim();
   if (!name || isSelfName(name)) return;
+  // The profile viewer polls every second; every request is a broadcast to ALL clients on the shared bus.
+  const key = name.toLowerCase();
+  if (Date.now() - (profileReqAt[key] ?? 0) < 5000) return;
+  profileReqAt[key] = Date.now();
   if (!inbox) startInbox();
   const payload = { from: displayName(), to: name.trim().toLowerCase() };
   for (let i = 0; i < 3; i++) {

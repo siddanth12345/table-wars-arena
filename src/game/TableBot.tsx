@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import type { Skin } from "./skins";
 import { createStageDisc, createTableBot, skinKey, type TableBotOptions } from "./tableBotFactory";

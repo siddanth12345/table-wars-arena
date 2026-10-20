@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
@@ -261,10 +261,9 @@ function FriendInviteRow({
 function SkinSpinPreview({ skin }: { skin: Skin }) {
   const group = useRef<THREE.Group>(null);
   const key = JSON.stringify(skin);
-  const bot = useRef(createTableBot({ skin, scale: 0.55, emitLight: true }));
-  useEffect(() => {
-    bot.current = createTableBot({ skin, scale: 0.55, emitLight: true });
-  }, [key]);
+  // Build the preview table once per skin (useRef(createTableBot(...)) rebuilt a whole bot on every render)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const bot = useMemo(() => ({ current: createTableBot({ skin, scale: 0.55, emitLight: true }) }), [key]);
   useFrame((_, dt) => {
     if (group.current) group.current.rotation.y += dt * 0.7;
   });

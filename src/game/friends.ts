@@ -7,10 +7,10 @@ export type FriendRequest = { id: string; from: string; to: string; t: number; s
 
 export type ProfileCache = {
   name: string;
-  skin?: Skin;
-  ability?: string;
-  mastery?: boolean;
-  achList?: string[];
+  skin?: Skin | undefined;
+  ability?: string | undefined;
+  mastery?: boolean | undefined;
+  achList?: string[] | undefined;
   updatedAt: number;
 };
 
@@ -146,14 +146,15 @@ export function getCachedProfile(name: string): ProfileCache | null {
   return profiles[name.trim().toLowerCase()] ?? null;
 }
 
+let friendsPersister: ((f: Friend[]) => void) | null = null;
+/** account.ts registers this (avoids a circular import and `require`, which doesn't exist in the browser). */
+export function setFriendsPersister(fn: ((f: Friend[]) => void) | null) { friendsPersister = fn; }
+
 function persistAll() {
   write(friendsKey(), friends);
   write(outKey(), outgoing);
   write(inKey(), incoming);
-  try {
-    const acc = require("./account") as { persistFriendsToProfile?: (f: Friend[]) => void };
-    acc.persistFriendsToProfile?.(friends);
-  } catch { /* ignore */ }
+  try { friendsPersister?.(friends); } catch { /* ignore */ }
 }
 
 export function getFriends() { return friends; }
@@ -280,7 +281,8 @@ export function dismissSplintered(id: string) {
 /** Mark all incoming requests from this username as splintered (sender left). */
 export function markSplinteredFrom(fromName: string) {
   const key = fromName.trim().toLowerCase();
-  if (!key) return;
+  // Only guests vanish for good when their tab closes; a real account just comes back later.
+  if (!key || !isGuestName(key)) return;
   let changed = false;
   incoming = incoming.map((r) => {
     if (r.from.toLowerCase() === key && !r.splintered) {
@@ -298,23 +300,6 @@ export function markSplinteredFrom(fromName: string) {
   });
   if (changed) {
     write(inKey(), incoming);
-    write(friendsKey(), friends);
-    bump();
-  }
-}
-
-/** Guest tbles with no activity: mark splintered after timeout (backup if close didn't broadcast). */
-export function markStaleGuestTbles() {
-  const now = Date.now();
-  let changed = false;
-  friends = friends.map((f) => {
-    if (!f.splintered && isGuestName(f.name) && now - f.addedAt > 86_400_000) {
-      // only age-based is weak; guest session death is primarily markSplinteredFrom
-      return f;
-    }
-    return f;
-  });
-  if (changed) {
     write(friendsKey(), friends);
     bump();
   }

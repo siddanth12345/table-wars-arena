@@ -26,7 +26,7 @@ export type Peer = {
   ability?: string; mastery?: boolean; achList?: string[];
 };
 export type Kind = "pvp" | "lobby" | "coop";
-export type Invite = { id: string; kind: "party" | "lobby" | "friend" | "play_party" | "play_1v1"; from: string; target: string; t: number; expires?: number };
+export type Invite = { id: string; kind: "party" | "lobby" | "friend" | "play_party" | "play_1v1"; from: string; target: string; t: number; expires?: number | undefined };
 export type PartyMember = { id: string; name: string; leader: boolean };
 
 export const PVP_WIN = 3;
@@ -47,7 +47,7 @@ const empty = () => ({
   peers: new Map<string, Peer>(),
   names: {} as Record<string, string>,
   // 1v1
-  stage: "idle" as "idle" | "queue" | "pick" | "playing" | "roundEnd" | "over",
+  stage: "idle" as "idle" | "queue" | "pick" | "ban" | "abilityPick" | "playing" | "roundEnd" | "over",
   pickEnds: 0,
   myPick: null as TimeOfDay | null,
   pickPhase: "tod" as "tod" | "ban" | "ability",
@@ -128,6 +128,10 @@ let mm: RealtimeChannel | null = null;
 let partyCh: RealtimeChannel | null = null;
 let inbox: RealtimeChannel | null = null;
 let picks: Record<string, TimeOfDay> = {};
+type BanChoice = "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss";
+let bans: Record<string, BanChoice> = {};
+let abilityChoices: Record<string, string> = {};
+let phaseLocked: Record<string, boolean> = {};
 let roundLocked = false;
 let pickTimer: ReturnType<typeof setTimeout> | null = null;
 let lastPose = 0;
@@ -281,7 +285,36 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
     if (isRecord(payload)) onRemoteChat(payload as Record<string, unknown>);
   });
   ch.on("broadcast", { event: "pickstart" }, ({ payload }) => {
-    if (isRecord(payload) && isFiniteIn(payload.ms, 500, 30000)) beginPick(payload.ms);
+    if (NET.kind !== "pvp" || NET.isHost || !isRecord(payload) || !isFiniteIn(payload.ms, 500, 30000)) return;
+    const ph = payload.phase;
+    if (isTimeOfDay(payload.tod)) NET.tod = payload.tod;
+    beginPickPhase(ph === "ban" || ph === "ability" ? ph : "tod", payload.ms);
+  });
+  ch.on("broadcast", { event: "todpick" }, ({ payload }) => {
+    if (NET.kind === "pvp" && !NET.isHost && isRecord(payload) && isTimeOfDay(payload.tod)) { NET.tod = payload.tod; bump(); }
+  });
+  ch.on("broadcast", { event: "ban" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.id, 64) || !NET.names[payload.id]) return;
+    const b = payload.ban;
+    if (b !== "none" && b !== "wall" && b !== "trampoline" && b !== "fire" && b !== "teleport" && b !== "boss") return;
+    bans[payload.id] = b;
+    NET.bans = { ...bans };
+    bump();
+  });
+  ch.on("broadcast", { event: "abilitypick" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.id, 64) || !NET.names[payload.id] || !isText(payload.choice, 32)) return;
+    abilityChoices[payload.id] = payload.choice;
+    NET.abilityChoices = { ...abilityChoices };
+    bump();
+  });
+  ch.on("broadcast", { event: "phaselock" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.id, 64) || !NET.names[payload.id]) return;
+    const ph = payload.phase;
+    if (ph !== "tod" && ph !== "ban" && ph !== "ability") return;
+    phaseLocked[`${ph}:${payload.id}`] = true;
+    NET.phaseLocked = { ...phaseLocked };
+    bump();
+    if (NET.isHost) tryResolvePhaseEarly(ph);
   });
   ch.on("broadcast", { event: "pick" }, ({ payload }) => {
     if (isRecord(payload) && isText(payload.id, 64) && isTimeOfDay(payload.tod) && NET.names[payload.id]) picks[payload.id] = payload.tod;
@@ -382,6 +415,10 @@ export function leaveRoom(full = true) {
   lastPose = 0;
   leaveQueue();
   picks = {};
+  bans = {};
+  abilityChoices = {};
+  phaseLocked = {};
+  if (pickTimer) { clearTimeout(pickTimer); pickTimer = null; }
   roundLocked = false;
   Object.assign(NET, empty());
   setTodOverride(null);
@@ -915,7 +952,8 @@ export function startInbox() {
   const ch = supabase.channel(INVITE_BUS, { config: { broadcast: { self: false } } });
   inbox = ch;
   ch.on("broadcast", { event: "invite" }, ({ payload }) => {
-    const inv = payload as Invite & { to?: string };
+    if (!isRecord(payload) || !isText(payload.from, 40) || !isText(payload.to, 40) || !isText(payload.target, 100)) return;
+    const inv = payload as unknown as Invite & { to?: string };
     const to = (inv.to ?? "").trim().toLowerCase();
     if (!to || to !== uname) return;
     const kind = inv.kind as Invite["kind"];
@@ -924,7 +962,8 @@ export function startInbox() {
       ...NET.invites.filter((i) => i.from !== inv.from || i.kind !== kind),
       {
         id: crypto.randomUUID(), kind, from: inv.from, target: inv.target, t: Date.now(),
-        expires: typeof inv.expires === "number" ? inv.expires : (kind === "play_party" || kind === "play_1v1" ? Date.now() + 5000 : kind === "friend" ? Date.now() + 10000 : undefined),
+        // Use MY clock: the sender's timestamp breaks with clock skew (invite would be dead on arrival).
+        expires: kind === "play_party" || kind === "play_1v1" ? Date.now() + 5000 : kind === "friend" ? Date.now() + 10000 : undefined,
       },
     ];
     bump();
@@ -1008,10 +1047,10 @@ export async function requestProfile(username: string) {
   }
 }
 
-export async function announceFriendSplinter() {
+export async function announceFriendSplinter(name: string = displayName()) {
   if (!inbox) startInbox();
   for (let i = 0; i < 3; i++) {
-    try { if (inbox) await inbox.send({ type: "broadcast", event: "friend_splinter", payload: { from: displayName() } }); } catch { /* ignore */ }
+    try { if (inbox) await inbox.send({ type: "broadcast", event: "friend_splinter", payload: { from: name } }); } catch { /* ignore */ }
   }
 }
 
@@ -1229,7 +1268,7 @@ function installUnloadLeave() {
   const bail = () => {
     try {
       // Notify others so our pending tble requests show as splintered
-      if (inbox) {
+      if (inbox && getAccount().status === "guest") {
         void inbox.send({ type: "broadcast", event: "friend_splinter", payload: { from: displayName() } });
       }
       leaveParty(false);

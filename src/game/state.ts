@@ -154,6 +154,8 @@ export const G = {
   diedThisRun: [] as string[],
   combo: 0,
   comboTimer: 0,
+  pvpMastery: false,
+  pvpMasteryAbility: null as null | string,
   abilityCd: 0,
   abilityCharges: 4,
   abilitySlow: 0,

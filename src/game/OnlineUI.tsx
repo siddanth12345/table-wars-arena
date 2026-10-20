@@ -281,11 +281,11 @@ function SkinSpinPreview({ skin }: { skin: Skin }) {
 
 export type ProfileData = {
   name: string;
-  skin?: Skin;
-  ability?: string;
-  mastery?: boolean;
-  achList?: string[];
-  isSelf?: boolean;
+  skin?: Skin | undefined;
+  ability?: string | undefined;
+  mastery?: boolean | undefined;
+  achList?: string[] | undefined;
+  isSelf?: boolean | undefined;
 };
 
 /** Full profile tab (home or in-game). */
@@ -297,7 +297,7 @@ export function ProfileTab({
 }: {
   data: ProfileData;
   onClose: () => void;
-  onUnadd?: () => void;
+  onUnadd?: (() => void) | undefined;
   /** If set, re-read profile every 1s (skin / ability / achievements). */
   live?: () => ProfileData;
 }) {

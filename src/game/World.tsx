@@ -467,7 +467,7 @@ export function World() {
   const tpRefresh = useRef(0);
   const slamStun = useRef({ dur: 0, exp: 0 });
   /** Smooth online sword-stick: lerp toward target instead of hard teleports */
-  const swordStick = useRef({ active: false, x: 0, y: 0, z: 0 });
+  const swordStick = useRef({ active: false, x: 0, y: 0, z: 0, t: 0 });
   /** After unstick, block new sticks for 2s (multi-sword spam) */
   const stickImmuneUntil = useRef(0);
   /** ability-applied stun timers (seconds left) for bots — real freeze */
@@ -1555,7 +1555,7 @@ const kd = (e: KeyboardEvent) => {
       } else {
         const st = swordStick.current;
         st.active = true;
-        st.x = extra.stick[0]!; st.y = extra.stick[1]!; st.z = extra.stick[2]!;
+        st.x = extra.stick[0]!; st.y = extra.stick[1]!; st.z = extra.stick[2]!; st.t = performance.now();
         hv.current.set(0, 0, 0); vy.current = 0; grounded.current = false;
       }
     }
@@ -1796,6 +1796,7 @@ const kd = (e: KeyboardEvent) => {
     }
 
     const clearArena = () => {
+      swordStick.current.active = false;
       p.copy(START);
       hv.current.set(0, 0, 0);
       vy.current = 0;
@@ -2002,6 +2003,8 @@ const kd = (e: KeyboardEvent) => {
     }
     if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
     // Smooth sword-stick follow (online victims): lerp to last stick target, never hard-teleport
+    // Failsafe: the caster refreshes the stick ~30x/s. If updates stop (sword reset, caster left/died), let go.
+    if (swordStick.current.active && performance.now() - swordStick.current.t > 400) swordStick.current.active = false;
     if (swordStick.current.active && !G.pvpDead && !G.campaignDead) {
       const st = swordStick.current;
       const k = 1 - Math.exp(-20 * dt);

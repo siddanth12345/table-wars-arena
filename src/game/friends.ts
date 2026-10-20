@@ -11,8 +11,17 @@ const LS_IN = "tble-friend-in-guest";
 let friends: Friend[] = [];
 let outgoing: FriendRequest[] = [];
 let incoming: FriendRequest[] = [];
+let version = 0;
+/** Stable snapshots for useSyncExternalStore (must be same reference if data unchanged). */
+let friendsSnap: Friend[] = friends;
+let reqSnap = { incoming, outgoing };
 const subs = new Set<() => void>();
-function bump() { subs.forEach((f) => f()); }
+function bump() {
+  version++;
+  friendsSnap = friends;
+  reqSnap = { incoming, outgoing };
+  subs.forEach((f) => f());
+}
 
 function accKey() {
   const a = getAccount();
@@ -83,15 +92,15 @@ export function getIncomingRequests() { return incoming; }
 export function useFriends() {
   return useSyncExternalStore(
     (cb) => { subs.add(cb); return () => subs.delete(cb); },
-    () => friends,
-    () => friends,
+    () => friendsSnap,
+    () => friendsSnap,
   );
 }
 export function useFriendRequests() {
   return useSyncExternalStore(
     (cb) => { subs.add(cb); return () => subs.delete(cb); },
-    () => ({ incoming, outgoing }),
-    () => ({ incoming, outgoing }),
+    () => reqSnap,
+    () => reqSnap,
   );
 }
 

@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { getAccount, displayName } from "./account";
 
-export type Friend = { name: string; addedAt: number };
+export type Friend = { name: string; addedAt: number; splintered?: boolean };
 export type FriendRequest = { id: string; from: string; to: string; t: number; splintered?: boolean };
 
 export const MAX_TBLES = 75;
@@ -57,7 +57,11 @@ function mapFriend(x: unknown): Friend | null {
   if (!x || typeof x !== "object") return null;
   const o = x as Record<string, unknown>;
   if (typeof o.name !== "string" || o.name.trim().length < 3) return null;
-  return { name: o.name.trim(), addedAt: typeof o.addedAt === "number" ? o.addedAt : Date.now() };
+  return {
+    name: o.name.trim(),
+    addedAt: typeof o.addedAt === "number" ? o.addedAt : Date.now(),
+    splintered: !!o.splintered,
+  };
 }
 function mapReq(x: unknown): FriendRequest | null {
   if (!x || typeof x !== "object") return null;
@@ -240,8 +244,33 @@ export function markSplinteredFrom(fromName: string) {
     }
     return r;
   });
+  friends = friends.map((f) => {
+    if (f.name.toLowerCase() === key && !f.splintered) {
+      changed = true;
+      return { ...f, splintered: true };
+    }
+    return f;
+  });
   if (changed) {
     write(inKey(), incoming);
+    write(friendsKey(), friends);
+    bump();
+  }
+}
+
+/** Guest tbles with no activity: mark splintered after timeout (backup if close didn't broadcast). */
+export function markStaleGuestTbles() {
+  const now = Date.now();
+  let changed = false;
+  friends = friends.map((f) => {
+    if (!f.splintered && isGuestName(f.name) && now - f.addedAt > 86_400_000) {
+      // only age-based is weak; guest session death is primarily markSplinteredFrom
+      return f;
+    }
+    return f;
+  });
+  if (changed) {
+    write(friendsKey(), friends);
     bump();
   }
 }

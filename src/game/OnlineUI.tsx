@@ -193,24 +193,30 @@ function TblePickList({
   const friends = useFriends();
   if (!friends.length) return null;
   return (
-    <div className={`${selectTheme} ${maxH} overflow-y-auto`}>
-      <div className="sticky top-0 border-b border-hud/30 bg-hud-track px-3 py-2 text-[10px] font-black uppercase tracking-widest text-crosshair/90">
-        {label}
+    <div
+      className={`${selectTheme} ${maxH} overflow-y-auto`}
+      style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+    >
+      <style>{`.tble-pick-scroll::-webkit-scrollbar{display:none}`}</style>
+      <div className="tble-pick-scroll max-h-full overflow-y-auto" style={{ scrollbarWidth: "none" }}>
+        <div className="border-b border-hud/30 bg-hud-track px-3 py-2 text-[10px] font-black uppercase tracking-widest text-crosshair/90">
+          {label}
+        </div>
+        <ul className="divide-y divide-hud/20">
+          {friends.map((f) => (
+            <li key={f.name}>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm font-bold transition hover:bg-crosshair/15"
+                onClick={() => void onPick(f.name)}
+              >
+                <span className="rounded border border-hud/25 bg-black/30 px-2 py-0.5">{f.name}</span>
+                <span className="text-[10px] uppercase opacity-50">Invite</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
-      <ul className="divide-y divide-hud/20">
-        {friends.map((f) => (
-          <li key={f.name}>
-            <button
-              type="button"
-              className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm font-bold transition hover:bg-crosshair/15"
-              onClick={() => void onPick(f.name)}
-            >
-              <span className="rounded border border-hud/25 bg-black/30 px-2 py-0.5">{f.name}</span>
-              <span className="text-[10px] uppercase opacity-50">Invite</span>
-            </button>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }
@@ -254,16 +260,17 @@ function FriendInviteRow({
 
 function SkinSpinPreview({ skin }: { skin: Skin }) {
   const group = useRef<THREE.Group>(null);
+  const key = JSON.stringify(skin);
   const bot = useRef(createTableBot({ skin, scale: 0.55, emitLight: true }));
   useEffect(() => {
     bot.current = createTableBot({ skin, scale: 0.55, emitLight: true });
-  }, [skin]);
+  }, [key]);
   useFrame((_, dt) => {
     if (group.current) group.current.rotation.y += dt * 0.7;
   });
   return (
     <group ref={group}>
-      <primitive object={bot.current} />
+      <primitive object={bot.current} key={key} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]} receiveShadow>
         <circleGeometry args={[1.6, 32]} />
         <meshStandardMaterial color="#1a1e28" metalness={0.2} roughness={0.8} />
@@ -286,21 +293,33 @@ export function ProfileTab({
   data,
   onClose,
   onUnadd,
+  live,
 }: {
   data: ProfileData;
   onClose: () => void;
   onUnadd?: () => void;
+  /** If set, re-read profile every 1s (skin / ability / achievements). */
+  live?: () => ProfileData;
 }) {
-  const skin = data.skin ?? DEFAULT_SKIN;
-  const achIds = data.achList ?? [];
+  const [view, setView] = useState(data);
+  useEffect(() => { setView(data); }, [data]);
+  useEffect(() => {
+    if (!live) return;
+    const id = setInterval(() => {
+      try { setView(live()); } catch { /* ignore */ }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [live]);
+  const skin = view.skin ?? DEFAULT_SKIN;
+  const achIds = view.achList ?? [];
   const achs = ACHIEVEMENTS.filter((a) => achIds.includes(a.id));
   return (
     <div className="gui fixed inset-0 z-[95] flex items-center justify-center bg-hud-scrim p-4 font-mono text-hud">
       <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border-2 border-hud/30 bg-hud-panel shadow-2xl">
         <div className="flex items-center justify-between border-b border-hud/30 px-5 py-3">
           <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-black uppercase tracking-widest text-crosshair">{data.name}</h2>
-            {onUnadd && !data.isSelf && (
+            <h2 className="text-2xl font-black uppercase tracking-widest text-crosshair">{view.name}</h2>
+            {onUnadd && !view.isSelf && (
               <button type="button" className="rounded bg-orange-500 px-3 py-1 text-xs font-black uppercase text-black" onClick={onUnadd}>Unadd</button>
             )}
           </div>
@@ -321,13 +340,13 @@ export function ProfileTab({
             <div className="rounded-lg border-2 border-hud/25 bg-black/40 p-3">
               <div className="text-[10px] font-black uppercase tracking-widest opacity-70">Ability</div>
               <div className="mt-2 flex items-center gap-3">
-                <span className="text-2xl">{ABILITY_LIST.find((a) => a.id === data.ability)?.icon ?? "—"}</span>
+                <span className="text-2xl">{ABILITY_LIST.find((a) => a.id === view.ability)?.icon ?? "—"}</span>
                 <div>
                   <div className="text-lg font-black uppercase text-crosshair">
-                    {ABILITY_LIST.find((a) => a.id === data.ability)?.name ?? (data.ability || "None shown")}
+                    {ABILITY_LIST.find((a) => a.id === view.ability)?.name ?? (view.ability || "None shown")}
                   </div>
                   <div className="text-xs opacity-70">
-                    {data.ability === "boss" ? "Boss" : data.mastery ? "Mastered" : data.ability ? "Normal" : "—"}
+                    {view.ability === "boss" ? "Boss" : view.mastery ? "Mastered" : view.ability ? "Normal" : "—"}
                   </div>
                 </div>
               </div>
@@ -387,7 +406,7 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="mb-6">
-        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Add tble · {friendCount()}/{MAX_TBLES}</h4>
+        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Add tble · ({friendCount()}/{MAX_TBLES})</h4>
         <form
           className="flex gap-2"
           onSubmit={async (e) => {
@@ -447,15 +466,25 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div>
-        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Your tbles ({friends.length})</h4>
+        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Your tbles ({friends.length}/{MAX_TBLES})</h4>
         {friends.length === 0 ? (
           <p className="text-sm opacity-60">No tbles yet. Send a request above.</p>
         ) : (
           <ul className="space-y-2">
             {friends.map((f) => (
-              <li key={f.name} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border-2 border-hud/30 bg-black/30 px-3 py-2 text-sm">
-                <button type="button" className="rounded border border-hud/25 bg-black/40 px-2 py-0.5 font-bold text-crosshair underline decoration-crosshair/40" onClick={() => setProfileName(f.name)}>{f.name}</button>
-                <button type="button" className="rounded bg-orange-500 px-3 py-1 text-xs font-black uppercase text-black" onClick={() => setUnadd(f.name)}>Unadd</button>
+              <li key={f.name} className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border-2 px-3 py-2 text-sm ${
+                f.splintered ? "border-red-500/70 bg-red-950/50" : "border-hud/30 bg-black/30"
+              }`}>
+                <button type="button" className={`rounded border border-hud/25 bg-black/40 px-2 py-0.5 font-bold underline decoration-crosshair/40 ${f.splintered ? "text-red-400" : "text-crosshair"}`} onClick={() => setProfileName(f.name)}>
+                  {f.name}{f.splintered ? " (splintered)" : ""}
+                </button>
+                {f.splintered ? (
+                  <button type="button" className="rounded border-2 border-red-400/80 bg-red-900/40 px-3 py-1 text-xs font-black uppercase text-red-100" onClick={() => removeFriend(f.name)}>
+                    Dismiss and unfriend
+                  </button>
+                ) : (
+                  <button type="button" className="rounded bg-orange-500 px-3 py-1 text-xs font-black uppercase text-black" onClick={() => setUnadd(f.name)}>Unadd</button>
+                )}
               </li>
             ))}
           </ul>
@@ -533,24 +562,10 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
         <button className={btnMain} disabled={waiting || !!busy} onClick={() => (party ? void go("game") : onCampaign())}>
           {party ? "Campaign with party" : "Offline campaign"}
         </button>
-        {!party && !waiting && (
-          <div className="rounded border border-hud/20 bg-black/20 p-2">
-            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Play campaign with tbles</p>
-            <FriendInviteRow kind="play_party" label="Invite tble to party campaign…" />
-            <p className="mt-1 text-[10px] opacity-50">5s invite · 7s resend cooldown · party max players.</p>
-          </div>
-        )}
         {party && <button className={btnAlt} disabled={waiting || !!busy} onClick={() => void go("training")}>Training with party</button>}
         <button className={btnAlt} disabled={waiting || !!busy} onClick={() => (party ? void go("pvp") : void run("Finding 1v1 match…", () => queue1v1()))}>
           {party ? "1v1 with party" : "1v1"}
         </button>
-        {!party && !waiting && (
-          <div className="rounded border border-hud/20 bg-black/20 p-2">
-            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Play 1v1 with tbles</p>
-            <FriendInviteRow kind="play_1v1" label="Invite tble to 1v1…" />
-            <p className="mt-1 text-[10px] opacity-50">Only you + 1 other · 5s invite · 7s cooldown.</p>
-          </div>
-        )}
         <div className="text-center text-xs font-bold uppercase tracking-widest opacity-70">
           1v1 career wins · <span className="text-crosshair">{getPvpWins()}</span>
         </div>
@@ -949,6 +964,28 @@ function OnlineRoster() {
           data={profile}
           onClose={() => setProfile(null)}
           onUnadd={!profile.isSelf && isFriend(profile.name) ? () => { removeFriend(profile.name); setProfile(null); } : undefined}
+          live={() => {
+            if (profile.isSelf) {
+              return {
+                name: displayName(),
+                skin: SKIN,
+                ability: getAbility(),
+                mastery: false,
+                achList: Object.keys(getProgress().earned || {}),
+                isSelf: true,
+              };
+            }
+            const p = [...NET.peers.values()].find((x) => x.name === profile.name || x.id === profile.name);
+            if (!p) return profile;
+            return {
+              name: p.name || profile.name,
+              skin: p.skin,
+              ability: net.kind === "pvp" ? undefined : p.ability,
+              mastery: p.mastery,
+              achList: p.achList,
+              isSelf: false,
+            };
+          }}
         />
       )}
     </div>

@@ -17,11 +17,10 @@ import {
 } from "./friends";
 import { DEFAULT_SKIN, SKIN, type Skin } from "./skins";
 import { createTableBot } from "./tableBotFactory";
-import { getAbility } from "./abilities";
-import { hasAchievement } from "./mastery";
-import { ABILITY_LIST, type AbilityId } from "./abilities";
+import { ABILITY_LIST, getAbility, type AbilityId } from "./abilities";
 import type { TimeOfDay } from "./settings";
 
+/* PREVIEW_REBUILD */
 const btnMain = "pointer-events-auto rounded bg-crosshair px-6 py-3 text-base font-black uppercase text-hud-ink disabled:opacity-40";
 const btnAlt = "pointer-events-auto rounded border-2 border-hud/40 px-6 py-3 text-base font-black uppercase disabled:opacity-40";
 const input = "w-full rounded border-2 border-hud/40 bg-hud-track px-3 py-2 font-bold text-hud placeholder:text-hud/40";

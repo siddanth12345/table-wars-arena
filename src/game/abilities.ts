@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { G } from "./state";
 
 export type AbilityId = "wall" | "trampoline" | "fire" | "teleport" | "boss";
 
@@ -63,17 +64,27 @@ load();
 
 function bump() { subs.forEach((f) => f()); }
 
+/** Resolve play context so Boss stays allowed in training/lobby even if callers omit mode. */
+export function abilityContext(mode?: string): string | undefined {
+  if (mode === "training" || mode === "lobby") return mode;
+  // Lobby sessions use training mode; offline training too
+  if (G.mode === "training") return "training";
+  return mode;
+}
+
 /** Boss needs Hardcore (except training / lobby). Other abilities are always free. */
 export function canUseAbility(id: AbilityId, mode?: string): boolean {
   if (id !== "boss") return true;
-  if (mode === "training" || mode === "lobby") return true;
-  if (unlockCheck) return unlockCheck(id, mode);
+  const m = abilityContext(mode);
+  if (m === "training" || m === "lobby") return true;
+  if (unlockCheck) return unlockCheck(id, m);
   return false;
 }
 
 /** If current selection isn't allowed, fall back to last unlocked (not boss) and persist. */
 export function clampSelectedAbility(mode?: string) {
-  if (canUseAbility(selected, mode)) return selected;
+  const m = abilityContext(mode);
+  if (canUseAbility(selected, m)) return selected;
   const fallback = getLastUnlockedAbility();
   selected = fallback;
   try { localStorage.setItem(STORE, fallback); } catch { /* ignore */ }
@@ -103,7 +114,7 @@ export function setAbility(id: AbilityId, mode?: string) {
 export function useAbility() {
   return useSyncExternalStore(
     (cb) => { subs.add(cb); return () => { subs.delete(cb); }; },
-    () => clampSelectedAbility(),
+    () => clampSelectedAbility(abilityContext()),
     () => selected,
   );
 }

@@ -37,6 +37,11 @@ export const PVP_CENTER_Y = 1.8 * PVP_SCALE;
 export const LOBBY_MAX = 8;
 export const PARTY_MAX = 5; // leader + 4 invited
 
+type BanAbility = "wall" | "trampoline" | "fire" | "teleport" | "boss";
+/** A 1v1 ban: nothing, a whole ability, or just an ability's mastery ("wall:m"). Boss has no mastery. */
+export type BanChoice = "none" | BanAbility | "wall:m" | "trampoline:m" | "fire:m" | "teleport:m";
+const BAN_CHOICES = new Set<string>(["none", "wall", "trampoline", "fire", "teleport", "boss", "wall:m", "trampoline:m", "fire:m", "teleport:m"]);
+
 const empty = () => ({
   online: false,
   kind: null as Kind | null,
@@ -51,10 +56,10 @@ const empty = () => ({
   pickEnds: 0,
   myPick: null as TimeOfDay | null,
   pickPhase: "tod" as "tod" | "ban" | "ability",
-  myBan: null as null | "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss",
+  myBan: null as null | BanChoice,
   myAbilityChoice: null as null | string,
   myPhaseLocked: false,
-  bans: {} as Record<string, "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss">,
+  bans: {} as Record<string, BanChoice>,
   abilityChoices: {} as Record<string, string>,
   phaseLocked: {} as Record<string, boolean>,
   pvpLoadout: null as null | { ability: "wall" | "trampoline" | "fire" | "teleport" | "boss"; mastery: boolean },
@@ -128,7 +133,6 @@ let mm: RealtimeChannel | null = null;
 let partyCh: RealtimeChannel | null = null;
 let inbox: RealtimeChannel | null = null;
 let picks: Record<string, TimeOfDay> = {};
-type BanChoice = "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss";
 let bans: Record<string, BanChoice> = {};
 let abilityChoices: Record<string, string> = {};
 let phaseLocked: Record<string, boolean> = {};
@@ -296,8 +300,8 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
   ch.on("broadcast", { event: "ban" }, ({ payload }) => {
     if (!isRecord(payload) || !isText(payload.id, 64) || !NET.names[payload.id]) return;
     const b = payload.ban;
-    if (b !== "none" && b !== "wall" && b !== "trampoline" && b !== "fire" && b !== "teleport" && b !== "boss") return;
-    bans[payload.id] = b;
+    if (typeof b !== "string" || !BAN_CHOICES.has(b)) return;
+    bans[payload.id] = b as BanChoice;
     NET.bans = { ...bans };
     bump();
   });
@@ -673,6 +677,8 @@ function resolveAbilityAndStart() {
     if (choice === "random" || banned.has(choice) || !(fallback as readonly string[]).includes(choice)) {
       choice = pickOne([...fallback]);
       mastery = false;
+    } else if (mastery && banned.has(`${choice}:m`)) {
+      mastery = false; // that mastery is banned: you keep the base ability
     }
     return { ability: choice as "wall" | "trampoline" | "fire" | "teleport" | "boss", mastery };
   };
@@ -710,7 +716,7 @@ export function confirmTodPick() {
   if (NET.isHost) tryResolvePhaseEarly("tod");
 }
 
-export function chooseBan(ban: "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss") {
+export function chooseBan(ban: BanChoice) {
   if (NET.myPhaseLocked || NET.stage !== "ban") return;
   NET.myBan = ban;
   bans[myId()] = ban;

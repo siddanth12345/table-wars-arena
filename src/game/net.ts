@@ -9,8 +9,8 @@ import {
   addFriendDirect, isSelfName, isFriend, friendCount, MAX_TBLES, markSplinteredFrom, setOnlineNames,
   cacheProfile, type FriendRequest,
 } from "./friends";
-import { getAbility, setAbility } from "./abilities";
-import { masteryOn, getProgress, recordPvpWin } from "./mastery";
+import { getAbility, setAbility, ABILITY_LIST } from "./abilities";
+import { masteryOn, getProgress, recordPvpWin, hasMastery, hasAchievement } from "./mastery";
 import { SKIN, type Skin } from "./skins";
 import { onRemoteChat, clearChat } from "./chat";
 
@@ -138,6 +138,7 @@ let abilityChoices: Record<string, string> = {};
 let phaseLocked: Record<string, boolean> = {};
 let roundLocked = false;
 let pickTimer: ReturnType<typeof setTimeout> | null = null;
+let autoPickTimer: ReturnType<typeof setTimeout> | null = null;
 let lastPose = 0;
 const timers: ReturnType<typeof setTimeout>[] = [];
 const later = (ms: number, fn: () => void) => timers.push(setTimeout(fn, ms));
@@ -423,6 +424,7 @@ export function leaveRoom(full = true) {
   abilityChoices = {};
   phaseLocked = {};
   if (pickTimer) { clearTimeout(pickTimer); pickTimer = null; }
+  if (autoPickTimer) { clearTimeout(autoPickTimer); autoPickTimer = null; }
   roundLocked = false;
   Object.assign(NET, empty());
   setTodOverride(null);
@@ -607,10 +609,49 @@ function beginPickPhase(phase: "tod" | "ban" | "ability", ms: number) {
     NET.myAbilityChoice = null;
   }
   bump();
+  // If I haven't chosen when the timer is about to run out, choose for me (fires just before the host resolves).
+  if (autoPickTimer) clearTimeout(autoPickTimer);
+  autoPickTimer = setTimeout(() => autoPickForPhase(phase), Math.max(300, ms - 250));
   if (NET.isHost) {
     if (pickTimer) clearTimeout(pickTimer);
     pickTimer = setTimeout(() => resolveCurrentPhase(phase), ms + 300);
   }
+}
+
+/** Everything this player may actually use: base abilities, masteries they earned, Boss only with Hardcore. */
+function ownedAbilityKeys(): string[] {
+  const out: string[] = [];
+  for (const a of ABILITY_LIST) {
+    if (a.id === "boss") { if (hasAchievement("hardcore")) out.push("boss"); continue; }
+    out.push(a.id);
+    if (hasMastery(a.id)) out.push(`${a.id}:m`);
+  }
+  return out;
+}
+/** Banned by either player (an ability ban also bans its mastery). */
+function isBannedKey(k: string): boolean {
+  const base = k.replace(":m", "");
+  for (const v of Object.values(bans)) if (v === base || (k.endsWith(":m") && v === k)) return true;
+  return false;
+}
+function autoPickForPhase(phase: "tod" | "ban" | "ability") {
+  if (NET.kind !== "pvp" || NET.pickPhase !== phase || NET.stage !== stageForPhase(phase) || NET.myPhaseLocked) return;
+  const me = myId();
+  if (phase === "ban") {
+    if (!NET.myBan) { NET.myBan = "none"; bans[me] = "none"; NET.bans = { ...bans }; send("ban", { id: me, ban: "none" }); bump(); }
+    return;
+  }
+  if (phase !== "ability") return;
+  const cur = NET.myAbilityChoice;
+  // Nothing chosen (or "random", or a pick that got banned meanwhile): random from what I own and isn't banned.
+  if (cur && cur !== "random" && !isBannedKey(cur)) return;
+  const options = ownedAbilityKeys().filter((k) => !isBannedKey(k));
+  const pick = options[Math.floor(Math.random() * options.length)] ?? "wall";
+  NET.myAbilityChoice = pick;
+  abilityChoices[me] = pick;
+  NET.abilityChoices = { ...abilityChoices };
+  send("abilitypick", { id: me, choice: pick });
+  bump();
 }
 
 function bothLocked(phase: string) {
@@ -675,7 +716,9 @@ function resolveAbilityAndStart() {
       choice = choice.slice(0, -2);
     }
     if (choice === "random" || banned.has(choice) || !(fallback as readonly string[]).includes(choice)) {
-      choice = pickOne([...fallback]);
+      // host can't see the other player's unlocks, so a host-side random never includes Boss
+      const rp = fallback.filter((a) => a !== "boss");
+      choice = pickOne([...(rp.length ? rp : (["wall"] as const))]);
       mastery = false;
     } else if (mastery && banned.has(`${choice}:m`)) {
       mastery = false; // that mastery is banned: you keep the base ability
@@ -720,6 +763,7 @@ export function chooseBan(ban: BanChoice) {
   if (NET.myPhaseLocked || NET.stage !== "ban") return;
   NET.myBan = ban;
   bans[myId()] = ban;
+  NET.bans = { ...bans }; // my own ban must show up for me too (was only mirrored when the OTHER player's arrived)
   send("ban", { id: myId(), ban });
   bump();
 }
@@ -737,12 +781,22 @@ export function chooseAbilityPick(choice: string) {
   if (NET.myPhaseLocked || NET.stage !== "abilityPick") return;
   NET.myAbilityChoice = choice;
   abilityChoices[myId()] = choice;
+  NET.abilityChoices = { ...abilityChoices };
   send("abilitypick", { id: myId(), choice });
   bump();
 }
 
 export function confirmAbilityPick() {
   if (NET.stage !== "abilityPick" || !NET.myAbilityChoice || NET.myPhaseLocked) return;
+  if (NET.myAbilityChoice === "random") {
+    // resolve "Random" here, where I know what I own and what's banned
+    const options = ownedAbilityKeys().filter((k) => !isBannedKey(k));
+    const pick = options[Math.floor(Math.random() * options.length)] ?? "wall";
+    NET.myAbilityChoice = pick;
+    abilityChoices[myId()] = pick;
+    NET.abilityChoices = { ...abilityChoices };
+    send("abilitypick", { id: myId(), choice: pick });
+  }
   NET.myPhaseLocked = true;
   phaseLocked[`ability:${myId()}`] = true;
   send("phaselock", { id: myId(), phase: "ability" });

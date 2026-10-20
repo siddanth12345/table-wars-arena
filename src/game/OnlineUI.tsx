@@ -682,6 +682,23 @@ const BAN_OPTIONS: { id: BanChoice; label: string; icon: string }[] = [
     ...(a.id === "boss" ? [] : [{ id: `${a.id}:m` as BanChoice, label: `${a.name} (Mastered)`, icon: a.icon }]),
   ]),
 ];
+/** Red X over a banned entry; two bans on the same entry = a second X rotated 45° (an 8-point star). */
+function BanX({ count }: { count: number }) {
+  return (
+    <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label={count > 1 ? "banned by both players" : "banned"}>
+      <g stroke="#ef4444" strokeWidth="4" strokeLinecap="round" vectorEffect="non-scaling-stroke">
+        <line x1="8" y1="8" x2="92" y2="92" vectorEffect="non-scaling-stroke" />
+        <line x1="92" y1="8" x2="8" y2="92" vectorEffect="non-scaling-stroke" />
+        {count > 1 && (
+          <>
+            <line x1="50" y1="6" x2="50" y2="94" vectorEffect="non-scaling-stroke" />
+            <line x1="6" y1="50" x2="94" y2="50" vectorEffect="non-scaling-stroke" />
+          </>
+        )}
+      </g>
+    </svg>
+  );
+}
 const banLabel = (k: string) => { const a = ABILITY_LIST.find((x) => x.id === k.replace(":m", "")); return a ? (k.endsWith(":m") ? `${a.name} (Mastered)` : a.name) : k; };
 
 export function MapPick() {
@@ -694,37 +711,32 @@ export function MapPick() {
   const opp = net.names[opponentId()];
   const locked = net.myPhaseLocked;
 
-  // Combined bans for ability phase
-  const banned = new Set<string>();
-  for (const v of Object.values(net.bans)) if (v && v !== "none") banned.add(v);
+  // Bans from BOTH players apply to both. banCount = how many players banned it (0-2); 2 = double X.
+  const banCounts: Record<string, number> = {};
+  for (const v of Object.values(net.bans)) if (v && v !== "none") banCounts[v] = (banCounts[v] ?? 0) + 1;
+  const banned = new Set(Object.keys(banCounts));
+  // An ability ban also covers its mastery
+  const countFor = (key: string) => Math.min(2, (banCounts[key] ?? 0) + (key.endsWith(":m") ? (banCounts[key.slice(0, -2)] ?? 0) : 0));
 
-  // Choose phase: show everything non-banned; lock mastery/boss you don't own ("Not available"). Ban phase stays unrestricted.
-  const abilityChoices: { key: string; label: string; icon: string; available: boolean }[] = [];
+  // Choose phase: banned entries stay listed with a red X; mastery/boss you don't own are "Not available".
+  const abilityChoices: { key: string; label: string; icon: string; available: boolean; banCount: number }[] = [];
   for (const a of ABILITY_LIST) {
-    if (banned.has(a.id)) continue;
     if (a.id === "boss") {
       const own = hasAchievement("hardcore");
-      abilityChoices.push({
-        key: "boss",
-        label: own ? a.name : `${a.name} — Not available`,
-        icon: a.icon,
-        available: own,
-      });
+      abilityChoices.push({ key: "boss", label: own ? a.name : `${a.name} — Not available`, icon: a.icon, available: own, banCount: countFor("boss") });
       continue;
     }
-    // base ability always free
-    abilityChoices.push({ key: a.id, label: a.name, icon: a.icon, available: true });
-    if (banned.has(`${a.id}:m`)) continue; // mastery banned
-    // mastered variant always listed; locked if not owned
+    abilityChoices.push({ key: a.id, label: a.name, icon: a.icon, available: true, banCount: countFor(a.id) });
     const ownM = hasMastery(a.id);
     abilityChoices.push({
       key: `${a.id}:m`,
       label: ownM ? `${a.name} (Mastered)` : `${a.name} (Mastered) — Not available`,
       icon: a.icon,
       available: ownM,
+      banCount: countFor(`${a.id}:m`),
     });
   }
-  abilityChoices.push({ key: "random", label: "Random", icon: "🎲", available: true });
+  abilityChoices.push({ key: "random", label: "Random", icon: "🎲", available: true, banCount: 0 });
 
   return (
     <div className="gui fixed inset-0 z-40 flex items-center justify-center bg-hud-scrim p-6 font-mono text-hud">
@@ -792,10 +804,10 @@ export function MapPick() {
                 <button
                   key={o.key}
                   type="button"
-                  disabled={locked || !o.available}
-                  onClick={() => o.available && chooseAbilityPick(o.key)}
-                  className={`rounded-xl border-2 p-4 text-left transition ${
-                    !o.available
+                  disabled={locked || !o.available || o.banCount > 0}
+                  onClick={() => o.available && o.banCount === 0 && chooseAbilityPick(o.key)}
+                  className={`relative rounded-xl border-2 p-4 text-left transition ${
+                    !o.available || o.banCount > 0
                       ? "cursor-not-allowed border-white/10 bg-black/20 opacity-40"
                       : net.myAbilityChoice === o.key
                         ? "border-crosshair bg-crosshair/15"
@@ -804,10 +816,11 @@ export function MapPick() {
                 >
                   <div className="text-2xl">{o.icon}</div>
                   <div className="mt-1 text-sm font-black uppercase">{o.label}</div>
+                  {o.banCount > 0 && <BanX count={o.banCount} />}
                 </button>
               ))}
             </div>
-            <p className="mt-4 text-xs opacity-70">Random picks from non-banned abilities. Both ready → skip timer.</p>
+            <p className="mt-4 text-xs opacity-70">Bans apply to both players. If you don't choose before the timer ends, you get a random ability you own that isn't banned. Both ready → skip timer.</p>
             <button type="button" className={`${btnMain} mt-4`} disabled={!net.myAbilityChoice || locked} onClick={() => confirmAbilityPick()}>
               {locked ? "Waiting for opponent…" : "Ready"}
             </button>

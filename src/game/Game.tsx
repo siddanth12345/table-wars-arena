@@ -19,7 +19,7 @@ import { getAbility, ABILITY_LIST } from "./abilities";
 import { ROOM, SOLIDS, WINDOW_ANGLES } from "./Room";
 import { LoadingScreen } from "./LoadingScreen";
 import { HomeBounceTable } from "./HomeBounceTable";
-import { AuthPanel, AccountBadge, PlayMenu, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
+import { AuthPanel, AccountBadge, PlayMenu, FriendsPanel, QueueOverlay, MapPick, Scoreboard, PvpEnd, OnlinePause, LobbyBar, Invites } from "./OnlineUI";
 import { ChatBar, ChatResumeCatcher } from "./ChatBar";
 import { NET, opponentId, myId } from "./net";
 import { useAccount } from "./account";
@@ -561,6 +561,7 @@ function Home() {
   const [skinsOpen, setSkinsOpen] = useState(false);
   const [abilitiesOpen, setAbilitiesOpen] = useState(false);
   const [achievementsOpen, setAchievementsOpen] = useState(false);
+  const [friendsOpen, setFriendsOpen] = useState(false);
   const inParty = !!(NET.party && NET.party.members.length > 0);
   if (G.phase !== "home") return null;
   return (
@@ -577,6 +578,7 @@ function Home() {
           <button className={btnAlt} onClick={() => setSkinsOpen(true)}>Skins</button>
           <button className={btnAlt} onClick={() => setAbilitiesOpen(true)}>Abilities</button>
           <button className={btnAlt} onClick={() => setAchievementsOpen(true)}>Achievements</button>
+          <button className={btnAlt} onClick={() => setFriendsOpen(true)}>Friends</button>
           <button className={tab === "settings" ? btnMain : btnAlt} onClick={() => setTab(tab === "settings" ? "main" : "settings")}>Settings</button>
         </div>
         <AccountBadge onLogin={() => setAuthOpen(true)} />
@@ -586,6 +588,7 @@ function Home() {
       {skinsOpen && <SkinsPanel onClose={() => setSkinsOpen(false)} />}
       {abilitiesOpen && <AbilitiesPanel onClose={() => setAbilitiesOpen(false)} />}
       {achievementsOpen && <AchievementsPanel onClose={() => setAchievementsOpen(false)} />}
+      {friendsOpen && <FriendsPanel onClose={() => setFriendsOpen(false)} />}
       {tab === "play" && <PlayMenu onCampaign={playGame} onClose={() => setTab("main")} />}
       {tab !== "main" && tab !== "play" && (
         <div className="m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">

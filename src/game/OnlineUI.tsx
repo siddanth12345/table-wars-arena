@@ -6,10 +6,12 @@ import {
   chooseAbilityPick, confirmAbilityPick, sendRematch, answerRematch, requeue, goHomeOnline,
   createLobby, joinLobby, sendInvite, acceptInvite, dismissInvite, partyGo, kickMember, disbandParty, leaveParty,
   isPartyLeader, inParty, myId, opponentId, startInbox, stopInbox,
+  sendFriendRequest, acceptFriendRequest, declineFriendRequest, cancelFriendRequest,
 } from "./net";
 import { useAccount, signIn, signUp, playAsGuest, signOut, logoutGuest, transferGuestProgress, isProgressTransferPending, clearProgressTransfer } from "./account";
 import { G, resetGame, lockPointer } from "./state";
 import { getPvpWins, useProgress, hasMastery, hasAchievement } from "./mastery";
+import { useFriends, useFriendRequests, removeFriend, type FriendRequest } from "./friends";
 import { ABILITY_LIST, type AbilityId } from "./abilities";
 import type { TimeOfDay } from "./settings";
 
@@ -206,16 +208,168 @@ export function AccountBadge({ onLogin }: { onLogin: () => void }) {
 function InviteBox({ kind, label }: { kind: "party" | "lobby"; label: string }) {
   const [name, setName] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
+  const friends = useFriends();
   return (
-    <div className="mt-2">
+    <div className="mt-2 space-y-2">
       <div className="flex gap-2">
         <input className={input} placeholder="Exact username" value={name} onChange={(e) => setName(e.target.value)} />
         <button className={btnAlt} onClick={async () => setMsg(await sendInvite(name, kind))}>{label}</button>
       </div>
+      {friends.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase opacity-60">Friends</span>
+          <select
+            className={`${input} max-w-[12rem] py-1 text-xs`}
+            defaultValue=""
+            onChange={async (e) => {
+              const v = e.target.value;
+              if (!v) return;
+              setMsg(await sendInvite(v, kind));
+              e.target.value = "";
+            }}
+          >
+            <option value="">Invite friend…</option>
+            {friends.map((f) => (
+              <option key={f.name} value={f.name}>{f.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
       {msg && <p className={`mt-1 text-xs font-bold ${msg.ok ? "text-crosshair" : "text-destructive"}`}>{msg.msg}</p>}
     </div>
   );
 }
+
+function FriendInviteRow({ kind, label }: { kind: "party" | "lobby"; label: string }) {
+  const friends = useFriends();
+  const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
+  if (!friends.length) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2">
+      <select
+        className={`${input} max-w-[14rem] py-1 text-xs`}
+        defaultValue=""
+        onChange={async (e) => {
+          const v = e.target.value;
+          if (!v) return;
+          setMsg(await sendInvite(v, kind));
+          e.target.value = "";
+        }}
+      >
+        <option value="">{label}</option>
+        {friends.map((f) => (
+          <option key={f.name} value={f.name}>{f.name}</option>
+        ))}
+      </select>
+      {msg && <span className={`text-xs font-bold ${msg.ok ? "text-crosshair" : "text-destructive"}`}>{msg.msg}</span>}
+    </div>
+  );
+}
+
+export function FriendsPanel({ onClose }: { onClose: () => void }) {
+  const acc = useAccount();
+  const friends = useFriends();
+  const { incoming, outgoing } = useFriendRequests();
+  const [name, setName] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (acc.status !== "user" && acc.status !== "guest") {
+    return (
+      <div className="relative m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">
+        <div className="mb-4 flex items-center justify-between border-b border-hud/30 pb-2">
+          <h3 className="text-2xl font-black uppercase tracking-widest text-crosshair">Friends</h3>
+          <button type="button" className="text-xs uppercase underline" onClick={onClose}>Close</button>
+        </div>
+        <p className="text-sm opacity-80">Log in or play as guest to manage friends.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative m-6 flex-1 overflow-y-auto rounded-lg border-2 border-hud/30 bg-hud-panel p-8">
+      <div className="mb-4 flex items-center justify-between border-b border-hud/30 pb-2">
+        <h3 className="text-2xl font-black uppercase tracking-widest text-crosshair">Friends</h3>
+        <button type="button" className="text-xs uppercase underline" onClick={onClose}>Close</button>
+      </div>
+
+      <div className="mb-6">
+        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">Add friend</h4>
+        <form
+          className="flex gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (busy) return;
+            setBusy(true);
+            setMsg(await sendFriendRequest(name));
+            setBusy(false);
+          }}
+        >
+          <input className={input} placeholder="Exact username" value={name} maxLength={20} onChange={(e) => setName(e.target.value)} />
+          <button className={btnMain} disabled={busy || name.trim().length < 3}>Send request</button>
+        </form>
+        <p className="mt-1 text-[10px] opacity-50">They must be online (home screen) to receive it. Guests use guest + 6 digits.</p>
+        {msg && <p className={`mt-2 text-xs font-bold ${msg.ok ? "text-crosshair" : "text-destructive"}`}>{msg.msg}</p>}
+      </div>
+
+      <div className="mb-6">
+        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">
+          Friend requests {incoming.length > 0 ? `(${incoming.length})` : ""}
+        </h4>
+        {incoming.length === 0 ? (
+          <p className="text-sm opacity-60">No incoming requests.</p>
+        ) : (
+          <ul className="space-y-2">
+            {incoming.map((r: FriendRequest) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-white/15 bg-black/30 px-3 py-2 text-sm">
+                <span><b className="text-crosshair">{r.from}</b> wants to be friends</span>
+                <span className="flex gap-2">
+                  <button type="button" className="rounded bg-crosshair px-3 py-1 text-xs font-black uppercase text-hud-ink" onClick={async () => setMsg(await acceptFriendRequest(r))}>Accept</button>
+                  <button type="button" className="rounded border border-white/25 px-3 py-1 text-xs font-bold uppercase" onClick={() => declineFriendRequest(r)}>Decline</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {outgoing.length > 0 && (
+          <div className="mt-3">
+            <p className="mb-1 text-[10px] uppercase opacity-50">Outgoing</p>
+            <ul className="space-y-1 text-sm opacity-80">
+              {outgoing.map((r) => (
+                <li key={r.id} className="flex items-center justify-between">
+                  <span>To <b>{r.to}</b>…</span>
+                  <button type="button" className="text-xs underline opacity-70" onClick={() => cancelFriendRequest(r)}>Cancel</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h4 className="mb-2 text-xs font-black uppercase tracking-widest opacity-70">
+          Your friends ({friends.length})
+        </h4>
+        {friends.length === 0 ? (
+          <p className="text-sm opacity-60">No friends yet. Send a request above.</p>
+        ) : (
+          <ul className="space-y-2">
+            {friends.map((f) => (
+              <li key={f.name} className="flex items-center justify-between rounded border border-white/10 bg-black/20 px-3 py-2 text-sm">
+                <b>{f.name}</b>
+                <button type="button" className="text-xs uppercase text-destructive underline" onClick={() => removeFriend(f.name)}>Remove</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {acc.status === "guest" && (
+          <p className="mt-3 text-[10px] opacity-50">Guest friends are temporary. Transfer progress when creating an account to keep them.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onClose: () => void }) {
   useProgress();
@@ -261,16 +415,36 @@ export function PlayMenu({ onCampaign, onClose }: { onCampaign: () => void; onCl
         <button className={btnMain} disabled={waiting || !!busy} onClick={() => (party ? void go("game") : onCampaign())}>
           {party ? "Campaign with party" : "Offline campaign"}
         </button>
+        {!party && !waiting && (
+          <div className="rounded border border-hud/20 bg-black/20 p-2">
+            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Play campaign with friends</p>
+            <FriendInviteRow kind="party" label="Invite friend to party…" />
+            <p className="mt-1 text-[10px] opacity-50">Creates/joins a party invite so you can run campaign together.</p>
+          </div>
+        )}
         {party && <button className={btnAlt} disabled={waiting || !!busy} onClick={() => void go("training")}>Training with party</button>}
         <button className={btnAlt} disabled={waiting || !!busy} onClick={() => (party ? void go("pvp") : void run("Finding 1v1 match…", () => queue1v1()))}>
           {party ? "1v1 with party" : "1v1"}
         </button>
+        {!party && !waiting && (
+          <div className="rounded border border-hud/20 bg-black/20 p-2">
+            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Play 1v1 with friends</p>
+            <FriendInviteRow kind="party" label="Invite friend to party 1v1…" />
+            <p className="mt-1 text-[10px] opacity-50">Invite to party, then start 1v1 with party.</p>
+          </div>
+        )}
         <div className="text-center text-xs font-bold uppercase tracking-widest opacity-70">
           1v1 career wins · <span className="text-crosshair">{getPvpWins()}</span>
         </div>
         <button className={btnAlt} disabled={waiting || !!busy} onClick={() => (party ? void go("lobby") : void run("Creating lobby…", () => createLobby()))}>
           {party ? "Lobby with party" : "Lobby"}
         </button>
+        {net.code && (
+          <div className="rounded border border-hud/20 bg-black/20 p-2">
+            <p className="mb-1 text-[10px] font-bold uppercase opacity-60">Lobby · invite friends</p>
+            <FriendInviteRow kind="lobby" label="Invite friend to lobby…" />
+          </div>
+        )}
         <div>
           <form className="flex gap-2" onSubmit={async (e) => {
             e.preventDefault();

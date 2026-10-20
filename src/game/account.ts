@@ -4,6 +4,7 @@ import { applySettings, setSettingsPersister, SETTINGS, type Settings } from "./
 import { applySkin, setSkinPersister, SKIN, type Skin } from "./skins";
 import { TRAIN, type TrainCfg } from "./state";
 import { hydrateProgress, resetProgress, serializeProgress, setProgressPersister } from "./mastery";
+import { serializeFriends, hydrateFriends, clearFriends, loadFriends } from "./friends";
 
 export type Account = { status: "loading" | "signedOut" | "guest" | "user"; userId: string | null; username: string; email: string | null };
 
@@ -65,11 +66,11 @@ export function validatePassword(p: string): string | null {
   return null;
 }
 
-type StoredSettings = Settings & { _skin?: Skin; _prog?: unknown };
+type StoredSettings = Settings & { _skin?: Skin; _prog?: unknown; _friends?: unknown };
 
 /** Everything stored in the profile's settings column: settings + skin + achievement/mastery progress. */
 function profilePayload(s: Settings = SETTINGS, skin: Skin = SKIN): StoredSettings {
-  return { ...s, _skin: skin, _prog: serializeProgress() };
+  return { ...s, _skin: skin, _prog: serializeProgress(), _friends: serializeFriends() };
 }
 
 async function loadProfile(userId: string) {
@@ -83,11 +84,17 @@ async function loadProfile(userId: string) {
   set({ status: "user", userId, username: data.username, email: data.email });
   if (data.settings) {
     const raw = data.settings as unknown as StoredSettings;
-    const { _skin, _prog, ...rest } = raw;
+    const { _skin, _prog, _friends, ...rest } = raw;
     applySettings(rest as Settings, true);
     if (_skin) applySkin(_skin, true);
     if (_prog) hydrateProgress(_prog);
+    // Transfer: merge guest friends into account; normal login: replace with account friends
+    if (_friends) hydrateFriends(_friends, merging);
+    else if (!merging) clearFriends();
+  } else if (!merging) {
+    clearFriends();
   }
+  loadFriends();
   // Fallback: localStorage progress if the profile row is missing _prog
   try {
     const rawLs = localStorage.getItem(`tble-prog-${userId}`);
@@ -139,6 +146,10 @@ export async function initAccount() {
   if (ACC.status === "loading") set({ status: "signedOut" });
 }
 
+export function persistFriendsToProfile(_f: unknown) {
+  if (ACC.status === "user" && ACC.userId) persistProfileSettings(SETTINGS);
+}
+
 export function saveTraining() {
   if (ACC.status === "user" && ACC.userId) void supabase.from("profiles").update({ training: { ...TRAIN } as never }).eq("id", ACC.userId);
 }
@@ -172,8 +183,12 @@ export async function signIn(username: string, password: string) {
 export function playAsGuest() {
   pendingProgressTransfer = false;
   // Fresh guest session on this tab
-  if (ACC.status !== "guest") resetProgress();
+  if (ACC.status !== "guest") {
+    resetProgress();
+    clearFriends();
+  }
   set({ status: "guest", userId: null, username: displayName(), email: null });
+  loadFriends();
 }
 
 export async function signOut() {
@@ -184,13 +199,15 @@ export async function signOut() {
   pendingProgressTransfer = false;
   await supabase.auth.signOut();
   set({ status: "signedOut", userId: null, username: "guest", email: null });
-  resetProgress(); // tab is clean — alts don't inherit the previous account's unlocks
+  resetProgress();
+  clearFriends();
 }
 
 /** Guest "log out": discard this tab's guest progress and open the login flow. */
 export function logoutGuest() {
   pendingProgressTransfer = false;
   resetProgress();
+  clearFriends();
   set({ status: "signedOut", userId: null, username: "guest", email: null });
 }
 

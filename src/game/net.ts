@@ -5,6 +5,10 @@ import { setTodOverride, type TimeOfDay } from "./settings";
 import { displayName, getAccount, lookupUsername } from "./account";
 import { G, goHome, resetGame, type Mode } from "./state";
 import { recordPvpWin } from "./mastery";
+import {
+  noteIncomingRequest, noteOutgoingRequest, removeIncoming, removeOutgoing,
+  addFriendDirect, isSelfName, isFriend, type FriendRequest,
+} from "./friends";
 import { setAbility } from "./abilities";
 import { SKIN, type Skin } from "./skins";
 import { onRemoteChat, clearChat } from "./chat";
@@ -342,6 +346,7 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
     setTimeout(() => void finish(), 4000);
   });
 }
+
 
 export function leaveRoom(full = true) {
   timers.splice(0).forEach(clearTimeout);
@@ -890,6 +895,27 @@ export function startInbox() {
     ];
     bump();
   });
+  ch.on("broadcast", { event: "friend_req" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.from, 40) || !isText(payload.to, 40) || !isText(payload.id, 80)) return;
+    const to = String(payload.to).trim().toLowerCase();
+    if (to !== uname) return;
+    const req: FriendRequest = {
+      id: String(payload.id),
+      from: String(payload.from),
+      to: String(payload.to),
+      t: Date.now(),
+    };
+    noteIncomingRequest(req);
+    bump();
+  });
+  ch.on("broadcast", { event: "friend_accept" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.from, 40) || !isText(payload.to, 40)) return;
+    // payload.from accepted our request (we were the sender: payload.to is us)
+    const to = String(payload.to).trim().toLowerCase();
+    if (to !== uname) return;
+    addFriendDirect(String(payload.from));
+    bump();
+  });
   ch.on("broadcast", { event: "party-left" }, () => bump());
   ch.subscribe((status) => {
     if (status === "SUBSCRIBED") bump();
@@ -899,6 +925,58 @@ export function stopInbox() {
   if (inbox) void supabase.removeChannel(inbox);
   inbox = null;
 }
+
+
+/** Send a friend request by exact username (or guest######). */
+export async function sendFriendRequest(username: string): Promise<{ ok: boolean; msg: string }> {
+  const name = username.trim();
+  const acc = getAccount();
+  if (acc.status !== "user" && acc.status !== "guest") return { ok: false, msg: "Log in or play as guest first." };
+  if (!name) return { ok: false, msg: "Enter a username." };
+  if (isSelfName(name)) return { ok: false, msg: "You can't add yourself as a friend." };
+  if (isFriend(name)) return { ok: false, msg: "Already friends." };
+  if (Date.now() - NET.inviteSentAt < 2000) return { ok: false, msg: "Wait a moment before sending another request." };
+  const guestName = /^guest\d{6}$/i.test(name);
+  if (!guestName && !(await lookupUsername(name))) return { ok: false, msg: "No player with that exact username." };
+  NET.inviteSentAt = Date.now();
+  if (!inbox) startInbox();
+  const req: FriendRequest = {
+    id: crypto.randomUUID(),
+    from: displayName(),
+    to: name,
+    t: Date.now(),
+  };
+  noteOutgoingRequest(req);
+  const payload = { id: req.id, from: req.from, to: name.trim().toLowerCase() };
+  for (let i = 0; i < 5; i++) {
+    try { if (inbox) await inbox.send({ type: "broadcast", event: "friend_req", payload }); } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return { ok: true, msg: `Friend request sent to ${name}.` };
+}
+
+export async function acceptFriendRequest(req: FriendRequest): Promise<{ ok: boolean; msg: string }> {
+  addFriendDirect(req.from);
+  removeIncoming(req.id);
+  if (!inbox) startInbox();
+  const payload = { from: displayName(), to: req.from.trim().toLowerCase(), id: req.id };
+  for (let i = 0; i < 5; i++) {
+    try { if (inbox) await inbox.send({ type: "broadcast", event: "friend_accept", payload }); } catch { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return { ok: true, msg: `You and ${req.from} are now friends.` };
+}
+
+export function declineFriendRequest(req: FriendRequest) {
+  removeIncoming(req.id);
+  bump();
+}
+
+export function cancelFriendRequest(req: FriendRequest) {
+  removeOutgoing(req.id);
+  bump();
+}
+
 
 /** Sends a party or lobby invite to an exact username. Returns a status message. */
 export async function sendInvite(username: string, kind: "party" | "lobby"): Promise<{ ok: boolean; msg: string }> {
@@ -1022,3 +1100,22 @@ async function followLeader(m: GoMsg) {
   if (m.mode === "pvp") { await startPvp(m.room, false, true); return; }
   await joinCoop(m.room, m.mode, false);
 }
+
+/** Tab close / laptop sleep: leave rooms so peers don't keep a ghost. */
+function installUnloadLeave() {
+  if (typeof window === "undefined") return;
+  const bail = () => {
+    try {
+      leaveParty(false);
+      leaveRoom(true);
+      leaveQueue();
+    } catch { /* ignore */ }
+  };
+  window.addEventListener("beforeunload", bail);
+  window.addEventListener("pagehide", bail);
+  document.addEventListener("visibilitychange", () => {
+    // Soft: if hidden for a long time we rely on presence timeout; hard close uses beforeunload
+  });
+}
+installUnloadLeave();
+

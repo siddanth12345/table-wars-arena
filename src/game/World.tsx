@@ -2034,7 +2034,9 @@ const kd = (e: KeyboardEvent) => {
         const travel = travelVec.length();
         const dir = travel > 1e-6 ? travelVec.clone().normalize() : new THREE.Vector3(1, 0, 0);
         if (sword.returning) {
-          const to = cam.position.clone().sub(sword.pos);
+          // Always home to the real player body — never the freecam camera
+          const home = tmpV.set(p.x, p.y + EYE, p.z);
+          const to = home.clone().sub(sword.pos);
           if (to.length() < 5) { sword.active = false; for (const [id, st] of sword.stuck) if (st.kind === "p") hitPeer(id, 0, false, undefined, { unstick: true }); sword.stuck.clear(); }
           else { sword.vel.copy(to.normalize()).multiplyScalar(tune("swordSpeed")); sword.pos.addScaledVector(sword.vel, dt); }
         } else if (travel > 0) {
@@ -2142,8 +2144,18 @@ const kd = (e: KeyboardEvent) => {
               const sword = bossSwords.current.find((candidate) => !candidate.active);
               if (sword) {
                 sword.active = true; sword.returning = false; sword.solidHits = 0; sword.hitCooldown = 0; sword.solidObjects.clear(); sword.hitTargets.clear(); sword.returnHitTargets.clear(); sword.stuck.clear();
-                sword.pos.copy(cam.position).addScaledVector(look, 2);
-                sword.vel.copy(look).normalize().multiplyScalar(tune("swordSpeed"));
+                // Spawn from player body + look; if freecam, still use body (not free cam)
+                const spawnFrom = G.freecam
+                  ? new THREE.Vector3(p.x, p.y + EYE, p.z)
+                  : cam.position.clone();
+                let aim = look.clone();
+                if (G.freecam) {
+                  // Face with last player yaw / body heading
+                  const yaw = localBody.playerYaw || lastYaw.current;
+                  aim.set(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
+                }
+                sword.pos.copy(spawnFrom).addScaledVector(aim, 2);
+                sword.vel.copy(aim).normalize().multiplyScalar(tune("swordSpeed"));
                 G.abilityCharges--;
                 if (G.abilityCharges <= 0) G.abilityCd = tune("bossCd");
                 playSfx("fire_ground");

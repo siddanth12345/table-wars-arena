@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ABILITY_LIST, setAbility, useAbility, canUseAbility, type AbilityId } from "./abilities";
 import { MASTERY_LINES, achievementFor, hasAchievement, hasMastery, masteryOn, setMasteryOn, useProgress } from "./mastery";
 import { G } from "./state";
+import { NET } from "./net";
 
 const btn = "rounded-xl border-2 border-white/20 bg-black/50 px-3 py-2 text-sm font-bold uppercase tracking-wide text-white hover:bg-white/10 transition";
 const btnOn = "rounded-xl border-2 border-crosshair bg-crosshair/20 px-3 py-2 text-sm font-bold uppercase tracking-wide text-crosshair";
@@ -58,7 +59,7 @@ const DETAILS: Record<AbilityId, { summary: string; lines: string[] }> = {
   boss: {
     summary: "A boss-style quarter-room strike on the ground, a bouncing spinning sword in the air, and a stun ring from maximum-area slams.",
     lines: [
-      "Unlock by earning the Hardcore achievement: beat the offline campaign boss fight without taking damage (you start the fight at full health, and Combo Burst healing disqualifies the attempt). Always available in training.",
+      "Unlock by earning the Hardcore achievement: beat the offline campaign boss fight without taking damage (you start the fight at full health, and Combo Burst healing disqualifies the attempt). Always available in training and lobby.",
       "Press V to use it. You have 3 charges. Once they are used up there is a 5s cooldown, then the charges refill.",
       "On the ground, V aims a quarter-room strike (costs 2 charges): a warning sector pointing at your crosshair, starting at the room center, appears for 1 second, then deals 25 damage to enemy bots and enemy players. It never hurts you or teammates, and works at any angle. With only 1 charge left you can't use it on the ground.",
       "In the air, V throws a spinning sword (costs 1 charge) at 350 u/s. Up to 3 can be out at once. It bounces off solid surfaces and flies back to you after 5 bounces.",
@@ -93,7 +94,7 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
           <div className="space-y-3 overflow-y-auto p-6 md:flex-1">
             {ABILITY_LIST.map((a) => {
               const on = selected === a.id;
-              const unlocked = a.id !== "boss" || hasAchievement("hardcore") || G.mode === "training";
+              const unlocked = a.id !== "boss" || hasAchievement("hardcore") || G.mode === "training" || NET.kind === "lobby";
               return (
                 <div
                   key={a.id}
@@ -107,7 +108,7 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                     <p className="mt-1 text-xs leading-relaxed opacity-70">{a.desc}</p>
                   </div>
                   <div className="flex shrink-0 flex-col gap-2">
-                    <button type="button" disabled={!unlocked} className={on ? btnOn : btn} onClick={() => { if (unlocked) setAbility(a.id as AbilityId); }}>
+                    <button type="button" disabled={!unlocked} className={on ? btnOn : btn} onClick={() => { if (unlocked) setAbility(a.id as AbilityId, G.mode === "training" ? "training" : NET.kind === "lobby" ? "lobby" : undefined); }}>
                       {!unlocked ? "Locked 🔒" : on ? "Selected" : "Select"}
                     </button>
                     <button type="button" className={btn} onClick={() => setDetail(a.id)}>
@@ -174,10 +175,10 @@ export function AbilitiesPanel({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className={`mt-4 w-full ${selected === detail ? btnOn : btn}`}
-                  onClick={() => { if (detail !== "boss" || hasAchievement("hardcore") || G.mode === "training") setAbility(detail); }}
-                  disabled={detail === "boss" && !hasAchievement("hardcore") && G.mode !== "training"}
+                  onClick={() => { if (detail !== "boss" || hasAchievement("hardcore") || G.mode === "training" || NET.kind === "lobby") setAbility(detail, G.mode === "training" ? "training" : NET.kind === "lobby" ? "lobby" : undefined); }}
+                  disabled={detail === "boss" && !hasAchievement("hardcore") && G.mode !== "training" && NET.kind !== "lobby"}
                 >
-                  {detail === "boss" && !hasAchievement("hardcore") && G.mode !== "training" ? "Locked 🔒" : selected === detail ? "Selected" : "Select this ability"}
+                  {detail === "boss" && !hasAchievement("hardcore") && G.mode !== "training" && NET.kind !== "lobby" ? "Locked 🔒" : selected === detail ? "Selected" : "Select this ability"}
                 </button>
               </div>
             </div>

@@ -399,6 +399,7 @@ export function World() {
   const swordNetT = useRef<number[]>([0, 0, 0]);
   const remoteSwords = useRef(Array.from({ length: 3 }, () => ({ id: "", t: 0, pos: new THREE.Vector3(), vel: new THREE.Vector3() })));
   const lastAbilityMode = useRef(G.mode);
+  const lastNetKind = useRef(NET.kind);
   const fireballs = useMemo(() => Array.from({ length: 12 }, () => ({
     active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), t: 0, traveled: 0, netId: "" as string, m: false, b: 0, idle: 0,
   })), []);
@@ -1786,7 +1787,12 @@ const kd = (e: KeyboardEvent) => {
     if (lastAbilityMode.current !== G.mode) {
       const leavingTraining = lastAbilityMode.current === "training" && G.mode !== "training";
       lastAbilityMode.current = G.mode;
-      if (leavingTraining && getAbility() === "boss" && !hasAchievement("hardcore")) setAbility(getLastUnlockedAbility());
+      if (leavingTraining) clampSelectedAbility();
+    }
+    if (lastNetKind.current !== NET.kind) {
+      const leavingLobby = lastNetKind.current === "lobby" && NET.kind !== "lobby";
+      lastNetKind.current = NET.kind;
+      if (leavingLobby) clampSelectedAbility();
     }
 
     const clearArena = () => {

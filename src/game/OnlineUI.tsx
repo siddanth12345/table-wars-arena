@@ -351,11 +351,12 @@ export function ProfileTab({
                 </div>
               </div>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col rounded-lg border-2 border-hud/25 bg-black/40">
+            <div className="flex min-h-0 flex-col rounded-lg border-2 border-hud/25 bg-black/40">
               <div className="border-b border-hud/20 px-3 py-2 text-[10px] font-black uppercase tracking-widest opacity-70">
                 Achievements ({achs.length || achIds.length})
               </div>
-              <ul className="max-h-48 flex-1 space-y-1 overflow-y-auto p-2">
+              {/* ~3 rows tall; scroll if more so the panel does not grow */}
+              <ul className="h-[7.25rem] max-h-[7.25rem] space-y-1 overflow-y-auto p-2">
                 {(achs.length ? achs : achIds.map((id) => ({ id, name: id, summary: "" }))).map((a) => (
                   <li key={a.id} className="rounded border border-hud/20 bg-hud-panel/80 px-3 py-2">
                     <div className="text-xs font-black uppercase text-crosshair">{a.name}</div>

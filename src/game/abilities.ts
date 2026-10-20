@@ -63,20 +63,20 @@ load();
 
 function bump() { subs.forEach((f) => f()); }
 
-/** Boss needs Hardcore (except training). Other abilities are always free. */
+/** Boss needs Hardcore (except training / lobby). Other abilities are always free. */
 export function canUseAbility(id: AbilityId, mode?: string): boolean {
   if (id !== "boss") return true;
-  if (mode === "training") return true;
+  if (mode === "training" || mode === "lobby") return true;
   if (unlockCheck) return unlockCheck(id, mode);
-  // Fallback before mastery finishes loading: deny Boss
   return false;
 }
 
-/** If current selection isn't allowed, fall back to wall and persist. */
+/** If current selection isn't allowed, fall back to last unlocked (not boss) and persist. */
 export function clampSelectedAbility(mode?: string) {
   if (canUseAbility(selected, mode)) return selected;
-  selected = "wall";
-  try { localStorage.setItem(STORE, "wall"); } catch { /* ignore */ }
+  const fallback = getLastUnlockedAbility();
+  selected = fallback;
+  try { localStorage.setItem(STORE, fallback); } catch { /* ignore */ }
   bump();
   return selected;
 }

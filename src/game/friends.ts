@@ -180,7 +180,6 @@ export function setOnlineNames(next: Set<string>) {
   onlineNames = next;
   subsOnline.forEach((f) => f());
 }
-export function isOnline(name: string) { return onlineNames.has(name.trim().toLowerCase()); }
 export function useOnlineNames() {
   return useSyncExternalStore(
     (cb) => { subsOnline.add(cb); return () => { subsOnline.delete(cb); }; },
@@ -189,9 +188,6 @@ export function useOnlineNames() {
   );
 }
 
-export function getFriends() { return friends; }
-export function getOutgoingRequests() { return outgoing; }
-export function getIncomingRequests() { return incoming; }
 export function friendCount() { return friends.length; }
 
 export function useFriends() {

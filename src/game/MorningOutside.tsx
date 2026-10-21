@@ -116,12 +116,7 @@ function GrassTufts() {
 
 /**
  * Sky textures + dome.
- * Night sky: black with scattered stars. (Old galaxy notes below no longer apply.)
- * - Thin galactic plane band across the sky
- * - Yellowish central bulge (stellar population in the core)
- * - Dark dust lane (Great Rift) cutting the band
- * - Sparse field stars outside the band; dense white stars in-band
- * - Soft purple / blue-white nebular patches near the plane
+ * Night sky: black with scattered stars.
  * Day/evening: solid base color + soft cartoony clouds baked into ONE opaque map
  * so there is no transparent second sphere (that caused the polygon ghost).
  */

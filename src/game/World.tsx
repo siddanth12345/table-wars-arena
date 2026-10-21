@@ -7,14 +7,14 @@ import { SETTINGS, useSettings, lampIntensity } from "./settings";
 import { useEffect, useMemo, useRef, type ElementRef } from "react";
 import * as THREE from "three";
 import {
-  G, MAG, FIRE_INTERVAL, DMG, PARRY_WINDOW, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, BUFF_TIME, DASH_CD, AIR_JUMPS, AIR_DASHES,
-  BOMB_CD, BOMB_CD_BUFF, TABLE_HP, TABLE_CAP, BOSS_HITS, BOSS_WARN, setLocker,
+  G, MAG, FIRE_INTERVAL, DMG, PARRY_WINDOW, PARRY_CD_HIT, PARRY_CD_MISS, BUFF_TIME,
+  TABLE_HP, TABLE_CAP, BOSS_WARN, setLocker,
   MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, isMobilePlay, pauseGame, setCursorLocked, registerDamage, tryComboBurst, onParrySuccess, STORM_START, type TrainSpawn,
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, SHARD_SPAWN_N, LOBBY_RESPAWN, FREECAM_SPEEDS,
   tune, maxCharges,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
-import { getAbility, getLastUnlockedAbility, setAbility, clampSelectedAbility } from "./abilities";
+import { getAbility, clampSelectedAbility } from "./abilities";
 import { hasAchievement, masteryOn, onCampaignWin, onPlayerDeath } from "./mastery";
 import { createTableBot, skinKey } from "./tableBotFactory";
 import { Room, ROOM, SOLIDS } from "./Room";

@@ -12,7 +12,6 @@ export type Account = { status: "loading" | "signedOut" | "guest" | "user"; user
 let ACC: Account = { status: "loading", userId: null, username: "guest", email: null };
 /** When true, next sign-in/sign-up merges current (guest) progress into the account instead of replacing it. */
 let pendingProgressTransfer = false;
-export function beginProgressTransfer() { pendingProgressTransfer = true; }
 export function clearProgressTransfer() { pendingProgressTransfer = false; }
 export function isProgressTransferPending() { return pendingProgressTransfer; }
 const subs = new Set<() => void>();
@@ -146,10 +145,6 @@ export async function initAccount() {
   const { data } = await supabase.auth.getUser();
   if (data.user) await loadProfile(data.user.id);
   if (ACC.status === "loading") set({ status: "signedOut" });
-}
-
-export function persistFriendsToProfile(_f: unknown) {
-  if (ACC.status === "user" && ACC.userId) persistProfileSettings(SETTINGS);
 }
 
 export function saveTraining() {

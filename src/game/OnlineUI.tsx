@@ -17,7 +17,7 @@ import {
 } from "./friends";
 import { DEFAULT_SKIN, SKIN, type Skin } from "./skins";
 import { createTableBot } from "./tableBotFactory";
-import { ABILITY_LIST, getAbility, type AbilityId } from "./abilities";
+import { ABILITY_LIST, getAbility } from "./abilities";
 import type { TimeOfDay } from "./settings";
 
 /* PREVIEW_REBUILD */

@@ -1612,13 +1612,17 @@ const kd = (e: KeyboardEvent) => {
       return;
     }
     if (k === "bsword") {
-      const sid = String(payload.id ?? "");
-      if (!sid) return;
-      const slot = remoteSwords.current.find((q) => q.t > 0 && q.id === sid) ?? remoteSwords.current.find((q) => q.t <= 0);
-      if (!slot) return;
-      slot.id = sid; slot.t = 0.4;
-      slot.pos.set(Number(payload.x) || 0, Number(payload.y) || 0, Number(payload.z) || 0);
-      slot.vel.set(Number(payload.vx) || 0, Number(payload.vy) || 0, Number(payload.vz) || 0);
+      const owner = String(payload.o ?? "");
+      const w = payload.w;
+      if (!owner || !Array.isArray(w)) return;
+      for (let i = 0; i + 6 < w.length && i < 7 * 3; i += 7) {
+        const sid = `${owner}-bs${Number(w[i]) | 0}`;
+        const slot = remoteSwords.current.find((q) => q.t > 0 && q.id === sid) ?? remoteSwords.current.find((q) => q.t <= 0);
+        if (!slot) continue;
+        slot.id = sid; slot.t = 0.4;
+        slot.pos.set(Number(w[i + 1]) || 0, Number(w[i + 2]) || 0, Number(w[i + 3]) || 0);
+        slot.vel.set(Number(w[i + 4]) || 0, Number(w[i + 5]) || 0, Number(w[i + 6]) || 0);
+      }
       return;
     }
     if (k === "crack") {
@@ -2011,6 +2015,7 @@ const kd = (e: KeyboardEvent) => {
       vy.current = 0;
       grounded.current = false;
     }
+    const swordOut: number[] = []; // [idx,x,y,z,vx,vy,vz,...] for every active sword, sent as ONE message
     // Boss sword: spherical contact hitbox, attachment DoT, five distinct solid bounces.
     for (let swordIndex = 0; swordIndex < bossSwords.current.length; swordIndex++) {
       const sword = bossSwords.current[swordIndex]!;
@@ -2031,8 +2036,8 @@ const kd = (e: KeyboardEvent) => {
           const peer = NET.peers.get(id);
           if (!peer || peer.dead) { sword.stuck.delete(id); continue; }
           stuck.netAcc += dt;
-          if (stuck.netAcc >= 1 / 30) {
-            stuck.netAcc %= 1 / 30;
+          if (stuck.netAcc >= 1 / 15) {
+            stuck.netAcc %= 1 / 15;
             const extra = { stick: [sword.pos.x + stuck.offset.x, sword.pos.y + stuck.offset.y, sword.pos.z + stuck.offset.z] };
             hitPeer(id, 0, false, undefined, extra);
           }
@@ -2111,13 +2116,7 @@ const kd = (e: KeyboardEvent) => {
         }
         if (sword.pos.length() > R * 2.5) sword.returning = true;
       }
-      if (sword.active && NET.online) {
-        swordNetT.current[swordIndex] = (swordNetT.current[swordIndex] ?? 0) - dt;
-        if (swordNetT.current[swordIndex]! <= 0) {
-          swordNetT.current[swordIndex] = 0.07;
-          sendNet("vfx", { k: "bsword", id: `${myId()}-bs${swordIndex}`, x: sword.pos.x, y: sword.pos.y, z: sword.pos.z, vx: sword.vel.x, vy: sword.vel.y, vz: sword.vel.z });
-        }
-      }
+      if (sword.active) swordOut.push(swordIndex, sword.pos.x, sword.pos.y, sword.pos.z, sword.vel.x, sword.vel.y, sword.vel.z);
       const mesh = bossSwordMeshes.current[swordIndex];
       if (mesh) {
         mesh.visible = sword.active;
@@ -2127,6 +2126,13 @@ const kd = (e: KeyboardEvent) => {
           mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), sword.vel.clone().normalize());
           mesh.rotateX(performance.now() / 65);
         }
+      }
+    }
+    if (swordOut.length && NET.online) {
+      swordNetT.current[0] = (swordNetT.current[0] ?? 0) - dt;
+      if (swordNetT.current[0]! <= 0) {
+        swordNetT.current[0] = 0.1; // 10 Hz, all swords in one packet
+        sendNet("vfx", { k: "bsword", o: myId(), w: swordOut.map((n) => Math.round(n * 10) / 10) });
       }
     }
     for (let ri = 0; ri < remoteSwords.current.length; ri++) {

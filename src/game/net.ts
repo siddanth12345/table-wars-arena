@@ -219,8 +219,8 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
       ability, mastery, achList,
       ...(p.skin && isRecord(p.skin) ? { skinVer: isFiniteIn(p.skinVer, 0, 1000000) ? p.skinVer : undefined } : cur ? { skinVer: (cur as { skinVer?: number }).skinVer } : {}),
     } as Peer);
-    // Cache for home profile viewer (friends list outside a match)
-    try {
+    // Cache for home profile viewer (friends list outside a match) — only when a profile packet actually arrived
+    if (p.skin || p.ability !== undefined) try {
       const nm = NET.peers.get(p.id)?.name ?? p.name;
       if (typeof nm === "string" && nm) {
         cacheProfile({
@@ -471,8 +471,8 @@ export function sendPose(x: number, y: number, z: number, yaw: number, extra?: {
     payload.skin = { ...SKIN };
     payload.skinVer = lastSkinVer;
   }
-  // Profile snapshot for pause roster (every ~3s with skin or always light fields)
-  try {
+  // Profile snapshot (ability/mastery/achievements): only with the skin refresh, not in every 10 Hz pose packet.
+  if (payload.skin) try {
     payload.ability = getAbility();
     payload.mastery = (() => { try { return masteryOn(getAbility() as "wall" | "trampoline" | "fire" | "teleport" | "boss"); } catch { return false; } })();
     const earned = Object.keys(getProgress().earned || {});
@@ -1085,11 +1085,17 @@ export function startInbox() {
   });
   ch.on("broadcast", { event: "party-left" }, () => bump());
   // Presence on the shared bus = "who is online" for the tble list (green dot)
+  // Presence sync fires for every join/leave of every online player; coalesce them.
+  let presenceT: ReturnType<typeof setTimeout> | null = null;
   ch.on("presence", { event: "sync" }, () => {
-    const st = ch.presenceState() as unknown as Record<string, { name?: unknown }[]>;
-    const names = new Set<string>();
-    for (const metas of Object.values(st)) for (const m of metas) if (typeof m?.name === "string") names.add(m.name.toLowerCase());
-    setOnlineNames(names);
+    if (presenceT) return;
+    presenceT = setTimeout(() => {
+      presenceT = null;
+      const st = ch.presenceState() as unknown as Record<string, { name?: unknown }[]>;
+      const names = new Set<string>();
+      for (const metas of Object.values(st)) for (const m of metas) if (typeof m?.name === "string") names.add(m.name.toLowerCase());
+      setOnlineNames(names);
+    }, 1000);
   });
   ch.subscribe((status) => {
     if (status === "SUBSCRIBED") {

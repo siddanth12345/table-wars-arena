@@ -134,11 +134,25 @@ export function loadFriends() {
   bump();
 }
 
+let saveProfilesT: ReturnType<typeof setTimeout> | null = null;
 export function cacheProfile(p: Omit<ProfileCache, "updatedAt"> & { updatedAt?: number }) {
   const key = p.name.trim().toLowerCase();
   if (!key) return;
-  profiles[key] = { ...p, name: p.name.trim(), updatedAt: p.updatedAt ?? Date.now() };
-  saveProfiles();
+  const old = profiles[key];
+  const next = { ...p, name: p.name.trim() };
+  // Peers refresh this often; skip identical data so we don't re-render or rewrite storage for nothing.
+  // Missing fields (undefined) keep the old value instead of wiping it.
+  const merged: ProfileCache = {
+    name: next.name,
+    skin: next.skin ?? old?.skin,
+    ability: next.ability ?? old?.ability,
+    mastery: next.mastery ?? old?.mastery,
+    achList: next.achList ?? old?.achList,
+    updatedAt: p.updatedAt ?? Date.now(),
+  };
+  if (old && JSON.stringify({ ...old, updatedAt: 0 }) === JSON.stringify({ ...merged, updatedAt: 0 })) return;
+  profiles[key] = merged;
+  if (!saveProfilesT) saveProfilesT = setTimeout(() => { saveProfilesT = null; saveProfiles(); }, 2000);
   bump();
 }
 

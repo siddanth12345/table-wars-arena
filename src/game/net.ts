@@ -63,6 +63,8 @@ const empty = () => ({
   abilityChoices: {} as Record<string, string>,
   phaseLocked: {} as Record<string, boolean>,
   pvpLoadout: null as null | { ability: "wall" | "trampoline" | "fire" | "teleport" | "boss"; mastery: boolean },
+  /** Both players' 1v1 picks for the whole match (survives rounds). */
+  pvpLoadouts: {} as Record<string, { ability: "wall" | "trampoline" | "fire" | "teleport" | "boss"; mastery: boolean }>,
   tod: "evening" as TimeOfDay,
   colors: {} as Record<string, "red" | "blue">,
   accountKeys: {} as Record<string, string>,
@@ -822,11 +824,15 @@ function onStart(m: StartMsg) {
   NET.scores = m.scores;
   NET.stage = "playing";
   NET.roundMsg = "";
-  NET.pvpLoadout = m.loadouts?.[myId()] ?? NET.pvpLoadout;
+  // Keep every player's pick for the whole match (host used to overwrite both with its own)
+  if (m.loadouts) {
+    NET.pvpLoadouts = { ...NET.pvpLoadouts, ...m.loadouts };
+  }
+  NET.pvpLoadout = m.loadouts?.[myId()] ?? NET.pvpLoadouts[myId()] ?? NET.pvpLoadout;
   roundLocked = false;
   setTodOverride(m.tod);
   resetGame("pvp");
-  // Apply 1v1 loadout
+  // Apply *this client's* 1v1 loadout only
   if (NET.pvpLoadout) {
     setAbility(NET.pvpLoadout.ability, "training"); // match pick may include Boss
     G.pvpMastery = !!NET.pvpLoadout.mastery;
@@ -854,16 +860,19 @@ function onDeath(id: string) {
   send("round", m);
   onRound(m);
   later(2500, () => {
+    const me = myId();
+    const opp = opponentId();
+    const def = { ability: "wall" as const, mastery: false };
     const s: StartMsg = {
       tod: NET.tod,
       colors: NET.colors,
       scores,
+      // Each player keeps the ability they picked at match start — never copy the host's
       loadouts: {
-        [myId()]: NET.pvpLoadout ?? { ability: "wall", mastery: false },
-        [opponentId()]: NET.pvpLoadout ?? { ability: "wall", mastery: false },
+        [me]: NET.pvpLoadouts[me] ?? NET.pvpLoadout ?? def,
+        [opp]: NET.pvpLoadouts[opp] ?? def,
       },
     };
-    // Keep each player's chosen loadout from match start (stored on NET per client)
     send("start", s);
     onStart(s);
   });

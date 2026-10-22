@@ -1030,6 +1030,8 @@ export function World() {
     const h = hazards.find((q) => !q.active);
     if (!h) return undefined;
     Object.assign(h, { active: true, kind, t, total: t, fx: 0, x, z, a0: a0 ?? Math.floor(Math.random() * 4) * (Math.PI / 2), dmg, owner, remote: false });
+    if (kind === "quarter" && owner === "boss") playSfx("quarter_cast", 0.85);
+    if (kind === "sword") playSfx("boss_sword_drop", 0.95);
     return h;
   };
 
@@ -1608,10 +1610,12 @@ const kd = (e: KeyboardEvent) => {
     }
     if (k === "bquarter") {
       const h = addHazard("quarter", 0, 0, Math.min(4, Math.max(0.2, Number(payload.w) || 1)), Number(payload.a0) || 0, 0, "player");
+      if (h) { h.remote = true; playSfx("quarter_cast", 0.8); }
       if (h) h.remote = true;
       return;
     }
     if (k === "bstomp") {
+      playSfx("boss_stomp", nearGain(Number(payload.x) || 0, 0, Number(payload.z) || 0));
       addWave(Number(payload.x) || 0, Number(payload.z) || 0, true, true);
       return;
     }
@@ -2069,6 +2073,7 @@ const kd = (e: KeyboardEvent) => {
             const surfaceId = hit.object.uuid;
             if (!sword.solidObjects.has(surfaceId)) { sword.solidObjects.add(surfaceId); }
             sword.solidHits++;
+            playSfx("sword_bounce", nearGain(sword.pos.x, sword.pos.y, sword.pos.z));
             // Every solid bounce deals 2 damage to anything currently attached to the sword.
             for (const [id, stuck] of sword.stuck) {
               if (stuck.kind === "t") {
@@ -2170,7 +2175,7 @@ const kd = (e: KeyboardEvent) => {
                 sword.vel.copy(aim).normalize().multiplyScalar(tune("swordSpeed"));
                 G.abilityCharges--;
                 if (G.abilityCharges <= 0) G.abilityCd = tune("bossCd");
-                playSfx("fire_ground");
+                playSfxShared("sword_throw");
               }
             }
           } else {
@@ -2183,7 +2188,7 @@ const kd = (e: KeyboardEvent) => {
             if (NET.online) sendNet("vfx", { k: "bquarter", a0: aimAngle - Math.PI / 4, w: tune("quarterWarn") });
             G.abilityCharges -= 2;
             if (G.abilityCharges <= 0) G.abilityCd = tune("bossCd");
-            playSfx("stun");
+            playSfxShared("quarter_cast");
             G.shake = Math.max(G.shake, 0.2);
           }
           }
@@ -3126,7 +3131,11 @@ const kd = (e: KeyboardEvent) => {
             if (tier === SLAM_TIERS.length - 1) b.lockT = 2; // next boss attack waits 2s
           }
           pvpBlast(_pvpAt.copy(p).setY(p.y + 0.5), r, PVP_DMG.slam, true);
-          if (tier === SLAM_TIERS.length - 1 && getAbility() === "boss" && (hasAchievement("hardcore") || G.mode === "training")) { addWave(p.x, p.z, true); if (NET.online) sendNet("vfx", { k: "bstomp", x: p.x, z: p.z }); }
+          if (tier === SLAM_TIERS.length - 1 && getAbility() === "boss" && (hasAchievement("hardcore") || G.mode === "training")) {
+            addWave(p.x, p.z, true);
+            playSfxShared("boss_stomp");
+            if (NET.online) sendNet("vfx", { k: "bstomp", x: p.x, z: p.z });
+          }
           ringsIn(p, r);
           boomFx(tmpV.copy(p).setY(p.y + 0.5), r, 0.4, true, "none");
           // Surface under feet: couch → bounce, no crack; raised solid → dark crack; floor → normal crack
@@ -3433,6 +3442,7 @@ const kd = (e: KeyboardEvent) => {
           if (h.t <= 0) {
             h.fx = 0.5;
             if (h.kind === "quarter") {
+              playSfx("quarter_hit", h.owner === "player" ? 0.9 : 1);
               const inQuarter = (x: number, z: number) => {
                 const ang = (Math.atan2(-z, x) - h.a0 + Math.PI * 4) % (Math.PI * 2);
                 return Math.hypot(x, z) <= R && ang <= Math.PI / 2;
@@ -3450,10 +3460,12 @@ const kd = (e: KeyboardEvent) => {
               if (Math.hypot(p.x - h.x, p.z - h.z) < SWORD_R && p.y < 40) {
                 G.stun = STUN_TIME;
                 G.hurtFlash = 0.25;
+                playSfx("stun", 0.8);
               }
               G.bombBig = BOMB_BIG_TIME;
               G.shake = Math.max(G.shake, 0.4);
             } else if (h.kind === "stomp") {
+              playSfx("boss_stomp", 1);
               addWave(b.pos.x, b.pos.z);
               G.shake = Math.max(G.shake, 0.8);
             } else {

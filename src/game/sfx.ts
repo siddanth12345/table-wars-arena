@@ -16,7 +16,9 @@ export type Sfx =
   | "teleport_expand" | "teleport_success" | "fire_ground" | "fire_air"
   | "spring_place" | "spring_reset" | "wall_place" | "ability_ready"
   | "combo_burst" | "countdown_tick" | "countdown_go" | "health_pickup" | "shard_pickup"
-  | "stun" | "death" | "respawn" | "storm_loop" | "storm_tick";
+  | "stun" | "death" | "respawn" | "storm_loop" | "storm_tick"
+  | "sword_throw" | "sword_bounce" | "quarter_cast" | "quarter_hit"
+  | "boss_stomp" | "boss_sword_drop";
 
 const TRIM: Record<Sfx, number> = {
   ui_hover: 1.0, ui_click: 1.0, ui_back: 1.0,
@@ -30,16 +32,20 @@ const TRIM: Record<Sfx, number> = {
   spring_place: 0.8, spring_reset: 0.7, wall_place: 0.9, ability_ready: 0.55,
   combo_burst: 0.9, countdown_tick: 0.6, countdown_go: 0.8, health_pickup: 0.7, shard_pickup: 0.7,
   stun: 0.7, death: 0.9, respawn: 0.7, storm_loop: 0.55, storm_tick: 0.8,
+  sword_throw: 0.9, sword_bounce: 0.85, quarter_cast: 0.85, quarter_hit: 1.0,
+  boss_stomp: 1.0, boss_sword_drop: 0.95,
 };
 /** Minimum milliseconds between two plays of the same sound. */
 const MIN_GAP: Partial<Record<Sfx, number>> = {
   ui_hover: 50, hit_marker: 60, player_hurt: 150, land: 150, shoot: 40, bounce_pad: 120, kill: 80,
+  sword_bounce: 70, boss_stomp: 200, quarter_hit: 120, sword_throw: 80,
 };
 
 /** Sounds other players hear from you. Anything not on this list is never played from a network message. */
 export const REMOTE_SFX: ReadonlySet<string> = new Set<Sfx>([
   "jump", "air_jump", "dash", "land", "slam_start", "slam_land", "slam_cancel", "slam_bounce",
   "parry_raise", "parry_success", "parry_fail", "bomb_throw", "grapple_fire", "teleport_success",
+  "sword_throw", "sword_bounce", "quarter_cast", "quarter_hit", "boss_stomp", "boss_sword_drop",
 ]);
 
 // Lighter network use: shared sounds are batched and sent at most 4 times a second as one tiny message.

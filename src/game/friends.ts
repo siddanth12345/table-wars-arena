@@ -7,10 +7,10 @@ export type FriendRequest = { id: string; from: string; to: string; t: number; s
 
 export type ProfileCache = {
   name: string;
-  skin?: Skin;
-  ability?: string;
-  mastery?: boolean;
-  achList?: string[];
+  skin?: Skin | undefined;
+  ability?: string | undefined;
+  mastery?: boolean | undefined;
+  achList?: string[] | undefined;
   updatedAt: number;
 };
 
@@ -134,11 +134,25 @@ export function loadFriends() {
   bump();
 }
 
+let saveProfilesT: ReturnType<typeof setTimeout> | null = null;
 export function cacheProfile(p: Omit<ProfileCache, "updatedAt"> & { updatedAt?: number }) {
   const key = p.name.trim().toLowerCase();
   if (!key) return;
-  profiles[key] = { ...p, name: p.name.trim(), updatedAt: p.updatedAt ?? Date.now() };
-  saveProfiles();
+  const old = profiles[key];
+  const next = { ...p, name: p.name.trim() };
+  // Peers refresh this often; skip identical data so we don't re-render or rewrite storage for nothing.
+  // Missing fields (undefined) keep the old value instead of wiping it.
+  const merged: ProfileCache = {
+    name: next.name,
+    skin: next.skin ?? old?.skin,
+    ability: next.ability ?? old?.ability,
+    mastery: next.mastery ?? old?.mastery,
+    achList: next.achList ?? old?.achList,
+    updatedAt: p.updatedAt ?? Date.now(),
+  };
+  if (old && JSON.stringify({ ...old, updatedAt: 0 }) === JSON.stringify({ ...merged, updatedAt: 0 })) return;
+  profiles[key] = merged;
+  if (!saveProfilesT) saveProfilesT = setTimeout(() => { saveProfilesT = null; saveProfiles(); }, 2000);
   bump();
 }
 
@@ -146,19 +160,34 @@ export function getCachedProfile(name: string): ProfileCache | null {
   return profiles[name.trim().toLowerCase()] ?? null;
 }
 
+let friendsPersister: ((f: Friend[]) => void) | null = null;
+/** account.ts registers this (avoids a circular import and `require`, which doesn't exist in the browser). */
+export function setFriendsPersister(fn: ((f: Friend[]) => void) | null) { friendsPersister = fn; }
+
 function persistAll() {
   write(friendsKey(), friends);
   write(outKey(), outgoing);
   write(inKey(), incoming);
-  try {
-    const acc = require("./account") as { persistFriendsToProfile?: (f: Friend[]) => void };
-    acc.persistFriendsToProfile?.(friends);
-  } catch { /* ignore */ }
+  try { friendsPersister?.(friends); } catch { /* ignore */ }
 }
 
-export function getFriends() { return friends; }
-export function getOutgoingRequests() { return outgoing; }
-export function getIncomingRequests() { return incoming; }
+// --- Online presence (who of my tbles is online right now) ---
+let onlineNames = new Set<string>();
+const subsOnline = new Set<() => void>();
+/** Replace the online set (lowercase usernames). Only notifies when it actually changed. */
+export function setOnlineNames(next: Set<string>) {
+  if (next.size === onlineNames.size && [...next].every((n) => onlineNames.has(n))) return;
+  onlineNames = next;
+  subsOnline.forEach((f) => f());
+}
+export function useOnlineNames() {
+  return useSyncExternalStore(
+    (cb) => { subsOnline.add(cb); return () => { subsOnline.delete(cb); }; },
+    () => onlineNames,
+    () => onlineNames,
+  );
+}
+
 export function friendCount() { return friends.length; }
 
 export function useFriends() {
@@ -280,7 +309,8 @@ export function dismissSplintered(id: string) {
 /** Mark all incoming requests from this username as splintered (sender left). */
 export function markSplinteredFrom(fromName: string) {
   const key = fromName.trim().toLowerCase();
-  if (!key) return;
+  // Only guests vanish for good when their tab closes; a real account just comes back later.
+  if (!key || !isGuestName(key)) return;
   let changed = false;
   incoming = incoming.map((r) => {
     if (r.from.toLowerCase() === key && !r.splintered) {
@@ -298,23 +328,6 @@ export function markSplinteredFrom(fromName: string) {
   });
   if (changed) {
     write(inKey(), incoming);
-    write(friendsKey(), friends);
-    bump();
-  }
-}
-
-/** Guest tbles with no activity: mark splintered after timeout (backup if close didn't broadcast). */
-export function markStaleGuestTbles() {
-  const now = Date.now();
-  let changed = false;
-  friends = friends.map((f) => {
-    if (!f.splintered && isGuestName(f.name) && now - f.addedAt > 86_400_000) {
-      // only age-based is weak; guest session death is primarily markSplinteredFrom
-      return f;
-    }
-    return f;
-  });
-  if (changed) {
     write(friendsKey(), friends);
     bump();
   }

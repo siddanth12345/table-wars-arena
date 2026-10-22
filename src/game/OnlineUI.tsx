@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
-  NET, PVP_WIN, useNet, queue1v1, leaveQueue, choosePick, confirmTodPick, chooseBan, confirmBan,
+  NET, PVP_WIN, type BanChoice, useNet, queue1v1, leaveQueue, choosePick, confirmTodPick, chooseBan, confirmBan,
   chooseAbilityPick, confirmAbilityPick, sendRematch, answerRematch, requeue, goHomeOnline,
   createLobby, joinLobby, sendInvite, acceptInvite, dismissInvite, partyGo, kickMember, disbandParty, leaveParty,
   isPartyLeader, inParty, myId, opponentId, startInbox, stopInbox,
@@ -12,12 +12,12 @@ import { useAccount, signIn, signUp, playAsGuest, signOut, logoutGuest, transfer
 import { G, resetGame, lockPointer } from "./state";
 import { getPvpWins, useProgress, hasMastery, hasAchievement, ACHIEVEMENTS, getProgress } from "./mastery";
 import {
-  useFriends, useFriendRequests, removeFriend, dismissSplintered, markSplinteredRequests,
+  useFriends, useFriendRequests, useOnlineNames, removeFriend, dismissSplintered, markSplinteredRequests,
   isFriend, MAX_TBLES, friendCount, getCachedProfile, type FriendRequest,
 } from "./friends";
 import { DEFAULT_SKIN, SKIN, type Skin } from "./skins";
 import { createTableBot } from "./tableBotFactory";
-import { ABILITY_LIST, getAbility, type AbilityId } from "./abilities";
+import { ABILITY_LIST, getAbility } from "./abilities";
 import type { TimeOfDay } from "./settings";
 
 /* PREVIEW_REBUILD */
@@ -181,6 +181,18 @@ export function AccountBadge({ onLogin }: { onLogin: () => void }) {
 const selectTheme = "w-full rounded-lg border-2 border-hud/40 bg-hud-panel font-mono text-sm text-hud shadow-inner";
 
 /** Scrollable tble picker matching HUD theme (no native OS select). */
+/** Discord-style presence: filled green = online, empty ring = offline. */
+function OnlineDot({ name }: { name: string }) {
+  const online = useOnlineNames().has(name.trim().toLowerCase());
+  return (
+    <span
+      aria-label={online ? "online" : "offline"}
+      title={online ? "Online" : "Offline"}
+      className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2 ${online ? "border-green-500 bg-green-500" : "border-hud/50 bg-transparent"}`}
+    />
+  );
+}
+
 function TblePickList({
   label,
   onPick,
@@ -210,7 +222,7 @@ function TblePickList({
                 className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm font-bold transition hover:bg-crosshair/15"
                 onClick={() => void onPick(f.name)}
               >
-                <span className="rounded border border-hud/25 bg-black/30 px-2 py-0.5">{f.name}</span>
+                <span className="flex items-center gap-2 rounded border border-hud/25 bg-black/30 px-2 py-0.5"><OnlineDot name={f.name} />{f.name}</span>
                 <span className="text-[10px] uppercase opacity-50">Invite</span>
               </button>
             </li>
@@ -261,10 +273,9 @@ function FriendInviteRow({
 function SkinSpinPreview({ skin }: { skin: Skin }) {
   const group = useRef<THREE.Group>(null);
   const key = JSON.stringify(skin);
-  const bot = useRef(createTableBot({ skin, scale: 0.55, emitLight: true }));
-  useEffect(() => {
-    bot.current = createTableBot({ skin, scale: 0.55, emitLight: true });
-  }, [key]);
+  // Build the preview table once per skin (useRef(createTableBot(...)) rebuilt a whole bot on every render)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const bot = useMemo(() => ({ current: createTableBot({ skin, scale: 0.55, emitLight: true }) }), [key]);
   useFrame((_, dt) => {
     if (group.current) group.current.rotation.y += dt * 0.7;
   });
@@ -281,11 +292,11 @@ function SkinSpinPreview({ skin }: { skin: Skin }) {
 
 export type ProfileData = {
   name: string;
-  skin?: Skin;
-  ability?: string;
-  mastery?: boolean;
-  achList?: string[];
-  isSelf?: boolean;
+  skin?: Skin | undefined;
+  ability?: string | undefined;
+  mastery?: boolean | undefined;
+  achList?: string[] | undefined;
+  isSelf?: boolean | undefined;
 };
 
 /** Full profile tab (home or in-game). */
@@ -297,7 +308,7 @@ export function ProfileTab({
 }: {
   data: ProfileData;
   onClose: () => void;
-  onUnadd?: () => void;
+  onUnadd?: (() => void) | undefined;
   /** If set, re-read profile every 1s (skin / ability / achievements). */
   live?: () => ProfileData;
 }) {
@@ -480,7 +491,7 @@ export function FriendsPanel({ onClose }: { onClose: () => void }) {
                 f.splintered ? "border-red-500/70 bg-red-950/50" : "border-hud/30 bg-black/30"
               }`}>
                 <button type="button" className={`rounded border border-hud/25 bg-black/40 px-2 py-0.5 font-bold underline decoration-crosshair/40 ${f.splintered ? "text-red-400" : "text-crosshair"}`} onClick={() => setProfileName(f.name)}>
-                  {f.name}{f.splintered ? " (splintered)" : ""}
+                  <span className="inline-flex items-center gap-2"><OnlineDot name={f.name} />{f.name}{f.splintered ? " (splintered)" : ""}</span>
                 </button>
                 {f.splintered ? (
                   <button type="button" className="rounded border-2 border-red-400/80 bg-red-900/40 px-3 py-1 text-xs font-black uppercase text-red-100" onClick={() => removeFriend(f.name)}>
@@ -663,10 +674,32 @@ export function QueueOverlay() {
 
 const TODS: { id: TimeOfDay; label: string }[] = [{ id: "day", label: "Day" }, { id: "evening", label: "Evening" }, { id: "night", label: "Night" }];
 
-const BAN_OPTIONS: { id: "none" | AbilityId; label: string; icon: string }[] = [
+// Same layout as the choose phase: each ability, then its mastered version (Boss has none)
+const BAN_OPTIONS: { id: BanChoice; label: string; icon: string }[] = [
   { id: "none", label: "None", icon: "—" },
-  ...ABILITY_LIST.map((a) => ({ id: a.id, label: a.name, icon: a.icon })),
+  ...ABILITY_LIST.flatMap((a) => [
+    { id: a.id as BanChoice, label: a.name, icon: a.icon },
+    ...(a.id === "boss" ? [] : [{ id: `${a.id}:m` as BanChoice, label: `${a.name} (Mastered)`, icon: a.icon }]),
+  ]),
 ];
+/** Red X over a banned entry; two bans on the same entry = a second X rotated 45° (an 8-point star). */
+function BanX({ count }: { count: number }) {
+  return (
+    <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label={count > 1 ? "banned by both players" : "banned"}>
+      <g stroke="#ef4444" strokeWidth="4" strokeLinecap="round" vectorEffect="non-scaling-stroke">
+        <line x1="8" y1="8" x2="92" y2="92" vectorEffect="non-scaling-stroke" />
+        <line x1="92" y1="8" x2="8" y2="92" vectorEffect="non-scaling-stroke" />
+        {count > 1 && (
+          <>
+            <line x1="50" y1="6" x2="50" y2="94" vectorEffect="non-scaling-stroke" />
+            <line x1="6" y1="50" x2="94" y2="50" vectorEffect="non-scaling-stroke" />
+          </>
+        )}
+      </g>
+    </svg>
+  );
+}
+const banLabel = (k: string) => { const a = ABILITY_LIST.find((x) => x.id === k.replace(":m", "")); return a ? (k.endsWith(":m") ? `${a.name} (Mastered)` : a.name) : k; };
 
 export function MapPick() {
   const net = useNet();
@@ -678,36 +711,32 @@ export function MapPick() {
   const opp = net.names[opponentId()];
   const locked = net.myPhaseLocked;
 
-  // Combined bans for ability phase
-  const banned = new Set<string>();
-  for (const v of Object.values(net.bans)) if (v && v !== "none") banned.add(v);
+  // Bans from BOTH players apply to both. banCount = how many players banned it (0-2); 2 = double X.
+  const banCounts: Record<string, number> = {};
+  for (const v of Object.values(net.bans)) if (v && v !== "none") banCounts[v] = (banCounts[v] ?? 0) + 1;
+  const banned = new Set(Object.keys(banCounts));
+  // An ability ban also covers its mastery
+  const countFor = (key: string) => Math.min(2, (banCounts[key] ?? 0) + (key.endsWith(":m") ? (banCounts[key.slice(0, -2)] ?? 0) : 0));
 
-  // Choose phase: show everything non-banned; lock mastery/boss you don't own ("Not available"). Ban phase stays unrestricted.
-  const abilityChoices: { key: string; label: string; icon: string; available: boolean }[] = [];
+  // Choose phase: banned entries stay listed with a red X; mastery/boss you don't own are "Not available".
+  const abilityChoices: { key: string; label: string; icon: string; available: boolean; banCount: number }[] = [];
   for (const a of ABILITY_LIST) {
-    if (banned.has(a.id)) continue;
     if (a.id === "boss") {
       const own = hasAchievement("hardcore");
-      abilityChoices.push({
-        key: "boss",
-        label: own ? a.name : `${a.name} — Not available`,
-        icon: a.icon,
-        available: own,
-      });
+      abilityChoices.push({ key: "boss", label: own ? a.name : `${a.name} — Not available`, icon: a.icon, available: own, banCount: countFor("boss") });
       continue;
     }
-    // base ability always free
-    abilityChoices.push({ key: a.id, label: a.name, icon: a.icon, available: true });
-    // mastered variant always listed; locked if not owned
+    abilityChoices.push({ key: a.id, label: a.name, icon: a.icon, available: true, banCount: countFor(a.id) });
     const ownM = hasMastery(a.id);
     abilityChoices.push({
       key: `${a.id}:m`,
       label: ownM ? `${a.name} (Mastered)` : `${a.name} (Mastered) — Not available`,
       icon: a.icon,
       available: ownM,
+      banCount: countFor(`${a.id}:m`),
     });
   }
-  abilityChoices.push({ key: "random", label: "Random", icon: "🎲", available: true });
+  abilityChoices.push({ key: "random", label: "Random", icon: "🎲", available: true, banCount: 0 });
 
   return (
     <div className="gui fixed inset-0 z-40 flex items-center justify-center bg-hud-scrim p-6 font-mono text-hud">
@@ -740,7 +769,7 @@ export function MapPick() {
 
         {net.stage === "ban" && (
           <>
-            <h1 className="mt-2 text-4xl font-black uppercase">Ban an ability</h1>
+            <h1 className="mt-2 text-4xl font-black uppercase">Ban an ability or mastery</h1>
             <div className="mt-2 text-6xl font-black text-crosshair">{left}</div>
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
               {BAN_OPTIONS.map((o) => (
@@ -756,7 +785,7 @@ export function MapPick() {
                 </button>
               ))}
             </div>
-            <p className="mt-4 text-xs opacity-70">Both bans apply. Pick None to ban nothing. Both ban → skip timer.</p>
+            <p className="mt-4 text-xs opacity-70">Both bans apply. Banning an ability also bans its mastery; banning a mastery keeps the normal ability. Pick None to ban nothing. Both ban → skip timer.</p>
             <button type="button" className={`${btnMain} mt-4`} disabled={!net.myBan || locked} onClick={() => confirmBan()}>
               {locked ? "Waiting for opponent…" : "Ban ability"}
             </button>
@@ -768,17 +797,17 @@ export function MapPick() {
             <h1 className="mt-2 text-4xl font-black uppercase">Choose ability</h1>
             <div className="mt-2 text-6xl font-black text-crosshair">{left}</div>
             {banned.size > 0 && (
-              <p className="mt-2 text-xs opacity-60">Banned: {[...banned].join(", ")}</p>
+              <p className="mt-2 text-xs opacity-60">Banned: {[...banned].map(banLabel).join(", ")}</p>
             )}
             <div className="mt-6 grid max-h-[40vh] grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3">
               {abilityChoices.map((o) => (
                 <button
                   key={o.key}
                   type="button"
-                  disabled={locked || !o.available}
-                  onClick={() => o.available && chooseAbilityPick(o.key)}
-                  className={`rounded-xl border-2 p-4 text-left transition ${
-                    !o.available
+                  disabled={locked || !o.available || o.banCount > 0}
+                  onClick={() => o.available && o.banCount === 0 && chooseAbilityPick(o.key)}
+                  className={`relative rounded-xl border-2 p-4 text-left transition ${
+                    !o.available || o.banCount > 0
                       ? "cursor-not-allowed border-white/10 bg-black/20 opacity-40"
                       : net.myAbilityChoice === o.key
                         ? "border-crosshair bg-crosshair/15"
@@ -787,10 +816,11 @@ export function MapPick() {
                 >
                   <div className="text-2xl">{o.icon}</div>
                   <div className="mt-1 text-sm font-black uppercase">{o.label}</div>
+                  {o.banCount > 0 && <BanX count={o.banCount} />}
                 </button>
               ))}
             </div>
-            <p className="mt-4 text-xs opacity-70">Random picks from non-banned abilities. Both ready → skip timer.</p>
+            <p className="mt-4 text-xs opacity-70">Bans apply to both players. If you don't choose before the timer ends, you get a random ability you own that isn't banned. Both ready → skip timer.</p>
             <button type="button" className={`${btnMain} mt-4`} disabled={!net.myAbilityChoice || locked} onClick={() => confirmAbilityPick()}>
               {locked ? "Waiting for opponent…" : "Ready"}
             </button>

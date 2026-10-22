@@ -7,14 +7,14 @@ import { SETTINGS, useSettings, lampIntensity } from "./settings";
 import { useEffect, useMemo, useRef, type ElementRef } from "react";
 import * as THREE from "three";
 import {
-  G, MAG, FIRE_INTERVAL, DMG, PARRY_WINDOW, PARRY_CD, PARRY_CD_HIT, PARRY_CD_MISS, BUFF_TIME, DASH_CD, AIR_JUMPS, AIR_DASHES,
-  BOMB_CD, BOMB_CD_BUFF, TABLE_HP, TABLE_CAP, BOSS_HITS, BOSS_WARN, setLocker,
+  G, MAG, FIRE_INTERVAL, DMG, PARRY_WINDOW, PARRY_CD_HIT, PARRY_CD_MISS, BUFF_TIME,
+  TABLE_HP, TABLE_CAP, BOSS_WARN, setLocker,
   MAP, PARRY_LOCK_AT, TUT_STEPS, ONLINE_TUT_STEPS, finishTutorial, MAX_HP, PARRY_DMG, cfg, TRAIN, TRAIN_Q, TRAIN_CMD, isMobilePlay, pauseGame, setCursorLocked, registerDamage, tryComboBurst, onParrySuccess, STORM_START, type TrainSpawn,
   SHARD_NEED, SHARD_INTERVAL, SHARD_LIFE, SHARD_SPAWN_N, LOBBY_RESPAWN, FREECAM_SPEEDS,
   tune, maxCharges,
 } from "./state";
 import { SKIN, useSkin } from "./skins";
-import { getAbility, getLastUnlockedAbility, setAbility, clampSelectedAbility } from "./abilities";
+import { getAbility, clampSelectedAbility } from "./abilities";
 import { hasAchievement, masteryOn, onCampaignWin, onPlayerDeath } from "./mastery";
 import { createTableBot, skinKey } from "./tableBotFactory";
 import { Room, ROOM, SOLIDS } from "./Room";
@@ -62,10 +62,8 @@ const SUMMON_HP = 2.5;
 const WAVE_H = 0.5 * 3.45 * TABLE_S; // half a table tall
 const WAVE_SPEED = 140;
 const WAVE_DMG = 20;
-const TELEPORT_CD = 2.5;
 const HEALTH_AMOUNT = 10;
 const HEALTH_INTERVAL = 5;
-const HEALTH_LIFE = 10;
 const HEALTH_R = (TABLE_W * 1.5) / 2; // ring diameter = 1.5 table lengths
 const SHARD_R = HEALTH_R * 3; // player shards are 3× health rings
 const BULLET_AOE_R = TABLE_W / 2; // splinter blast diameter = one brown table
@@ -422,10 +420,8 @@ export function World() {
   const FIRE_VFX_VER = 7; // sharper wider mastered zigzags
   const FIRE_SEGS = 22;
   const fireballMeshRefs = useRef<(THREE.Mesh | null)[]>([]);
-  const fireParticleRefs = useRef<(THREE.Points | null)[]>([]);
   const slam = useRef({ on: false, fromY: 0, h: 0 });
   const bunnyHop = useRef(0); // time window to auto-jump on land after dash
-  const doDashRef = useRef<(dirs: () => { f: THREE.Vector3; r: THREE.Vector3 }) => void>(() => {});
   const bounce = useRef({ t: 0, y: 0 });
   const demoAng = useRef(0);
   const healthRefs = useRef<(THREE.Group | null)[]>([]);
@@ -467,7 +463,7 @@ export function World() {
   const tpRefresh = useRef(0);
   const slamStun = useRef({ dur: 0, exp: 0 });
   /** Smooth online sword-stick: lerp toward target instead of hard teleports */
-  const swordStick = useRef({ active: false, x: 0, y: 0, z: 0 });
+  const swordStick = useRef({ active: false, x: 0, y: 0, z: 0, t: 0 });
   /** After unstick, block new sticks for 2s (multi-sword spam) */
   const stickImmuneUntil = useRef(0);
   /** ability-applied stun timers (seconds left) for bots — real freeze */
@@ -1557,7 +1553,7 @@ const kd = (e: KeyboardEvent) => {
       } else {
         const st = swordStick.current;
         st.active = true;
-        st.x = extra.stick[0]!; st.y = extra.stick[1]!; st.z = extra.stick[2]!;
+        st.x = extra.stick[0]!; st.y = extra.stick[1]!; st.z = extra.stick[2]!; st.t = performance.now();
         hv.current.set(0, 0, 0); vy.current = 0; grounded.current = false;
       }
     }
@@ -1620,13 +1616,17 @@ const kd = (e: KeyboardEvent) => {
       return;
     }
     if (k === "bsword") {
-      const sid = String(payload.id ?? "");
-      if (!sid) return;
-      const slot = remoteSwords.current.find((q) => q.t > 0 && q.id === sid) ?? remoteSwords.current.find((q) => q.t <= 0);
-      if (!slot) return;
-      slot.id = sid; slot.t = 0.4;
-      slot.pos.set(Number(payload.x) || 0, Number(payload.y) || 0, Number(payload.z) || 0);
-      slot.vel.set(Number(payload.vx) || 0, Number(payload.vy) || 0, Number(payload.vz) || 0);
+      const owner = String(payload.o ?? "");
+      const w = payload.w;
+      if (!owner || !Array.isArray(w)) return;
+      for (let i = 0; i + 6 < w.length && i < 7 * 3; i += 7) {
+        const sid = `${owner}-bs${Number(w[i]) | 0}`;
+        const slot = remoteSwords.current.find((q) => q.t > 0 && q.id === sid) ?? remoteSwords.current.find((q) => q.t <= 0);
+        if (!slot) continue;
+        slot.id = sid; slot.t = 0.4;
+        slot.pos.set(Number(w[i + 1]) || 0, Number(w[i + 2]) || 0, Number(w[i + 3]) || 0);
+        slot.vel.set(Number(w[i + 4]) || 0, Number(w[i + 5]) || 0, Number(w[i + 6]) || 0);
+      }
       return;
     }
     if (k === "crack") {
@@ -1800,6 +1800,7 @@ const kd = (e: KeyboardEvent) => {
     }
 
     const clearArena = () => {
+      swordStick.current.active = false;
       p.copy(START);
       hv.current.set(0, 0, 0);
       vy.current = 0;
@@ -2006,6 +2007,8 @@ const kd = (e: KeyboardEvent) => {
     }
     if (G.abilitySlow > 0) G.abilitySlow = Math.max(0, G.abilitySlow - dt);
     // Smooth sword-stick follow (online victims): lerp to last stick target, never hard-teleport
+    // Failsafe: the caster refreshes the stick ~30x/s. If updates stop (sword reset, caster left/died), let go.
+    if (swordStick.current.active && performance.now() - swordStick.current.t > 400) swordStick.current.active = false;
     if (swordStick.current.active && !G.pvpDead && !G.campaignDead) {
       const st = swordStick.current;
       const k = 1 - Math.exp(-20 * dt);
@@ -2016,6 +2019,7 @@ const kd = (e: KeyboardEvent) => {
       vy.current = 0;
       grounded.current = false;
     }
+    const swordOut: number[] = []; // [idx,x,y,z,vx,vy,vz,...] for every active sword, sent as ONE message
     // Boss sword: spherical contact hitbox, attachment DoT, five distinct solid bounces.
     for (let swordIndex = 0; swordIndex < bossSwords.current.length; swordIndex++) {
       const sword = bossSwords.current[swordIndex]!;
@@ -2036,8 +2040,8 @@ const kd = (e: KeyboardEvent) => {
           const peer = NET.peers.get(id);
           if (!peer || peer.dead) { sword.stuck.delete(id); continue; }
           stuck.netAcc += dt;
-          if (stuck.netAcc >= 1 / 30) {
-            stuck.netAcc %= 1 / 30;
+          if (stuck.netAcc >= 1 / 15) {
+            stuck.netAcc %= 1 / 15;
             const extra = { stick: [sword.pos.x + stuck.offset.x, sword.pos.y + stuck.offset.y, sword.pos.z + stuck.offset.z] };
             hitPeer(id, 0, false, undefined, extra);
           }
@@ -2117,13 +2121,7 @@ const kd = (e: KeyboardEvent) => {
         }
         if (sword.pos.length() > R * 2.5) sword.returning = true;
       }
-      if (sword.active && NET.online) {
-        swordNetT.current[swordIndex] = (swordNetT.current[swordIndex] ?? 0) - dt;
-        if (swordNetT.current[swordIndex]! <= 0) {
-          swordNetT.current[swordIndex] = 0.07;
-          sendNet("vfx", { k: "bsword", id: `${myId()}-bs${swordIndex}`, x: sword.pos.x, y: sword.pos.y, z: sword.pos.z, vx: sword.vel.x, vy: sword.vel.y, vz: sword.vel.z });
-        }
-      }
+      if (sword.active) swordOut.push(swordIndex, sword.pos.x, sword.pos.y, sword.pos.z, sword.vel.x, sword.vel.y, sword.vel.z);
       const mesh = bossSwordMeshes.current[swordIndex];
       if (mesh) {
         mesh.visible = sword.active;
@@ -2133,6 +2131,13 @@ const kd = (e: KeyboardEvent) => {
           mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), sword.vel.clone().normalize());
           mesh.rotateX(performance.now() / 65);
         }
+      }
+    }
+    if (swordOut.length && NET.online) {
+      swordNetT.current[0] = (swordNetT.current[0] ?? 0) - dt;
+      if (swordNetT.current[0]! <= 0) {
+        swordNetT.current[0] = 0.1; // 10 Hz, all swords in one packet
+        sendNet("vfx", { k: "bsword", o: myId(), w: swordOut.map((n) => Math.round(n * 10) / 10) });
       }
     }
     for (let ri = 0; ri < remoteSwords.current.length; ri++) {
@@ -2268,8 +2273,6 @@ const kd = (e: KeyboardEvent) => {
       } else {
       const can = G.abilityCd <= 0 && G.abilityCharges > 0 && !G.abilityLocked && !G.parryLocked;
       if (can) {
-        const yaw = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ").y;
-        const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
         if (ab === "wall" || ab === "trampoline") {
           const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ");
           const yaw = euler.y;
@@ -2463,7 +2466,6 @@ const kd = (e: KeyboardEvent) => {
     }
     // Fire lines — 5× wider/taller, no self-dmg, can hit boss if under it
     const FIRE_W = 20; // was ~4, then 8; now 5× original
-    const FIRE_H = 8; // 5× taller zone
     for (const fire of abilityFires) {
       if (!fire.active) continue;
       if (offlinePaused) continue; // offline menu freezes fire line timer + damage
@@ -2839,7 +2841,6 @@ const kd = (e: KeyboardEvent) => {
 
     // World/enemy sim keeps running even when local player is dead (host must keep boss moving)
     const active = G.phase === "playing" && engaged && !G.frozen && G.countdown <= 0.6;
-    const canControl = active && !G.pvpDead && !G.campaignDead && !freecamOn;
 
     // --- 1v1 storm: 60s into a round a wall closes in from the arena edge at 30 u/s ---
     {
@@ -3921,7 +3922,6 @@ const kd = (e: KeyboardEvent) => {
       // enemy aim (tables, blues, boss, pvp peers when attackable)
       if (mode === "normal" && !G.freecam) {
         const aimDist = 400;
-        const tip = origin.clone().addScaledVector(dir, aimDist);
         const check = (px: number, py: number, pz: number, r: number) => {
           const to = new THREE.Vector3(px, py, pz).sub(origin);
           const t = to.dot(dir);

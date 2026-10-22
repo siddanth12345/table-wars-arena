@@ -199,7 +199,6 @@ setAbilityUnlockCheck((id) => {
 export const hasMastery = (ab: AbilityId) => { const a = achievementFor(ab); return !!a && !!progress.earned[a.id]; };
 // training mastery overrides (existing)
 const trainPick: Partial<Record<AbilityId, boolean>> = {};
-export function getTrainMastery(ab: AbilityId) { return !!trainPick[ab]; }
 export function setTrainMastery(ab: AbilityId, on: boolean) { trainPick[ab] = on; bump(); }
 
 export const masteryOn = (ab: AbilityId) => {
@@ -343,7 +342,6 @@ export function resetProgress() {
 /** Cosmetic unlock helpers for skins */
 /** Home / loading green-table wall hits toward "Your Wasting Your Time". */
 let homeBounces = 0;
-export function getHomeBounces() { return homeBounces; }
 export function noteHomeTableBounce() {
   if (progress.earned.wasting_your_time) return;
   homeBounces++;

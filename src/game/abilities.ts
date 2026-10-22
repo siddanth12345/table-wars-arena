@@ -75,6 +75,8 @@ export function abilityContext(mode?: string): string | undefined {
 /** Boss needs Hardcore (except training / lobby). Other abilities are always free. */
 export function canUseAbility(id: AbilityId, mode?: string): boolean {
   if (id !== "boss") return true;
+  // A 1v1 loadout picked in the map-pick phase may be Boss even without Hardcore
+  if (G.mode === "pvp" && G.pvpMasteryAbility === id) return true;
   const m = abilityContext(mode);
   if (m === "training" || m === "lobby") return true;
   if (unlockCheck) return unlockCheck(id, m);
@@ -82,13 +84,13 @@ export function canUseAbility(id: AbilityId, mode?: string): boolean {
 }
 
 /** If current selection isn't allowed, fall back to last unlocked (not boss) and persist. */
-export function clampSelectedAbility(mode?: string) {
+export function clampSelectedAbility(mode?: string, notify = true) {
   const m = abilityContext(mode);
   if (canUseAbility(selected, m)) return selected;
   const fallback = getLastUnlockedAbility();
   selected = fallback;
   try { localStorage.setItem(STORE, fallback); } catch { /* ignore */ }
-  bump();
+  if (notify) bump();
   return selected;
 }
 
@@ -114,7 +116,7 @@ export function setAbility(id: AbilityId, mode?: string) {
 export function useAbility() {
   return useSyncExternalStore(
     (cb) => { subs.add(cb); return () => { subs.delete(cb); }; },
-    () => clampSelectedAbility(abilityContext()),
+    () => clampSelectedAbility(abilityContext(), false),
     () => selected,
   );
 }

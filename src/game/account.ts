@@ -4,7 +4,7 @@ import { applySettings, setSettingsPersister, SETTINGS, type Settings } from "./
 import { applySkin, setSkinPersister, SKIN, type Skin } from "./skins";
 import { TRAIN, type TrainCfg } from "./state";
 import { hydrateProgress, resetProgress, serializeProgress, setProgressPersister } from "./mastery";
-import { serializeFriends, hydrateFriends, clearFriends, loadFriends } from "./friends";
+import { serializeFriends, hydrateFriends, clearFriends, loadFriends, setFriendsPersister } from "./friends";
 // net import deferred to avoid cycle at module load
 
 export type Account = { status: "loading" | "signedOut" | "guest" | "user"; userId: string | null; username: string; email: string | null };
@@ -12,7 +12,6 @@ export type Account = { status: "loading" | "signedOut" | "guest" | "user"; user
 let ACC: Account = { status: "loading", userId: null, username: "guest", email: null };
 /** When true, next sign-in/sign-up merges current (guest) progress into the account instead of replacing it. */
 let pendingProgressTransfer = false;
-export function beginProgressTransfer() { pendingProgressTransfer = true; }
 export function clearProgressTransfer() { pendingProgressTransfer = false; }
 export function isProgressTransferPending() { return pendingProgressTransfer; }
 const subs = new Set<() => void>();
@@ -133,6 +132,7 @@ export async function initAccount() {
   started = true;
   setSettingsPersister((s) => persistProfileSettings(s));
   setProgressPersister(() => persistProfileSettings(SETTINGS));
+  setFriendsPersister(() => persistProfileSettings(SETTINGS));
   setSkinPersister((skin) => {
     if (ACC.status !== "user" || !ACC.userId) return;
     const payload = profilePayload(SETTINGS, skin);
@@ -145,10 +145,6 @@ export async function initAccount() {
   const { data } = await supabase.auth.getUser();
   if (data.user) await loadProfile(data.user.id);
   if (ACC.status === "loading") set({ status: "signedOut" });
-}
-
-export function persistFriendsToProfile(_f: unknown) {
-  if (ACC.status === "user" && ACC.userId) persistProfileSettings(SETTINGS);
 }
 
 export function saveTraining() {
@@ -192,15 +188,17 @@ export function playAsGuest() {
   loadFriends();
 }
 
+/** Tell other tbles this session is gone. Dynamic import: net.ts imports this file, and `require` doesn't exist in the browser. */
+async function announceSplinter(name: string) {
+  try { const net = await import("./net"); await net.announceFriendSplinter(name); } catch { /* ignore */ }
+}
+
 export async function signOut() {
   if (ACC.status === "user" && ACC.userId) {
     try { persistProfileSettings(SETTINGS); } catch { /* ignore */ }
   }
   pendingProgressTransfer = false;
-  try {
-    const net = require("./net") as { announceFriendSplinter?: () => void };
-    void net.announceFriendSplinter?.();
-  } catch { /* ignore */ }
+  await announceSplinter(displayName());
   await supabase.auth.signOut();
   set({ status: "signedOut", userId: null, username: "guest", email: null });
   resetProgress();
@@ -210,10 +208,7 @@ export async function signOut() {
 /** Guest "log out": discard this tab's guest progress and open the login flow. */
 export function logoutGuest() {
   pendingProgressTransfer = false;
-  try {
-    const net = require("./net") as { announceFriendSplinter?: () => void };
-    void net.announceFriendSplinter?.();
-  } catch { /* ignore */ }
+  void announceSplinter(displayName());
   resetProgress();
   clearFriends();
   set({ status: "signedOut", userId: null, username: "guest", email: null });

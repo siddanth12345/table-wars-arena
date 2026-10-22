@@ -6,11 +6,11 @@ import { displayName, getAccount, lookupUsername } from "./account";
 import { G, goHome, resetGame, type Mode } from "./state";
 import {
   noteIncomingRequest, noteOutgoingRequest, removeIncoming, removeOutgoing,
-  addFriendDirect, isSelfName, isFriend, friendCount, MAX_TBLES, markSplinteredFrom,
+  addFriendDirect, isSelfName, isFriend, friendCount, MAX_TBLES, markSplinteredFrom, setOnlineNames,
   cacheProfile, type FriendRequest,
 } from "./friends";
-import { getAbility, setAbility } from "./abilities";
-import { masteryOn, getProgress, recordPvpWin } from "./mastery";
+import { getAbility, setAbility, ABILITY_LIST } from "./abilities";
+import { masteryOn, getProgress, recordPvpWin, hasMastery, hasAchievement } from "./mastery";
 import { SKIN, type Skin } from "./skins";
 import { onRemoteChat, clearChat } from "./chat";
 
@@ -26,7 +26,7 @@ export type Peer = {
   ability?: string; mastery?: boolean; achList?: string[];
 };
 export type Kind = "pvp" | "lobby" | "coop";
-export type Invite = { id: string; kind: "party" | "lobby" | "friend" | "play_party" | "play_1v1"; from: string; target: string; t: number; expires?: number };
+export type Invite = { id: string; kind: "party" | "lobby" | "friend" | "play_party" | "play_1v1"; from: string; target: string; t: number; expires?: number | undefined };
 export type PartyMember = { id: string; name: string; leader: boolean };
 
 export const PVP_WIN = 3;
@@ -36,6 +36,11 @@ export const PVP_HITBOX = 1.6 * PVP_SCALE * 1.3; // 1.3× larger hitbox; visual 
 export const PVP_CENTER_Y = 1.8 * PVP_SCALE;
 export const LOBBY_MAX = 8;
 export const PARTY_MAX = 5; // leader + 4 invited
+
+type BanAbility = "wall" | "trampoline" | "fire" | "teleport" | "boss";
+/** A 1v1 ban: nothing, a whole ability, or just an ability's mastery ("wall:m"). Boss has no mastery. */
+export type BanChoice = "none" | BanAbility | "wall:m" | "trampoline:m" | "fire:m" | "teleport:m";
+const BAN_CHOICES = new Set<string>(["none", "wall", "trampoline", "fire", "teleport", "boss", "wall:m", "trampoline:m", "fire:m", "teleport:m"]);
 
 const empty = () => ({
   online: false,
@@ -47,14 +52,14 @@ const empty = () => ({
   peers: new Map<string, Peer>(),
   names: {} as Record<string, string>,
   // 1v1
-  stage: "idle" as "idle" | "queue" | "pick" | "playing" | "roundEnd" | "over",
+  stage: "idle" as "idle" | "queue" | "pick" | "ban" | "abilityPick" | "playing" | "roundEnd" | "over",
   pickEnds: 0,
   myPick: null as TimeOfDay | null,
   pickPhase: "tod" as "tod" | "ban" | "ability",
-  myBan: null as null | "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss",
+  myBan: null as null | BanChoice,
   myAbilityChoice: null as null | string,
   myPhaseLocked: false,
-  bans: {} as Record<string, "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss">,
+  bans: {} as Record<string, BanChoice>,
   abilityChoices: {} as Record<string, string>,
   phaseLocked: {} as Record<string, boolean>,
   pvpLoadout: null as null | { ability: "wall" | "trampoline" | "fire" | "teleport" | "boss"; mastery: boolean },
@@ -128,8 +133,12 @@ let mm: RealtimeChannel | null = null;
 let partyCh: RealtimeChannel | null = null;
 let inbox: RealtimeChannel | null = null;
 let picks: Record<string, TimeOfDay> = {};
+let bans: Record<string, BanChoice> = {};
+let abilityChoices: Record<string, string> = {};
+let phaseLocked: Record<string, boolean> = {};
 let roundLocked = false;
 let pickTimer: ReturnType<typeof setTimeout> | null = null;
+let autoPickTimer: ReturnType<typeof setTimeout> | null = null;
 let lastPose = 0;
 const timers: ReturnType<typeof setTimeout>[] = [];
 const later = (ms: number, fn: () => void) => timers.push(setTimeout(fn, ms));
@@ -210,8 +219,8 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
       ability, mastery, achList,
       ...(p.skin && isRecord(p.skin) ? { skinVer: isFiniteIn(p.skinVer, 0, 1000000) ? p.skinVer : undefined } : cur ? { skinVer: (cur as { skinVer?: number }).skinVer } : {}),
     } as Peer);
-    // Cache for home profile viewer (friends list outside a match)
-    try {
+    // Cache for home profile viewer (friends list outside a match) — only when a profile packet actually arrived
+    if (p.skin || p.ability !== undefined) try {
       const nm = NET.peers.get(p.id)?.name ?? p.name;
       if (typeof nm === "string" && nm) {
         cacheProfile({
@@ -281,7 +290,36 @@ function joinRoom(name: string, kind: Kind, host: boolean, stage?: (typeof NET)[
     if (isRecord(payload)) onRemoteChat(payload as Record<string, unknown>);
   });
   ch.on("broadcast", { event: "pickstart" }, ({ payload }) => {
-    if (isRecord(payload) && isFiniteIn(payload.ms, 500, 30000)) beginPick(payload.ms);
+    if (NET.kind !== "pvp" || NET.isHost || !isRecord(payload) || !isFiniteIn(payload.ms, 500, 30000)) return;
+    const ph = payload.phase;
+    if (isTimeOfDay(payload.tod)) NET.tod = payload.tod;
+    beginPickPhase(ph === "ban" || ph === "ability" ? ph : "tod", payload.ms);
+  });
+  ch.on("broadcast", { event: "todpick" }, ({ payload }) => {
+    if (NET.kind === "pvp" && !NET.isHost && isRecord(payload) && isTimeOfDay(payload.tod)) { NET.tod = payload.tod; bump(); }
+  });
+  ch.on("broadcast", { event: "ban" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.id, 64) || !NET.names[payload.id]) return;
+    const b = payload.ban;
+    if (typeof b !== "string" || !BAN_CHOICES.has(b)) return;
+    bans[payload.id] = b as BanChoice;
+    NET.bans = { ...bans };
+    bump();
+  });
+  ch.on("broadcast", { event: "abilitypick" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.id, 64) || !NET.names[payload.id] || !isText(payload.choice, 32)) return;
+    abilityChoices[payload.id] = payload.choice;
+    NET.abilityChoices = { ...abilityChoices };
+    bump();
+  });
+  ch.on("broadcast", { event: "phaselock" }, ({ payload }) => {
+    if (!isRecord(payload) || !isText(payload.id, 64) || !NET.names[payload.id]) return;
+    const ph = payload.phase;
+    if (ph !== "tod" && ph !== "ban" && ph !== "ability") return;
+    phaseLocked[`${ph}:${payload.id}`] = true;
+    NET.phaseLocked = { ...phaseLocked };
+    bump();
+    if (NET.isHost) tryResolvePhaseEarly(ph);
   });
   ch.on("broadcast", { event: "pick" }, ({ payload }) => {
     if (isRecord(payload) && isText(payload.id, 64) && isTimeOfDay(payload.tod) && NET.names[payload.id]) picks[payload.id] = payload.tod;
@@ -382,6 +420,11 @@ export function leaveRoom(full = true) {
   lastPose = 0;
   leaveQueue();
   picks = {};
+  bans = {};
+  abilityChoices = {};
+  phaseLocked = {};
+  if (pickTimer) { clearTimeout(pickTimer); pickTimer = null; }
+  if (autoPickTimer) { clearTimeout(autoPickTimer); autoPickTimer = null; }
   roundLocked = false;
   Object.assign(NET, empty());
   setTodOverride(null);
@@ -428,8 +471,8 @@ export function sendPose(x: number, y: number, z: number, yaw: number, extra?: {
     payload.skin = { ...SKIN };
     payload.skinVer = lastSkinVer;
   }
-  // Profile snapshot for pause roster (every ~3s with skin or always light fields)
-  try {
+  // Profile snapshot (ability/mastery/achievements): only with the skin refresh, not in every 10 Hz pose packet.
+  if (payload.skin) try {
     payload.ability = getAbility();
     payload.mastery = (() => { try { return masteryOn(getAbility() as "wall" | "trampoline" | "fire" | "teleport" | "boss"); } catch { return false; } })();
     const earned = Object.keys(getProgress().earned || {});
@@ -566,10 +609,49 @@ function beginPickPhase(phase: "tod" | "ban" | "ability", ms: number) {
     NET.myAbilityChoice = null;
   }
   bump();
+  // If I haven't chosen when the timer is about to run out, choose for me (fires just before the host resolves).
+  if (autoPickTimer) clearTimeout(autoPickTimer);
+  autoPickTimer = setTimeout(() => autoPickForPhase(phase), Math.max(300, ms - 250));
   if (NET.isHost) {
     if (pickTimer) clearTimeout(pickTimer);
     pickTimer = setTimeout(() => resolveCurrentPhase(phase), ms + 300);
   }
+}
+
+/** Everything this player may actually use: base abilities, masteries they earned, Boss only with Hardcore. */
+function ownedAbilityKeys(): string[] {
+  const out: string[] = [];
+  for (const a of ABILITY_LIST) {
+    if (a.id === "boss") { if (hasAchievement("hardcore")) out.push("boss"); continue; }
+    out.push(a.id);
+    if (hasMastery(a.id)) out.push(`${a.id}:m`);
+  }
+  return out;
+}
+/** Banned by either player (an ability ban also bans its mastery). */
+function isBannedKey(k: string): boolean {
+  const base = k.replace(":m", "");
+  for (const v of Object.values(bans)) if (v === base || (k.endsWith(":m") && v === k)) return true;
+  return false;
+}
+function autoPickForPhase(phase: "tod" | "ban" | "ability") {
+  if (NET.kind !== "pvp" || NET.pickPhase !== phase || NET.stage !== stageForPhase(phase) || NET.myPhaseLocked) return;
+  const me = myId();
+  if (phase === "ban") {
+    if (!NET.myBan) { NET.myBan = "none"; bans[me] = "none"; NET.bans = { ...bans }; send("ban", { id: me, ban: "none" }); bump(); }
+    return;
+  }
+  if (phase !== "ability") return;
+  const cur = NET.myAbilityChoice;
+  // Nothing chosen (or "random", or a pick that got banned meanwhile): random from what I own and isn't banned.
+  if (cur && cur !== "random" && !isBannedKey(cur)) return;
+  const options = ownedAbilityKeys().filter((k) => !isBannedKey(k));
+  const pick = options[Math.floor(Math.random() * options.length)] ?? "wall";
+  NET.myAbilityChoice = pick;
+  abilityChoices[me] = pick;
+  NET.abilityChoices = { ...abilityChoices };
+  send("abilitypick", { id: me, choice: pick });
+  bump();
 }
 
 function bothLocked(phase: string) {
@@ -634,8 +716,12 @@ function resolveAbilityAndStart() {
       choice = choice.slice(0, -2);
     }
     if (choice === "random" || banned.has(choice) || !(fallback as readonly string[]).includes(choice)) {
-      choice = pickOne([...fallback]);
+      // host can't see the other player's unlocks, so a host-side random never includes Boss
+      const rp = fallback.filter((a) => a !== "boss");
+      choice = pickOne([...(rp.length ? rp : (["wall"] as const))]);
       mastery = false;
+    } else if (mastery && banned.has(`${choice}:m`)) {
+      mastery = false; // that mastery is banned: you keep the base ability
     }
     return { ability: choice as "wall" | "trampoline" | "fire" | "teleport" | "boss", mastery };
   };
@@ -673,10 +759,11 @@ export function confirmTodPick() {
   if (NET.isHost) tryResolvePhaseEarly("tod");
 }
 
-export function chooseBan(ban: "none" | "wall" | "trampoline" | "fire" | "teleport" | "boss") {
+export function chooseBan(ban: BanChoice) {
   if (NET.myPhaseLocked || NET.stage !== "ban") return;
   NET.myBan = ban;
   bans[myId()] = ban;
+  NET.bans = { ...bans }; // my own ban must show up for me too (was only mirrored when the OTHER player's arrived)
   send("ban", { id: myId(), ban });
   bump();
 }
@@ -694,12 +781,22 @@ export function chooseAbilityPick(choice: string) {
   if (NET.myPhaseLocked || NET.stage !== "abilityPick") return;
   NET.myAbilityChoice = choice;
   abilityChoices[myId()] = choice;
+  NET.abilityChoices = { ...abilityChoices };
   send("abilitypick", { id: myId(), choice });
   bump();
 }
 
 export function confirmAbilityPick() {
   if (NET.stage !== "abilityPick" || !NET.myAbilityChoice || NET.myPhaseLocked) return;
+  if (NET.myAbilityChoice === "random") {
+    // resolve "Random" here, where I know what I own and what's banned
+    const options = ownedAbilityKeys().filter((k) => !isBannedKey(k));
+    const pick = options[Math.floor(Math.random() * options.length)] ?? "wall";
+    NET.myAbilityChoice = pick;
+    abilityChoices[myId()] = pick;
+    NET.abilityChoices = { ...abilityChoices };
+    send("abilitypick", { id: myId(), choice: pick });
+  }
   NET.myPhaseLocked = true;
   phaseLocked[`ability:${myId()}`] = true;
   send("phaselock", { id: myId(), phase: "ability" });
@@ -905,17 +1002,17 @@ async function joinCoop(name: string, mode: Mode, host: boolean) {
 // ---------------------------------------------------------------- invites (personal inbox)
 
 const INVITE_BUS = "tble:invite-bus";
-const inboxName = (u: string) => INVITE_BUS; // shared bus; filter by payload.to
 
 export function startInbox() {
   const acc = getAccount();
   stopInbox();
   if (acc.status !== "user" && acc.status !== "guest") return;
   const uname = (acc.username && acc.username !== "guest" ? acc.username : displayName()).trim().toLowerCase();
-  const ch = supabase.channel(INVITE_BUS, { config: { broadcast: { self: false } } });
+  const ch = supabase.channel(INVITE_BUS, { config: { broadcast: { self: false }, presence: { key: myId() } } });
   inbox = ch;
   ch.on("broadcast", { event: "invite" }, ({ payload }) => {
-    const inv = payload as Invite & { to?: string };
+    if (!isRecord(payload) || !isText(payload.from, 40) || !isText(payload.to, 40) || !isText(payload.target, 100)) return;
+    const inv = payload as unknown as Invite & { to?: string };
     const to = (inv.to ?? "").trim().toLowerCase();
     if (!to || to !== uname) return;
     const kind = inv.kind as Invite["kind"];
@@ -924,7 +1021,8 @@ export function startInbox() {
       ...NET.invites.filter((i) => i.from !== inv.from || i.kind !== kind),
       {
         id: crypto.randomUUID(), kind, from: inv.from, target: inv.target, t: Date.now(),
-        expires: typeof inv.expires === "number" ? inv.expires : (kind === "play_party" || kind === "play_1v1" ? Date.now() + 5000 : kind === "friend" ? Date.now() + 10000 : undefined),
+        // Use MY clock: the sender's timestamp breaks with clock skew (invite would be dead on arrival).
+        expires: kind === "play_party" || kind === "play_1v1" ? Date.now() + 5000 : kind === "friend" ? Date.now() + 10000 : undefined,
       },
     ];
     bump();
@@ -986,20 +1084,42 @@ export function startInbox() {
     bump();
   });
   ch.on("broadcast", { event: "party-left" }, () => bump());
+  // Presence on the shared bus = "who is online" for the tble list (green dot)
+  // Presence sync fires for every join/leave of every online player; coalesce them.
+  let presenceT: ReturnType<typeof setTimeout> | null = null;
+  ch.on("presence", { event: "sync" }, () => {
+    if (presenceT) return;
+    presenceT = setTimeout(() => {
+      presenceT = null;
+      const st = ch.presenceState() as unknown as Record<string, { name?: unknown }[]>;
+      const names = new Set<string>();
+      for (const metas of Object.values(st)) for (const m of metas) if (typeof m?.name === "string") names.add(m.name.toLowerCase());
+      setOnlineNames(names);
+    }, 1000);
+  });
   ch.subscribe((status) => {
-    if (status === "SUBSCRIBED") bump();
+    if (status === "SUBSCRIBED") {
+      bump();
+      void ch.track({ name: uname }).catch(() => { /* ignore */ });
+    }
   });
 }
 export function stopInbox() {
   if (inbox) void supabase.removeChannel(inbox);
   inbox = null;
+  setOnlineNames(new Set());
 }
 
 
 /** Send a friend request by exact username (or guest######). */
+const profileReqAt: Record<string, number> = {};
 export async function requestProfile(username: string) {
   const name = username.trim();
   if (!name || isSelfName(name)) return;
+  // The profile viewer polls every second; every request is a broadcast to ALL clients on the shared bus.
+  const key = name.toLowerCase();
+  if (Date.now() - (profileReqAt[key] ?? 0) < 5000) return;
+  profileReqAt[key] = Date.now();
   if (!inbox) startInbox();
   const payload = { from: displayName(), to: name.trim().toLowerCase() };
   for (let i = 0; i < 3; i++) {
@@ -1008,10 +1128,10 @@ export async function requestProfile(username: string) {
   }
 }
 
-export async function announceFriendSplinter() {
+export async function announceFriendSplinter(name: string = displayName()) {
   if (!inbox) startInbox();
   for (let i = 0; i < 3; i++) {
-    try { if (inbox) await inbox.send({ type: "broadcast", event: "friend_splinter", payload: { from: displayName() } }); } catch { /* ignore */ }
+    try { if (inbox) await inbox.send({ type: "broadcast", event: "friend_splinter", payload: { from: name } }); } catch { /* ignore */ }
   }
 }
 
@@ -1229,7 +1349,7 @@ function installUnloadLeave() {
   const bail = () => {
     try {
       // Notify others so our pending tble requests show as splintered
-      if (inbox) {
+      if (inbox && getAccount().status === "guest") {
         void inbox.send({ type: "broadcast", event: "friend_splinter", payload: { from: displayName() } });
       }
       leaveParty(false);

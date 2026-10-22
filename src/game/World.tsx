@@ -977,7 +977,9 @@ export function World() {
       return true;
     }
     if (h.isShard) return false;
-    if (G.stage !== "boss") return false;
+    // Heal in campaign boss fight and in live 1v1s (rings already spawn there)
+    const pvpLive = G.mode === "pvp" && NET.stage === "playing";
+    if (G.stage !== "boss" && !pvpLive) return false;
     if (G.playerHp < cfg.maxHp()) G.playerHp = Math.min(cfg.maxHp(), G.playerHp + HEALTH_AMOUNT);
     else if (G.bombCd > 0) G.bombCd = 0;
     else return false;

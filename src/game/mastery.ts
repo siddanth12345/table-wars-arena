@@ -87,7 +87,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   {
     id: "hacker", name: "Close the Game, Hacker", icon: "🖤",
     summary: "",
-    how: "Beat offline campaign in under 1:00.",
+    how: "Beat offline or party campaign in under 1:00.",
     secret: true,
     noDetails: true,
   },
@@ -295,9 +295,11 @@ export function onCampaignWin(isParty = false) {
   const t = G.time;
   if (isParty) {
     award("down_you_go_friends");
+    // Hacker also available in party campaign (victory-screen time)
+    if (t < 60) award("hacker");
   } else {
     award("down_you_go");
-    // Timed achievements: offline only, victory-screen time (G.time)
+    // Timed achievements: victory-screen time (G.time)
     if (t < 300) award("speedrunner");
     if (t < 150) award("faster_than_light");
     if (t < 60) award("hacker");

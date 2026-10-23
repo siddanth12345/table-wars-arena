@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import type { Skin, EyeDesign, LegDesign, TableDecoration } from "./skins";
-import { DEFAULT_SKIN, isLavaColor } from "./skins";
+import type { EyeDesign, LegDesign, TableDecoration, Skin } from "./skins";
+import { DEFAULT_SKIN, DEFAULT_MAGMA_COLOR, skinHasMagma } from "./skins";
 
 const LEG_POS: [number, number][] = [
   [-2.4, -1.5],
@@ -23,20 +23,141 @@ function mat(color: string | THREE.Color, opts: ConstructorParameters<typeof THR
   return new THREE.MeshStandardMaterial({ color, roughness: 0.35, ...opts });
 }
 
-function lavaMat(opts: ConstructorParameters<typeof THREE.MeshStandardMaterial>[0] = {}) {
+/** Build a rock+magma crack canvas texture (seamless-ish). */
+function makeMagmaCanvas(glowHex: string, phase = 0) {
+  const S = 256;
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const ctx = c.getContext("2d")!;
+  // Magma base (non-rock) — tinted by glow color
+  const col = new THREE.Color(glowHex);
+  const deep = col.clone().multiplyScalar(0.35);
+  const mid = col.clone().multiplyScalar(0.75);
+  const hot = col.clone().lerp(new THREE.Color("#fff2a0"), 0.35);
+  const g = ctx.createRadialGradient(S * 0.5, S * 0.5, 10, S * 0.5, S * 0.5, S * 0.7);
+  g.addColorStop(0, `#${hot.getHexString()}`);
+  g.addColorStop(0.45, `#${mid.getHexString()}`);
+  g.addColorStop(1, `#${deep.getHexString()}`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, S, S);
+
+  // Soft flowing bright veins (phase shifts for slow magma motion)
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 8; i++) {
+    const a = phase * 0.4 + i * 1.7;
+    const x0 = S * (0.15 + 0.7 * ((Math.sin(a + i) + 1) * 0.5));
+    const y0 = S * (0.15 + 0.7 * ((Math.cos(a * 0.9 + i * 0.6) + 1) * 0.5));
+    const x1 = S * (0.15 + 0.7 * ((Math.sin(a + 2 + i) + 1) * 0.5));
+    const y1 = S * (0.15 + 0.7 * ((Math.cos(a * 1.1 + i) + 1) * 0.5));
+    const lg = ctx.createLinearGradient(x0, y0, x1, y1);
+    lg.addColorStop(0, "rgba(0,0,0,0)");
+    lg.addColorStop(0.5, `rgba(255, 230, 120, ${0.25 + 0.2 * Math.sin(phase + i)})`);
+    lg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.strokeStyle = lg;
+    ctx.lineWidth = 10 + (i % 3) * 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.quadraticCurveTo((x0 + x1) / 2 + Math.sin(a) * 30, (y0 + y1) / 2, x1, y1);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = "source-over";
+
+  // Dark rock polygons (smooth irregular chunks like the reference)
+  const rocks: { x: number; y: number; r: number; seed: number }[] = [];
+  const rnd = (n: number) => {
+    const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  };
+  for (let i = 0; i < 28; i++) {
+    rocks.push({
+      x: rnd(i * 3.1) * S,
+      y: rnd(i * 5.7 + 2) * S,
+      r: 28 + rnd(i * 9.2) * 42,
+      seed: i * 13.3,
+    });
+  }
+  for (const rock of rocks) {
+    const sides = 6 + Math.floor(rnd(rock.seed) * 4);
+    ctx.beginPath();
+    for (let s = 0; s < sides; s++) {
+      const ang = (s / sides) * Math.PI * 2 + rnd(rock.seed + s) * 0.5;
+      const rad = rock.r * (0.65 + rnd(rock.seed + s * 2) * 0.45);
+      const px = rock.x + Math.cos(ang) * rad;
+      const py = rock.y + Math.sin(ang) * rad;
+      if (s === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    const shade = 28 + Math.floor(rnd(rock.seed + 1) * 28);
+    ctx.fillStyle = `rgb(${shade},${shade - 4},${shade - 8})`;
+    ctx.fill();
+    // subtle top highlight
+    ctx.strokeStyle = `rgba(70,60,55,0.5)`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // Thin bright crack edges between rocks
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = `rgba(255, 200, 80, ${0.35 + 0.2 * Math.sin(phase * 2)})`;
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 18; i++) {
+    const a = phase * 0.25 + i * 2.2;
+    ctx.beginPath();
+    const x0 = rnd(i + 40) * S;
+    const y0 = rnd(i + 80) * S;
+    ctx.moveTo(x0, y0);
+    ctx.quadraticCurveTo(
+      x0 + Math.sin(a) * 40,
+      y0 + Math.cos(a) * 40,
+      x0 + Math.cos(a * 0.7) * 60,
+      y0 + Math.sin(a * 0.7) * 60,
+    );
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = "source-over";
+  return c;
+}
+
+function magmaTableMat(glowHex: string, opts: ConstructorParameters<typeof THREE.MeshStandardMaterial>[0] = {}) {
+  const canvas = makeMagmaCanvas(glowHex, 0);
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(1.2, 1.2);
   const m = new THREE.MeshStandardMaterial({
-    color: "#1a0500",
-    emissive: "#ff4500",
-    emissiveIntensity: 1.4,
-    roughness: 0.45,
-    metalness: 0.15,
+    map,
+    color: "#ffffff",
+    emissive: glowHex,
+    emissiveIntensity: 0.55,
+    roughness: 0.55,
+    metalness: 0.08,
     ...opts,
   });
-  m.userData.lava = true;
+  m.userData.magma = true;
+  m.userData.magmaGlow = glowHex;
+  m.userData.magmaCanvas = canvas;
+  m.userData.magmaMap = map;
+  m.userData.magmaPhase = 0;
   return m;
 }
 
-/** Pulse lava materials on a table bot (call each frame). */
+function magmaLegMat(glowHex: string, opts: ConstructorParameters<typeof THREE.MeshStandardMaterial>[0] = {}) {
+  const m = new THREE.MeshStandardMaterial({
+    color: "#1c1210",
+    emissive: glowHex,
+    emissiveIntensity: 0.9,
+    roughness: 0.5,
+    metalness: 0.12,
+    ...opts,
+  });
+  m.userData.magmaLeg = true;
+  m.userData.magmaGlow = glowHex;
+  return m;
+}
+
+/** Animate magma cracks (slow flow) + leg pulse. Call each frame. */
 export function animateLavaMaterials(root: THREE.Object3D, time = performance.now() * 0.001) {
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
@@ -44,14 +165,49 @@ export function animateLavaMaterials(root: THREE.Object3D, time = performance.no
       ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material])
       : [];
     for (const mat of mats) {
-      const m = mat as THREE.MeshStandardMaterial;
-      if (!m?.userData?.lava) continue;
-      // Lava swirl: heat pulses between deep red and bright orange
-      const pulse = 0.55 + 0.45 * Math.sin(time * 3.2 + (mesh.id % 7) * 0.7);
-      const hot = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(time * 5.1 + mesh.id));
-      m.emissive.setRGB(0.95 * hot, 0.18 + 0.22 * pulse, 0.02);
-      m.emissiveIntensity = 1.1 + 1.4 * pulse;
-      m.color.setRGB(0.12 + 0.08 * pulse, 0.03, 0.01);
+      const m = mat as THREE.MeshStandardMaterial & {
+        userData: {
+          magma?: boolean;
+          magmaLeg?: boolean;
+          magmaGlow?: string;
+          magmaCanvas?: HTMLCanvasElement;
+          magmaMap?: THREE.CanvasTexture;
+          magmaPhase?: number;
+          lastMagmaDraw?: number;
+        };
+      };
+      if (m?.userData?.magmaLeg) {
+        const pulse = 0.55 + 0.45 * Math.sin(time * 2.8 + mesh.id * 0.3);
+        try {
+          const g = new THREE.Color(m.userData.magmaGlow || DEFAULT_MAGMA_COLOR);
+          m.emissive.copy(g);
+          m.emissiveIntensity = 0.55 + 1.1 * pulse;
+        } catch { /* ignore */ }
+        continue;
+      }
+      if (!m?.userData?.magma) continue;
+      // Slow magma drift via UV + occasional texture refresh
+      const map = m.userData.magmaMap;
+      if (map) {
+        map.offset.x = (time * 0.018) % 1;
+        map.offset.y = (time * 0.012) % 1;
+        map.needsUpdate = true;
+      }
+      const pulse = 0.5 + 0.5 * Math.sin(time * 2.2);
+      m.emissiveIntensity = 0.35 + 0.55 * pulse;
+      // Redraw cracks slowly so veins shift (every ~120ms)
+      const last = m.userData.lastMagmaDraw ?? 0;
+      if (time - last > 0.12 && m.userData.magmaCanvas && map) {
+        m.userData.lastMagmaDraw = time;
+        m.userData.magmaPhase = (m.userData.magmaPhase ?? 0) + 0.15;
+        const ctx = m.userData.magmaCanvas.getContext("2d");
+        if (ctx) {
+          const fresh = makeMagmaCanvas(m.userData.magmaGlow || DEFAULT_MAGMA_COLOR, m.userData.magmaPhase);
+          ctx.clearRect(0, 0, 256, 256);
+          ctx.drawImage(fresh, 0, 0);
+          map.needsUpdate = true;
+        }
+      }
     }
   });
 }
@@ -85,11 +241,11 @@ function addEyes(g: THREE.Group, design: EyeDesign, color: string, ghost: boolea
   }
 }
 
-function addLegs(g: THREE.Group, design: LegDesign, primary: string, ghost: boolean) {
+function addLegs(g: THREE.Group, design: LegDesign, primary: string, ghost: boolean, magma = false, magmaColor = DEFAULT_MAGMA_COLOR) {
   if (design === "nolegs") return; // floating tabletop
   const opacity = ghost ? 0.35 : 1;
-  const m = isLavaColor(primary)
-    ? lavaMat({ transparent: ghost, opacity, roughness: 0.5 })
+  const m = magma
+    ? magmaLegMat(magmaColor, { transparent: ghost, opacity, roughness: 0.5 })
     : mat(darken(primary, 0.28), { transparent: ghost, opacity, roughness: 0.4 });
   if (design === "oneleg") {
     const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 3, 12), m);
@@ -227,7 +383,7 @@ function addThrone(g: THREE.Group, color: string) {
   g.add(light);
 }
 
-function addDecoration(g: THREE.Group, kind: TableDecoration, color: string, topDeco: string = "none", tablePrimary = "#4da861") {
+function addDecoration(g: THREE.Group, kind: TableDecoration, color: string, topDeco: string = "none", tablePrimary = "#4da861", magma = false, magmaColor = DEFAULT_MAGMA_COLOR) {
   if (kind === "none") return;
   if (kind === "trophy") { addTrophy(g, color, 3.4); return; }
   if (kind === "crown") { addCrown(g, color, 3.4); return; }
@@ -235,7 +391,7 @@ function addDecoration(g: THREE.Group, kind: TableDecoration, color: string, top
   if (kind === "stack") {
     const topSurf = new THREE.Mesh(
       new THREE.BoxGeometry(6.4, 0.35, 6.4),
-      isLavaColor(tablePrimary) ? lavaMat({ roughness: 0.55 }) : mat(tablePrimary, { roughness: 0.55 }),
+      magma ? magmaTableMat(magmaColor, { roughness: 0.55 }) : mat(tablePrimary, { roughness: 0.55 }),
     );
     topSurf.position.set(0, 3.4 + 3.2, 0);
     g.add(topSurf);
@@ -319,11 +475,18 @@ export function createTableBot(opts: TableBotOptions = {}): THREE.Group {
   const root = new THREE.Group();
   root.scale.setScalar(scale);
 
+  const magmaOn = skinHasMagma(skin);
+  const magmaCol = skin.magmaColor || DEFAULT_MAGMA_COLOR;
+  // Rock base color when magma is on (palette color still used for solid skins)
+  const primary = magmaOn && (skin.tablePrimary === "lava" || !skin.tablePrimary)
+    ? "#2a1810"
+    : skin.tablePrimary;
+
   const top = new THREE.Mesh(
     new THREE.BoxGeometry(6, 0.5, 4),
-    isLavaColor(skin.tablePrimary)
-      ? lavaMat({ transparent: ghost, opacity, envMapIntensity: 2 })
-      : mat(skin.tablePrimary, {
+    magmaOn
+      ? magmaTableMat(magmaCol, { transparent: ghost, opacity, envMapIntensity: 2 })
+      : mat(primary, {
           roughness: 0.28,
           metalness: 0.08,
           envMapIntensity: 2,
@@ -336,13 +499,13 @@ export function createTableBot(opts: TableBotOptions = {}): THREE.Group {
   top.receiveShadow = true;
   root.add(top);
 
-  addLegs(root, skin.legDesign, skin.tablePrimary, ghost);
+  addLegs(root, skin.legDesign, primary, ghost, magmaOn, magmaCol);
   addEyes(root, skin.eyeDesign, skin.eyeColor, ghost);
-  addDecoration(root, skin.decoration, skin.decorationColor, skin.topDecoration ?? "none", skin.tablePrimary);
+  addDecoration(root, skin.decoration, skin.decorationColor, skin.topDecoration ?? "none", primary, magmaOn, magmaCol);
 
   if (emitLight) {
-    const lc = isLavaColor(skin.tablePrimary) ? "#ff6a00" : skin.lightColor;
-    const light = new THREE.PointLight(lc, 40 * lightIntensity * (isLavaColor(skin.tablePrimary) ? 1.25 : 1), 120, 2);
+    const lc = magmaOn ? magmaCol : skin.lightColor;
+    const light = new THREE.PointLight(lc, 40 * lightIntensity * (magmaOn ? 1.25 : 1), 120, 2);
     light.position.set(0, 4.5, 0);
     root.add(light);
   }
@@ -378,5 +541,5 @@ export function createStageDisc(color = "#2a2430", lightColor = "#4da861"): THRE
 
 export function skinKey(skin: Partial<Skin> | undefined) {
   const s = { ...DEFAULT_SKIN, ...(skin ?? {}) };
-  return [s.eyeColor, s.tablePrimary, s.eyeDesign, s.decoration, s.topDecoration ?? "none", s.decorationColor, s.lightColor, s.legDesign].join("|");
+  return [s.eyeColor, s.tablePrimary, s.eyeDesign, s.decoration, s.topDecoration ?? "none", s.decorationColor, s.lightColor, s.legDesign, s.magma ? "1" : "0", s.magmaColor || ""].join("|");
 }

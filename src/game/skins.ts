@@ -19,8 +19,9 @@ export const COLOR_CHART = [
   "#4da861", "#277b44", "#96653f", "#75492e", "#2f6fd6", "#1f4fa8", "#e6452c", "#ffd058", "#ffae34",
 ] as const;
 
-/** Special table primary unlocked by Close the Game, Hacker — animated in-game. */
-export const LAVA_COLOR = "lava";
+/** Magma crack effect (Hacker unlock). Toggle via skins panel; magmaColor tints the glow. */
+export const LAVA_COLOR = "lava"; // panel toggle token only — not stored as tablePrimary
+export const DEFAULT_MAGMA_COLOR = "#ff6a00";
 export function isLavaColor(c: string | undefined) {
   return (c ?? "").toLowerCase() === LAVA_COLOR;
 }
@@ -41,6 +42,10 @@ export type Skin = {
   decorationColor: string;
   lightColor: string;
   legDesign: LegDesign;
+  /** Magma crack overlay on tabletops (Hacker). */
+  magma?: boolean;
+  /** Glow / non-rock color for magma cracks. */
+  magmaColor?: string;
 };
 
 export const DEFAULT_SKIN: Skin = {
@@ -52,7 +57,28 @@ export const DEFAULT_SKIN: Skin = {
   decorationColor: "#ffffff",
   lightColor: "#4da861",
   legDesign: "conic",
+  magma: false,
+  magmaColor: DEFAULT_MAGMA_COLOR,
 };
+
+export function skinHasMagma(s: Partial<Skin> | undefined) {
+  if (!s) return false;
+  if (s.magma) return true;
+  return isLavaColor(s.tablePrimary);
+}
+
+/** Fix legacy lava primary + fill magma defaults. */
+export function normalizeSkin(s: Skin): Skin {
+  const out: Skin = { ...DEFAULT_SKIN, ...s };
+  if (isLavaColor(out.tablePrimary)) {
+    out.magma = true;
+    out.tablePrimary = "#2a1810";
+    if (!out.magmaColor) out.magmaColor = DEFAULT_MAGMA_COLOR;
+  }
+  out.magma = !!out.magma;
+  out.magmaColor = out.magmaColor || DEFAULT_MAGMA_COLOR;
+  return out;
+}
 
 const STORE_KEY = "tw-skins";
 
@@ -67,7 +93,7 @@ function load() {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const p = JSON.parse(raw) as Partial<Skin>;
-      SKIN = { ...DEFAULT_SKIN, ...p };
+      SKIN = normalizeSkin({ ...DEFAULT_SKIN, ...p });
     }
   } catch { /* ignore */ }
 }
@@ -78,7 +104,7 @@ export function setSkinPersister(fn: ((s: Skin) => void) | null) {
 }
 
 export function applySkin(next: Skin, fromAccount = false) {
-  SKIN = { ...DEFAULT_SKIN, ...structuredClone(next) };
+  SKIN = normalizeSkin({ ...DEFAULT_SKIN, ...structuredClone(next) });
   try { localStorage.setItem(STORE_KEY, JSON.stringify(SKIN)); } catch { /* ignore */ }
   if (!fromAccount) persist?.(SKIN);
   subs.forEach((f) => f());

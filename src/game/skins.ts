@@ -19,6 +19,12 @@ export const COLOR_CHART = [
   "#4da861", "#277b44", "#96653f", "#75492e", "#2f6fd6", "#1f4fa8", "#e6452c", "#ffd058", "#ffae34",
 ] as const;
 
+/** Special table primary unlocked by Close the Game, Hacker — animated in-game. */
+export const LAVA_COLOR = "lava";
+export function isLavaColor(c: string | undefined) {
+  return (c ?? "").toLowerCase() === LAVA_COLOR;
+}
+
 export type EyeDesign = "boss" | "square" | "triangle";
 export type TableDecoration = "none" | "plates" | "rug" | "office" | "birthday" | "trophy" | "crown" | "stack" | "throne";
 /** Only used when decoration is stack — sits on the upper table. */

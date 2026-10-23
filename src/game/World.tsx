@@ -16,7 +16,7 @@ import {
 import { SKIN, useSkin } from "./skins";
 import { getAbility, clampSelectedAbility } from "./abilities";
 import { hasAchievement, masteryOn, onCampaignWin, onPlayerDeath } from "./mastery";
-import { createTableBot, skinKey } from "./tableBotFactory";
+import { createTableBot, skinKey, animateLavaMaterials } from "./tableBotFactory";
 import { Room, ROOM, SOLIDS } from "./Room";
 import { tableWood } from "./textures";
 import { HomeShowcase } from "./HomeShowcase";
@@ -337,6 +337,7 @@ function LocalFreecamBody() {
     if (!m) return;
     m.visible = localBody.show;
     if (!localBody.show) return;
+    animateLavaMaterials(bot);
     m.position.set(localBody.x, localBody.y, localBody.z);
     m.rotation.y = localBody.yaw + Math.PI;
   });

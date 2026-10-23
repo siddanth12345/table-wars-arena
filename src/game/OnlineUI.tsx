@@ -16,7 +16,7 @@ import {
   isFriend, MAX_TBLES, friendCount, getCachedProfile, type FriendRequest,
 } from "./friends";
 import { DEFAULT_SKIN, SKIN, type Skin } from "./skins";
-import { createTableBot } from "./tableBotFactory";
+import { createTableBot, animateLavaMaterials } from "./tableBotFactory";
 import { ABILITY_LIST, getAbility } from "./abilities";
 import type { TimeOfDay } from "./settings";
 
@@ -277,7 +277,10 @@ function SkinSpinPreview({ skin }: { skin: Skin }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const bot = useMemo(() => ({ current: createTableBot({ skin, scale: 0.55, emitLight: true }) }), [key]);
   useFrame((_, dt) => {
-    if (group.current) group.current.rotation.y += dt * 0.7;
+    if (group.current) {
+      group.current.rotation.y += dt * 0.7;
+      animateLavaMaterials(bot.current);
+    }
   });
   return (
     <group ref={group}>

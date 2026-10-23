@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { NET, PVP_SCALE, useNet, myId, type Peer } from "./net";
 import { G } from "./state";
 import { DEFAULT_SKIN, type Skin } from "./skins";
-import { createTableBot, skinKey } from "./tableBotFactory";
+import { createTableBot, skinKey, animateLavaMaterials } from "./tableBotFactory";
 
 function RemoteTable({ peer }: { peer: Peer }) {
   const root = useRef<THREE.Group>(null);
@@ -43,6 +43,7 @@ function RemoteTable({ peer }: { peer: Peer }) {
     const p = NET.peers.get(peer.id);
     const m = root.current;
     if (!p || !m) return;
+    animateLavaMaterials(bot);
     m.visible = !p.dead && G.phase === "playing";
     const k = 1 - Math.exp(-14 * dt);
     m.position.lerp(new THREE.Vector3(p.x, p.y, p.z), k);

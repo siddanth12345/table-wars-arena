@@ -37,7 +37,9 @@ export function AchievementsPanel({ onClose }: { onClose: () => void }) {
                   key={a.id}
                   className={`flex items-center gap-4 rounded-2xl border-2 p-4 transition ${
                     got
-                      ? dark ? "border-white/40 bg-black/80" : "border-crosshair bg-crosshair/10"
+                      ? dark
+                        ? "border-red-500 bg-black/90 shadow-[0_0_18px_rgba(239,68,68,0.55)]"
+                        : "border-crosshair bg-crosshair/10"
                       : "border-white/15 bg-black/40"
                   }`}
                 >

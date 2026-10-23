@@ -2,30 +2,65 @@ import { useRef, useState, useEffect, useMemo } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import {
-  applySkin, useSkin, COLOR_CHART, EYE_DESIGNS, DECORATIONS, TOP_DECORATIONS, LEG_DESIGNS,
+  applySkin, useSkin, COLOR_CHART, LAVA_COLOR, isLavaColor, EYE_DESIGNS, DECORATIONS, TOP_DECORATIONS, LEG_DESIGNS,
   type Skin, type EyeDesign, type TableDecoration, type TopDecoration, type LegDesign,
 } from "./skins";
-import { decorationUnlocked, legUnlocked, useProgress } from "./mastery";
-import { createStageDisc, createTableBot, skinKey } from "./tableBotFactory";
+import { decorationUnlocked, legUnlocked, useProgress, hasAchievement } from "./mastery";
+import { createStageDisc, createTableBot, skinKey, animateLavaMaterials } from "./tableBotFactory";
 
 const btn = "rounded-xl border-2 border-white/20 bg-black/50 px-3 py-2 text-sm font-bold uppercase tracking-wide text-white hover:bg-white/10 transition";
 const btnOn = "rounded-xl border-2 border-crosshair bg-crosshair/20 px-3 py-2 text-sm font-bold uppercase tracking-wide text-crosshair";
 const btnLocked = "rounded-xl border-2 border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm font-bold uppercase tracking-wide text-amber-200/90 hover:bg-amber-500/20 transition";
 const btnLockedOn = "rounded-xl border-2 border-amber-400 bg-amber-500/25 px-3 py-2 text-sm font-bold uppercase tracking-wide text-amber-100";
 
-function ColorChart({ value, onPick }: { value: string; onPick: (c: string) => void }) {
+function ColorChart({
+  value, onPick, allowLava,
+}: { value: string; onPick: (c: string) => void; allowLava?: boolean }) {
+  const lavaUnlocked = hasAchievement("hacker");
+  const lavaSelected = isLavaColor(value);
   return (
-    <div className="grid max-h-40 grid-cols-12 gap-1 overflow-y-auto rounded-lg border border-white/10 bg-black/40 p-2">
-      {COLOR_CHART.map((c) => (
-        <button
-          key={c}
-          type="button"
-          title={c}
-          className="h-5 w-5 rounded-sm border border-white/20 transition hover:scale-125"
-          style={{ background: c, outline: value.toLowerCase() === c.toLowerCase() ? "2px solid #fff" : undefined }}
-          onClick={() => onPick(c)}
-        />
-      ))}
+    <div className="space-y-2">
+      {allowLava && (
+        <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-black/40 p-2">
+          <button
+            type="button"
+            title={lavaUnlocked ? "Lava (animated)" : "Locked — Close the Game, Hacker"}
+            disabled={!lavaUnlocked}
+            className={`relative h-10 w-10 shrink-0 rounded-md transition hover:scale-105 ${
+              lavaUnlocked ? "cursor-pointer" : "cursor-not-allowed opacity-50"
+            }`}
+            style={{
+              background: "linear-gradient(145deg, #1a0500 0%, #ff4500 45%, #ffcc00 100%)",
+              boxShadow: lavaUnlocked
+                ? (lavaSelected
+                  ? "0 0 0 3px #fff, 0 0 18px 4px rgba(255,80,0,0.95), 0 0 28px rgba(255,40,0,0.6)"
+                  : "0 0 0 2px rgba(255,100,40,0.9), 0 0 14px 3px rgba(255,60,0,0.75)")
+                : "0 0 0 1px rgba(255,255,255,0.15)",
+            }}
+            onClick={() => { if (lavaUnlocked) onPick(LAVA_COLOR); }}
+          >
+            {!lavaUnlocked && (
+              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-white/90">🔒</span>
+            )}
+          </button>
+          <div className="text-[10px] leading-snug opacity-70">
+            <div className="font-black uppercase tracking-wide text-orange-300">Lava</div>
+            {lavaUnlocked ? "Animated table primary · Hacker unlock" : "Unlock with Close the Game, Hacker"}
+          </div>
+        </div>
+      )}
+      <div className="grid max-h-40 grid-cols-12 gap-1 overflow-y-auto rounded-lg border border-white/10 bg-black/40 p-2">
+        {COLOR_CHART.map((c) => (
+          <button
+            key={c}
+            type="button"
+            title={c}
+            className="h-5 w-5 rounded-sm border border-white/20 transition hover:scale-125"
+            style={{ background: c, outline: !lavaSelected && value.toLowerCase() === c.toLowerCase() ? "2px solid #fff" : undefined }}
+            onClick={() => onPick(c)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -110,7 +145,10 @@ function PreviewScene({ skin }: { skin: Skin }) {
   }, [bot, stage]);
 
   useFrame(() => {
-    if (root.current) root.current.rotation.y = yawRef.current;
+    if (root.current) {
+      root.current.rotation.y = yawRef.current;
+      animateLavaMaterials(root.current);
+    }
   });
 
   return (
@@ -149,7 +187,12 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
       setSaveHint("Unlock that decoration (or pick an unlocked one) before saving.");
       return;
     }
-    applySkin(draft);
+    const next = { ...draft };
+    if (isLavaColor(next.tablePrimary) && !hasAchievement("hacker")) {
+      next.tablePrimary = live.tablePrimary && !isLavaColor(live.tablePrimary) ? live.tablePrimary : "#4da861";
+      setSaveHint("Lava requires Close the Game, Hacker.");
+    }
+    applySkin(next);
     onClose();
   };
 
@@ -271,7 +314,7 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
                   </button>
                 ))}
               </div>
-              <ColorChart value={draft[colorTarget]} onPick={(c) => set(colorTarget, c)} />
+              <ColorChart value={draft[colorTarget]} onPick={(c) => set(colorTarget, c)} allowLava={colorTarget === "tablePrimary"} />
             </div>
           </div>
 

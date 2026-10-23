@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { Skin, EyeDesign, LegDesign, TableDecoration } from "./skins";
-import { DEFAULT_SKIN } from "./skins";
+import { DEFAULT_SKIN, isLavaColor } from "./skins";
 
 const LEG_POS: [number, number][] = [
   [-2.4, -1.5],
@@ -21,6 +21,39 @@ function darken(hex: string, amount = 0.35) {
 
 function mat(color: string | THREE.Color, opts: ConstructorParameters<typeof THREE.MeshStandardMaterial>[0] = {}) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.35, ...opts });
+}
+
+function lavaMat(opts: ConstructorParameters<typeof THREE.MeshStandardMaterial>[0] = {}) {
+  const m = new THREE.MeshStandardMaterial({
+    color: "#1a0500",
+    emissive: "#ff4500",
+    emissiveIntensity: 1.4,
+    roughness: 0.45,
+    metalness: 0.15,
+    ...opts,
+  });
+  m.userData.lava = true;
+  return m;
+}
+
+/** Pulse lava materials on a table bot (call each frame). */
+export function animateLavaMaterials(root: THREE.Object3D, time = performance.now() * 0.001) {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    const mats = mesh.material
+      ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material])
+      : [];
+    for (const mat of mats) {
+      const m = mat as THREE.MeshStandardMaterial;
+      if (!m?.userData?.lava) continue;
+      // Lava swirl: heat pulses between deep red and bright orange
+      const pulse = 0.55 + 0.45 * Math.sin(time * 3.2 + (mesh.id % 7) * 0.7);
+      const hot = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(time * 5.1 + mesh.id));
+      m.emissive.setRGB(0.95 * hot, 0.18 + 0.22 * pulse, 0.02);
+      m.emissiveIntensity = 1.1 + 1.4 * pulse;
+      m.color.setRGB(0.12 + 0.08 * pulse, 0.03, 0.01);
+    }
+  });
 }
 
 function addEyes(g: THREE.Group, design: EyeDesign, color: string, ghost: boolean) {
@@ -54,9 +87,10 @@ function addEyes(g: THREE.Group, design: EyeDesign, color: string, ghost: boolea
 
 function addLegs(g: THREE.Group, design: LegDesign, primary: string, ghost: boolean) {
   if (design === "nolegs") return; // floating tabletop
-  const legColor = darken(primary, 0.28);
   const opacity = ghost ? 0.35 : 1;
-  const m = mat(legColor, { transparent: ghost, opacity, roughness: 0.4 });
+  const m = isLavaColor(primary)
+    ? lavaMat({ transparent: ghost, opacity, roughness: 0.5 })
+    : mat(darken(primary, 0.28), { transparent: ghost, opacity, roughness: 0.4 });
   if (design === "oneleg") {
     const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 3, 12), m);
     mesh.position.set(0, 1.5, 0);
@@ -199,7 +233,10 @@ function addDecoration(g: THREE.Group, kind: TableDecoration, color: string, top
   if (kind === "crown") { addCrown(g, color, 3.4); return; }
   if (kind === "throne") { addThrone(g, color); return; }
   if (kind === "stack") {
-    const topSurf = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.35, 6.4), mat(tablePrimary, { roughness: 0.55 }));
+    const topSurf = new THREE.Mesh(
+      new THREE.BoxGeometry(6.4, 0.35, 6.4),
+      isLavaColor(tablePrimary) ? lavaMat({ roughness: 0.55 }) : mat(tablePrimary, { roughness: 0.55 }),
+    );
     topSurf.position.set(0, 3.4 + 3.2, 0);
     g.add(topSurf);
     for (const [x, z] of [[-2, -2], [2, -2], [-2, 2], [2, 2]] as [number, number][]) {
@@ -284,13 +321,15 @@ export function createTableBot(opts: TableBotOptions = {}): THREE.Group {
 
   const top = new THREE.Mesh(
     new THREE.BoxGeometry(6, 0.5, 4),
-    mat(skin.tablePrimary, {
-      roughness: 0.28,
-      metalness: 0.08,
-      envMapIntensity: 2,
-      transparent: ghost,
-      opacity,
-    }),
+    isLavaColor(skin.tablePrimary)
+      ? lavaMat({ transparent: ghost, opacity, envMapIntensity: 2 })
+      : mat(skin.tablePrimary, {
+          roughness: 0.28,
+          metalness: 0.08,
+          envMapIntensity: 2,
+          transparent: ghost,
+          opacity,
+        }),
   );
   top.position.set(0, 3.2, 0);
   top.castShadow = true;
@@ -302,7 +341,8 @@ export function createTableBot(opts: TableBotOptions = {}): THREE.Group {
   addDecoration(root, skin.decoration, skin.decorationColor, skin.topDecoration ?? "none", skin.tablePrimary);
 
   if (emitLight) {
-    const light = new THREE.PointLight(skin.lightColor, 40 * lightIntensity, 120, 2);
+    const lc = isLavaColor(skin.tablePrimary) ? "#ff6a00" : skin.lightColor;
+    const light = new THREE.PointLight(lc, 40 * lightIntensity * (isLavaColor(skin.tablePrimary) ? 1.25 : 1), 120, 2);
     light.position.set(0, 4.5, 0);
     root.add(light);
   }

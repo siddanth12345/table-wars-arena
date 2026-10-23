@@ -86,7 +86,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   },
   {
     id: "hacker", name: "Close the Game, Hacker", icon: "🖤",
-    summary: "",
+    summary: "Unlocks animated lava table color.",
     how: "Beat offline or party campaign in under 1:00.",
     secret: true,
     noDetails: true,

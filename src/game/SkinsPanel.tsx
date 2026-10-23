@@ -24,20 +24,19 @@ function ColorChart({
         <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-black/40 p-2">
           <button
             type="button"
-            title={lavaUnlocked ? "Lava (animated)" : "Locked — Close the Game, Hacker"}
-            disabled={!lavaUnlocked}
-            className={`relative h-10 w-10 shrink-0 rounded-md transition hover:scale-105 ${
-              lavaUnlocked ? "cursor-pointer" : "cursor-not-allowed opacity-50"
-            }`}
+            title={lavaUnlocked ? "Lava (animated)" : "Locked — unlock with ???"}
+            className="relative h-10 w-10 shrink-0 cursor-pointer rounded-md transition hover:scale-105"
             style={{
               background: "linear-gradient(145deg, #1a0500 0%, #ff4500 45%, #ffcc00 100%)",
-              boxShadow: lavaUnlocked
-                ? (lavaSelected
+              // Always glow; selected gets a stronger rim (preview allowed even when locked)
+              boxShadow: lavaSelected
+                ? (lavaUnlocked
                   ? "0 0 0 3px #fff, 0 0 18px 4px rgba(255,80,0,0.95), 0 0 28px rgba(255,40,0,0.6)"
-                  : "0 0 0 2px rgba(255,100,40,0.9), 0 0 14px 3px rgba(255,60,0,0.75)")
-                : "0 0 0 1px rgba(255,255,255,0.15)",
+                  : "0 0 0 3px #f59e0b, 0 0 14px 3px rgba(245,158,11,0.7)")
+                : "0 0 0 2px rgba(255,100,40,0.9), 0 0 14px 3px rgba(255,60,0,0.75)",
+              opacity: lavaUnlocked || lavaSelected ? 1 : 0.75,
             }}
-            onClick={() => { if (lavaUnlocked) onPick(LAVA_COLOR); }}
+            onClick={() => onPick(LAVA_COLOR)}
           >
             {!lavaUnlocked && (
               <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-white/90">🔒</span>
@@ -45,7 +44,11 @@ function ColorChart({
           </button>
           <div className="text-[10px] leading-snug opacity-70">
             <div className="font-black uppercase tracking-wide text-orange-300">Lava</div>
-            {lavaUnlocked ? "Animated table primary · Hacker unlock" : "Unlock with Close the Game, Hacker"}
+            {lavaUnlocked
+              ? "Animated table primary"
+              : lavaSelected
+                ? "Preview only — deselect to save · Unlock with ???"
+                : "Unlock with ???"}
           </div>
         </div>
       )}
@@ -176,23 +179,23 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
     setSaveHint("");
   };
 
-  // Locked deco selected for preview only — block save until cleared
+  // Locked deco / lava selected for preview only — block save until cleared
   const decoLocked = !decorationUnlocked(draft.decoration);
   const topLocked = draft.decoration === "stack" && !decorationUnlocked(draft.topDecoration ?? "none");
   const legLocked = !legUnlocked(draft.legDesign);
-  const canSave = !decoLocked && !topLocked && !legLocked;
+  const lavaLocked = isLavaColor(draft.tablePrimary) && !hasAchievement("hacker");
+  const canSave = !decoLocked && !topLocked && !legLocked && !lavaLocked;
 
   const trySave = () => {
     if (!canSave) {
-      setSaveHint("Unlock that decoration (or pick an unlocked one) before saving.");
+      setSaveHint(
+        lavaLocked
+          ? "Lava is locked (???) — pick another table color to save."
+          : "Unlock that decoration (or pick an unlocked one) before saving.",
+      );
       return;
     }
-    const next = { ...draft };
-    if (isLavaColor(next.tablePrimary) && !hasAchievement("hacker")) {
-      next.tablePrimary = live.tablePrimary && !isLavaColor(live.tablePrimary) ? live.tablePrimary : "#4da861";
-      setSaveHint("Lava requires Close the Game, Hacker.");
-    }
-    applySkin(next);
+    applySkin(draft);
     onClose();
   };
 
@@ -328,7 +331,7 @@ export function SkinsPanel({ onClose }: { onClose: () => void }) {
                 type="button"
                 className={canSave ? btnOn : `${btn} opacity-50 cursor-not-allowed`}
                 onClick={trySave}
-                title={canSave ? "Save skin" : "Cannot save while a locked decoration is selected"}
+                title={canSave ? "Save skin" : "Cannot save while a locked color or decoration is selected"}
               >
                 Save skin
               </button>
